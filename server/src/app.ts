@@ -5,7 +5,9 @@ import { cors } from 'hono/cors'
 import { bytesToGb, type ServerConfig } from './config.ts'
 import { requirePool } from './pool.ts'
 import { QuotaError, folderSize } from './quota.ts'
+import { completeSetup, getSetupState, SetupError } from './setup.ts'
 import { listPath, makeFolder, openDownload, removePath, saveFile } from './storage.ts'
+import { isConfigured } from './users.ts'
 
 export function createApp(config: ServerConfig) {
   const app = new Hono()
@@ -13,9 +15,38 @@ export function createApp(config: ServerConfig) {
 
   app.get('/api/health', (c) => c.json({ ok: true, service: 'storebase' }))
 
+  app.get('/api/setup', async (c) => {
+    const state = await getSetupState(config)
+    return c.json(state)
+  })
+
+  app.post('/api/setup', async (c) => {
+    try {
+      const body = await c.req.json()
+      const result = await completeSetup(config, body)
+      return c.json(result, 201)
+    } catch (err) {
+      if (err instanceof SetupError) {
+        const status = err.status === 409 ? 409 : 400
+        return c.json({ error: err.message }, status)
+      }
+      throw err
+    }
+  })
+
+  app.use('/api/*', async (c, next) => {
+    const path = c.req.path
+    if (path === '/api/health' || path === '/api/setup') return next()
+    if (!(await isConfigured(config))) {
+      return c.json({ error: 'Setup required', configured: false }, 503)
+    }
+    return next()
+  })
+
   app.get('/api/status', async (c) => {
     const manifest = await requirePool(config)
     const usedBytes = await folderSize(config.driveDir)
+    const state = await getSetupState(config)
     return c.json({
       host: hostname(),
       dataDir: config.dataDir,
@@ -24,6 +55,7 @@ export function createApp(config: ServerConfig) {
       usedBytes,
       usedGb: bytesToGb(usedBytes),
       availableBytes: Math.max(0, manifest.reservedBytes - usedBytes),
+      admin: state.configured ? state.admin : null,
     })
   })
 
@@ -88,8 +120,7 @@ export function createApp(config: ServerConfig) {
     if (message.includes('ENOENT') || message.includes('no such file')) {
       return c.json({ error: 'Not found' }, 404)
     }
-    const status = 500
-    return c.json({ error: message }, status)
+    return c.json({ error: message }, 500)
   })
 
   return app

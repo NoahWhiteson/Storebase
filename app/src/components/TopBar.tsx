@@ -24,6 +24,8 @@ type TopBarProps = {
   search: string
   view: 'grid' | 'list'
   files: DriveItem[]
+  account: { name: string; email: string }
+  initials: string
   onSearch: (value: string) => void
   onView: (view: 'grid' | 'list') => void
   onOpenSidebar: () => void
@@ -33,6 +35,8 @@ export function TopBar({
   search,
   view,
   files,
+  account,
+  initials,
   onSearch,
   onView,
   onOpenSidebar,
@@ -105,15 +109,15 @@ export function TopBar({
               <button className="ml-1 rounded-full outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-white/30">
                 <Avatar>
                   <AvatarFallback className="bg-[#2a2a2a] text-sm font-medium text-white">
-                    NW
+                    {initials}
                   </AvatarFallback>
                 </Avatar>
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-56">
               <DropdownMenuLabel>
-                Noah Whiteson
-                <div className="font-normal text-muted-foreground">noah@storebase.local</div>
+                {account.name}
+                <div className="font-normal text-muted-foreground">{account.email}</div>
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
               <DropdownMenuItem>Account</DropdownMenuItem>

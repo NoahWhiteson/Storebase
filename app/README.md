@@ -14,4 +14,5 @@ npm run build
 npm run preview
 ```
 
-The file list is still mock data in `src/data/files.ts`. Next step is pointing it at `GET /api/files` and `GET /api/status`.
+The file list is still mock data in `src/data/files.ts` until the client talks to `GET /api/files`. First visit hits `/api/setup` and onboarding if the node has no admin.
+

@@ -1,7 +1,8 @@
 import { serve } from '@hono/node-server'
 import { expandHome, loadConfig, parseReserveGb } from './config.ts'
-import { describeReserve, initPool, requirePool } from './pool.ts'
+import { describeReserve, initPool, readManifest } from './pool.ts'
 import { createApp } from './app.ts'
+import { isConfigured } from './users.ts'
 
 function arg(name: string): string | undefined {
   const i = process.argv.indexOf(name)
@@ -12,8 +13,8 @@ function arg(name: string): string | undefined {
 function printHelp(): void {
   console.log(`Storebase node
 
-  npm run init -- --reserve 100 [--dir ./data]
   npm start [-- --port 4780 --host 127.0.0.1 --dir ./data]
+  npm run init -- --reserve 100 [--dir ./data]
 `)
 }
 
@@ -23,6 +24,7 @@ async function init(): Promise<void> {
   const config = loadConfig({ dataDir, reserveGb })
   const manifest = await initPool(config)
   console.log(`Reserved ${describeReserve(manifest)} at ${config.driveDir}`)
+  console.log('Open the app to create the admin account.')
 }
 
 async function start(): Promise<void> {
@@ -30,11 +32,16 @@ async function start(): Promise<void> {
   const port = Number(arg('--port') ?? process.env.STOREBASE_PORT ?? 4780)
   const host = arg('--host') ?? process.env.STOREBASE_HOST ?? '127.0.0.1'
   const config = loadConfig({ dataDir, port, host })
-  const manifest = await requirePool(config)
   const app = createApp(config)
-  serve({ fetch: app.fetch, hostname: config.host, port: config.port }, (info) => {
+  serve({ fetch: app.fetch, hostname: config.host, port: config.port }, async (info) => {
     console.log(`Storebase node on http://${info.address}:${info.port}`)
-    console.log(`Drive ${config.driveDir} · reserved ${describeReserve(manifest)}`)
+    if (await isConfigured(config)) {
+      const manifest = await readManifest(config)
+      const reserve = manifest ? describeReserve(manifest) : 'unknown'
+      console.log(`Drive ${config.driveDir} · reserved ${reserve}`)
+      return
+    }
+    console.log('Not configured. Open the app to finish onboarding.')
   })
 }
 

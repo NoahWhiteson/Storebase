@@ -17,9 +17,6 @@ import type { DriveItem, FileKind, SectionId } from '@/types'
 import { ChevronRight } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
-const QUOTA = 100 * 1024 ** 3
-const ME = { owner: 'Noah Whiteson', ownerInitials: 'NW' }
-
 const titles: Record<SectionId, string> = {
   home: 'Welcome to Storebase',
   'my-drive': 'My files',
@@ -44,7 +41,22 @@ function kindFromName(name: string): FileKind {
   return 'doc'
 }
 
-export default function App() {
+type Account = {
+  name: string
+  email: string
+  reservedBytes: number
+}
+
+function initials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean)
+  if (parts.length === 0) return '?'
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase()
+  return `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase()
+}
+
+export default function App({ account }: { account: Account }) {
+  const me = { owner: account.name, ownerInitials: initials(account.name) }
+  const quota = account.reservedBytes > 0 ? account.reservedBytes : 100 * 1024 ** 3
   const [items, setItems] = useState<DriveItem[]>(initialItems)
   const [section, setSection] = useState<SectionId>('home')
   const [folderId, setFolderId] = useState<string | null>(null)
@@ -88,7 +100,7 @@ export default function App() {
       if (section === 'spam') return item.spam && !item.trashed
       if (item.trashed || item.spam) return false
       if (section === 'starred') return item.starred
-      if (section === 'shared') return item.shared && item.owner !== ME.owner
+      if (section === 'shared') return item.shared && item.owner !== me.owner
       if (section === 'recent') return item.kind !== 'folder'
       if (section === 'computers') {
         if (folderId) return item.parentId === folderId
@@ -98,7 +110,7 @@ export default function App() {
       if (section === 'my-drive') {
         if (item.computer) return false
         if (item.parentId !== folderId) return false
-        return folderId !== null || item.owner === ME.owner
+        return folderId !== null || item.owner === me.owner
       }
       return item.parentId === folderId
     })
@@ -113,7 +125,7 @@ export default function App() {
       })
     }
     return list
-  }, [folderId, items, search, section])
+  }, [folderId, items, me.owner, search, section])
 
   const suggested = useMemo(
     () => items.filter((item) => item.kind === 'folder' && !item.trashed && !item.spam && !item.computer && item.parentId === null).slice(0, 4),
@@ -211,7 +223,7 @@ export default function App() {
           name,
           kind: 'folder',
           parentId: parent,
-          ...ME,
+          ...me,
           modifiedAt: now,
           size: null,
           starred: false,
@@ -251,7 +263,7 @@ export default function App() {
       name: names[kind],
       kind,
       parentId: parent,
-      ...ME,
+      ...me,
       modifiedAt: now,
       size: kind === 'folder' ? null : 0,
       starred: false,
@@ -275,7 +287,7 @@ export default function App() {
       name: file.name,
       kind: kindFromName(file.name),
       parentId: parent,
-      ...ME,
+      ...me,
       modifiedAt: now,
       size: file.size,
       starred: false,
@@ -298,6 +310,8 @@ export default function App() {
         search={search}
         view={view}
         files={items}
+        account={account}
+        initials={me.ownerInitials}
         onSearch={setSearch}
         onView={setView}
         onOpenSidebar={() => setSidebarOpen(true)}
@@ -306,7 +320,7 @@ export default function App() {
         <Sidebar
           section={section}
           usedBytes={usedBytes}
-          quotaBytes={QUOTA}
+          quotaBytes={quota}
           mobileOpen={sidebarOpen}
           onCloseMobile={() => setSidebarOpen(false)}
           onSection={goSection}

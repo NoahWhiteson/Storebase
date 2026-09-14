@@ -7,6 +7,7 @@ export type ServerConfig = {
   dataDir: string
   driveDir: string
   manifestPath: string
+  usersPath: string
   reserveBytes: number
 }
 
@@ -38,6 +39,7 @@ export function loadConfig(overrides: {
     dataDir,
     driveDir: resolve(dataDir, 'drive'),
     manifestPath: resolve(dataDir, 'storebase.json'),
+    usersPath: resolve(dataDir, 'users.json'),
     reserveBytes: gbToBytes(reserveGb),
   }
 }
