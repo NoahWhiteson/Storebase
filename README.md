@@ -24,22 +24,24 @@ After it finishes:
 2. First visit is onboarding: admin, storage cap, optional extra users. Each user gets their own drive under `data/drive/<userId>/`.
 3. Later visits are sign-in. Uploads, folders, trash, stars, and downloads hit the node.
 
-Helper (linked to `~/.local/bin/storebase`):
+Helper (the `storebase` script in the clone, also linked to `~/.local/bin/storebase`):
 
 ```bash
+storebase update          # opt-in: pull GitHub main, rebuild UI, restart
+storebase update --check  # look only
 storebase status
 storebase logs
-storebase update
 storebase restart
 ```
 
-Auto-update (on if you said yes): the node checks GitHub `main` on boot and every 6 hours, fast-forwards, rebuilds, and restarts.
+Updates are opt-in. Auto-update stays off unless you said yes at install or flipped it in Settings. `storebase update` is the command that actually pulls — Settings is not required.
 
 ## Dev on this repo
 
 ```bash
 cd server && npm install && npm start
 cd app && npm install && npm run dev
+./storebase update --check
 ```
 
 App `43123`, API `4780`. Vite proxies `/api`. Production installs serve the built app from the node port directly.

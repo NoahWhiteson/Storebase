@@ -7,7 +7,7 @@
     "init": "tsx src/cli.ts init",
     "start": "tsx src/cli.ts start",
     "dev": "tsx watch src/cli.ts start",
-    "update": "tsx src/cli.ts update"
+    "update": "tsx src/cli.ts update --no-restart --force"
   },
   "dependencies": {
     "@hono/node-server": "^1.19.0",

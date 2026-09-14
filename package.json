@@ -1,0 +1,11 @@
+{
+  "name": "storebase",
+  "private": true,
+  "bin": {
+    "storebase": "./storebase"
+  },
+  "scripts": {
+    "update": "./storebase update",
+    "start": "npm start --prefix server"
+  }
+}

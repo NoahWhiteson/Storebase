@@ -52,9 +52,8 @@ export function Settings({
   onPlatform?: (next: { defaultView: 'grid' | 'list' }) => void
   onToast: (message: string) => void
 }) {
-  const admin = account.role === 'admin'
   const [section, setSection] = useState<SettingsSection>(
-    admin || initialSection === 'account' ? initialSection : 'account',
+    account.role === 'admin' || initialSection === 'account' ? initialSection : 'account',
   )
   const [data, setData] = useState<SettingsPayload | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -76,6 +75,8 @@ export function Settings({
     void reload()
   }, [])
 
+  const admin = Boolean(data?.admin ?? account.role === 'admin')
+
   useEffect(() => {
     setSection(admin || initialSection === 'account' ? initialSection : 'account')
   }, [admin, initialSection])
@@ -91,7 +92,7 @@ export function Settings({
   ]
 
   return (
-    <div className="flex min-h-0 flex-1 bg-[#1a1a1a]">
+    <div className="flex h-full min-h-0 flex-1 overflow-hidden bg-[#1a1a1a]">
       <aside className="hidden w-[256px] shrink-0 flex-col md:flex">
         <button
           type="button"
@@ -153,7 +154,16 @@ export function Settings({
         </div>
 
         {loading && !data ? <p className="text-sm text-[#8d8d8d]">Loading settings…</p> : null}
-        {error ? <p className="mb-4 text-sm text-[#f28b82]">{error}</p> : null}
+        {error ? (
+          <div className="mb-4 max-w-lg">
+            <p className="text-sm text-[#f28b82]">{error}</p>
+            <p className="mt-2 text-sm text-[#8d8d8d]">
+              Settings talks to this node over <code className="text-[#e8e8e8]">/api/settings</code>. If the page is empty
+              after an install, rebuild from the machine:
+            </p>
+            <pre className="mt-3 rounded-xl bg-[#242424] px-4 py-3 text-sm text-[#e8e8e8]">storebase update</pre>
+          </div>
+        ) : null}
 
         {data && section === 'account' ? (
           <AccountPanel data={data} onSaved={onAccount} onToast={onToast} />
@@ -688,8 +698,14 @@ function UpdatesPanel({
 
   return (
     <div className="max-w-lg">
-      <Heading title="Updates" hint="Pulls from GitHub main, rebuilds, and restarts." />
-      <Toggle on={auto} onChange={(next) => void saveAuto(next)} label="Auto-update from GitHub" />
+      <Heading title="Updates" hint="Opt-in. Nothing pulls GitHub unless you run the command or click Update." />
+      <p className="mb-2 text-sm text-[#8d8d8d]">On the machine:</p>
+      <pre className="mb-6 rounded-xl bg-[#242424] px-4 py-3 text-sm text-[#e8e8e8]">storebase update</pre>
+      <p className="mb-6 text-sm text-[#8d8d8d]">
+        That fetches GitHub main, rebuilds the web UI, and restarts the node. Use{' '}
+        <code className="text-[#e8e8e8]">storebase update --check</code> to look without applying.
+      </p>
+      <Toggle on={auto} onChange={(next) => void saveAuto(next)} label="Also auto-update every 6 hours" />
       <div className="mt-6 space-y-3 text-sm">
         <Row label="This install" value={update?.currentSha?.slice(0, 7) ?? 'unknown'} />
         <Row label="GitHub main" value={update?.latestSha?.slice(0, 7) ?? 'unknown'} />
@@ -712,7 +728,7 @@ function UpdatesPanel({
         </Button>
         <Button
           className="h-11 rounded-full bg-white text-[#1a1a1a] hover:bg-[#f2f2f2]"
-          disabled={busy || !update?.available}
+          disabled={busy}
           onClick={() => void apply()}
         >
           Update now

@@ -1,0 +1,158 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+here() {
+  local src="${BASH_SOURCE[0]:-$0}"
+  while [ -L "$src" ]; do
+    local dir link
+    dir="$(cd "$(dirname "$src")" && pwd)"
+    link="$(readlink "$src")"
+    case "$link" in
+      /*) src="$link" ;;
+      *) src="$dir/$link" ;;
+    esac
+  done
+  cd "$(dirname "$src")" && pwd
+}
+
+ROOT="$(here)"
+ENV_FILE="$ROOT/.env"
+UNIT="storebase"
+PLIST="$HOME/Library/LaunchAgents/com.storebase.node.plist"
+START_SH="$ROOT/start.sh"
+
+if [ -f "$ENV_FILE" ]; then
+  set -a
+  # shellcheck disable=SC1090
+  . "$ENV_FILE"
+  set +a
+fi
+
+cmd="${1:-help}"
+shift || true
+
+node_bin() {
+  if command -v node >/dev/null 2>&1; then
+    command -v node
+    return
+  fi
+  if [ -x "$ROOT/.node/bin/node" ]; then
+    printf '%s\n' "$ROOT/.node/bin/node"
+    return
+  fi
+  printf 'error: node is not on PATH. Install Node 20+ or re-run install.sh.\n' >&2
+  exit 1
+}
+
+run_tsx() {
+  local node
+  node="$(node_bin)"
+  local tsx="$ROOT/server/node_modules/tsx/dist/cli.mjs"
+  if [ ! -f "$tsx" ]; then
+    printf 'error: server deps missing. Run: (cd %s/server && npm install)\n' "$ROOT" >&2
+    exit 1
+  fi
+  (cd "$ROOT/server" && "$node" "$tsx" "$@")
+}
+
+has_systemd() {
+  command -v systemctl >/dev/null 2>&1 && [ -f "$HOME/.config/systemd/user/storebase.service" ]
+}
+
+has_launchd() {
+  [ -f "$PLIST" ]
+}
+
+do_start() {
+  if has_systemd; then
+    systemctl --user start "$UNIT"
+  elif has_launchd; then
+    launchctl load -w "$PLIST" 2>/dev/null || launchctl start com.storebase.node
+  elif [ -x "$START_SH" ]; then
+    nohup "$START_SH" >"$ROOT/storebase.log" 2>&1 & echo $! >"$ROOT/storebase.pid"
+  else
+    run_tsx src/cli.ts start "$@"
+  fi
+}
+
+do_stop() {
+  if has_systemd; then
+    systemctl --user stop "$UNIT"
+  elif has_launchd; then
+    launchctl stop com.storebase.node 2>/dev/null || true
+    launchctl unload "$PLIST" 2>/dev/null || true
+  elif [ -f "$ROOT/storebase.pid" ]; then
+    kill "$(cat "$ROOT/storebase.pid")" 2>/dev/null || true
+    rm -f "$ROOT/storebase.pid"
+  else
+    printf 'No service unit found. Stop the node process yourself.\n' >&2
+  fi
+}
+
+usage() {
+  cat <<EOF
+Storebase
+
+  storebase update [--check]   Pull GitHub main, rebuild, restart (opt-in)
+  storebase start
+  storebase stop
+  storebase restart
+  storebase logs
+  storebase status
+  storebase help
+
+Update does not run unless you invoke it (or turn on auto-update in Settings).
+EOF
+}
+
+case "$cmd" in
+  help|-h|--help)
+    usage
+    ;;
+  start)
+    do_start "$@"
+    ;;
+  stop)
+    do_stop
+    ;;
+  restart)
+    do_stop || true
+    do_start
+    ;;
+  update)
+    if [ "${1:-}" = "--check" ] || [ "${1:-}" = "-c" ]; then
+      shift || true
+      run_tsx src/cli.ts update --check "$@"
+      exit 0
+    fi
+    printf 'Opt-in update: pull https://github.com/NoahWhiteson/Storebase main, rebuild, restart.\n'
+    run_tsx src/cli.ts update --no-restart --force "$@"
+    if has_systemd || has_launchd || [ -x "$START_SH" ]; then
+      "$0" restart
+    else
+      printf 'Updated. Restart the node process to load the new build.\n'
+    fi
+    ;;
+  logs)
+    if has_systemd; then
+      journalctl --user -u "$UNIT" -f
+    else
+      tail -f "$ROOT/storebase.log"
+    fi
+    ;;
+  status)
+    printf 'Install: %s\n' "$ROOT"
+    printf 'URL:     http://%s:%s\n' "${STOREBASE_HOST:-127.0.0.1}" "${STOREBASE_PORT:-4780}"
+    if has_systemd; then
+      systemctl --user --no-pager status "$UNIT" || true
+    elif [ -f "$ROOT/storebase.pid" ] && kill -0 "$(cat "$ROOT/storebase.pid")" 2>/dev/null; then
+      printf 'Running (pid %s)\n' "$(cat "$ROOT/storebase.pid")"
+    else
+      run_tsx src/cli.ts update --check || true
+    fi
+    ;;
+  *)
+    usage >&2
+    exit 1
+    ;;
+esac

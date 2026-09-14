@@ -169,9 +169,10 @@ export function createApp(config: ServerConfig) {
     if (c.get('user').role !== 'admin') return c.json({ error: 'Admin only' }, 403)
     const current = updateStatus()
     if (current.updating) return c.json(current)
+    const force = c.req.query('force') === '1'
     const checked = await checkGithub(config)
-    if (!checked.available) return c.json(checked)
-    return c.json(await applyUpdate(config))
+    if (!checked.available && !force) return c.json(checked)
+    return c.json(await applyUpdate(config, { restart: true, force }))
   })
 
   app.get('/api/files', async (c) => {

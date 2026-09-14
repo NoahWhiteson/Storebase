@@ -6,6 +6,7 @@ import type { ServerConfig } from './config.ts'
 
 const exec = promisify(execFile)
 const REPO = 'NoahWhiteson/Storebase'
+const GITHUB_GIT = `https://github.com/${REPO}.git`
 const INTERVAL_MS = 6 * 60 * 60 * 1000
 
 export type UpdateState = {
@@ -33,12 +34,25 @@ function gitOk(home: string): boolean {
 }
 
 async function git(home: string, args: string[]): Promise<string> {
-  const { stdout } = await exec('git', ['-C', home, ...args], { encoding: 'utf8' })
-  return stdout.trim()
+  try {
+    const { stdout, stderr } = await exec('git', ['-C', home, ...args], {
+      encoding: 'utf8',
+      maxBuffer: 20 * 1024 * 1024,
+    })
+    return (stdout || stderr).trim()
+  } catch (err) {
+    const e = err as { stderr?: string; stdout?: string; message?: string }
+    throw new Error((e.stderr || e.stdout || e.message || 'git failed').trim())
+  }
 }
 
 async function npm(cwd: string, args: string[]): Promise<void> {
-  await exec('npm', args, { cwd, encoding: 'utf8' })
+  try {
+    await exec('npm', args, { cwd, encoding: 'utf8', maxBuffer: 20 * 1024 * 1024 })
+  } catch (err) {
+    const e = err as { stderr?: string; stdout?: string; message?: string }
+    throw new Error((e.stderr || e.stdout || e.message || 'npm failed').trim())
+  }
 }
 
 export function updateStatus(): UpdateState {
@@ -76,16 +90,32 @@ export async function checkGithub(config: ServerConfig): Promise<UpdateState> {
   return updateStatus()
 }
 
-export async function applyUpdate(config: ServerConfig): Promise<UpdateState> {
+export async function applyUpdate(
+  config: ServerConfig,
+  opts: { restart?: boolean; force?: boolean } = {},
+): Promise<UpdateState> {
+  const restart = opts.restart !== false
+  const force = Boolean(opts.force)
   if (state.updating) return updateStatus()
   if (!gitOk(config.homeDir)) {
-    state.lastError = 'This install is not a git clone, so it cannot auto-update'
+    state.lastError = 'This install is not a git clone. Run storebase from the Storebase folder.'
     return updateStatus()
   }
   state.updating = true
   try {
-    await git(config.homeDir, ['fetch', 'origin', 'main'])
-    await git(config.homeDir, ['merge', '--ff-only', 'origin/main'])
+    await git(config.homeDir, ['fetch', '--depth', '50', GITHUB_GIT, 'main'])
+    const incoming = await git(config.homeDir, ['rev-parse', 'FETCH_HEAD'])
+    const current = await localSha(config.homeDir)
+    state.latestSha = incoming
+    state.currentSha = current
+    if (incoming === current && !force) {
+      state.available = false
+      state.lastError = null
+      state.lastCheckedAt = new Date().toISOString()
+      return updateStatus()
+    }
+    await git(config.homeDir, ['reset', '--hard', 'FETCH_HEAD'])
+    await git(config.homeDir, ['checkout', '-B', 'main'])
     await npm(join(config.homeDir, 'app'), ['install'])
     await npm(join(config.homeDir, 'server'), ['install'])
     await npm(join(config.homeDir, 'app'), ['run', 'build'])
@@ -93,7 +123,7 @@ export async function applyUpdate(config: ServerConfig): Promise<UpdateState> {
     state.available = false
     state.lastError = null
     state.lastCheckedAt = new Date().toISOString()
-    setTimeout(() => process.exit(0), 400)
+    if (restart) setTimeout(() => process.exit(0), 400)
   } catch (err) {
     state.lastError = err instanceof Error ? err.message : 'Update failed'
   } finally {
@@ -108,7 +138,7 @@ export function startUpdateLoop(config: ServerConfig, enabled: () => Promise<boo
     const next = await checkGithub(config)
     if (next.available && !next.updating) {
       console.log(`Storebase update ${next.currentSha?.slice(0, 7)} → ${next.latestSha?.slice(0, 7)}. Applying.`)
-      await applyUpdate(config)
+      await applyUpdate(config, { restart: true, force: false })
     }
   }
   void tick()

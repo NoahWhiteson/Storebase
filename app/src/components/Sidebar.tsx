@@ -20,6 +20,7 @@ import {
   HardDrive,
   Home,
   Plus,
+  Settings,
   Star,
   Trash2,
   Upload,
@@ -137,6 +138,14 @@ export function Sidebar({
               </button>
             )
           })}
+          <button
+            type="button"
+            onClick={onOpenSettings}
+            className="mt-2 flex h-10 items-center gap-3 rounded-full px-4 text-sm font-medium text-[#b3b3b3] hover:bg-white/5 hover:text-white"
+          >
+            <Settings className="size-[18px]" strokeWidth={1.75} />
+            Settings
+          </button>
         </nav>
       </ScrollArea>
 

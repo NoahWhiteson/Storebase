@@ -98,5 +98,5 @@ export async function checkUpdate() {
 }
 
 export async function applyUpdate() {
-  return api<NonNullable<SettingsPayload['update']>>('/api/update', { method: 'POST' })
+  return api<NonNullable<SettingsPayload['update']>>('/api/update?force=1', { method: 'POST' })
 }

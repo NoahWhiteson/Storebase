@@ -12,9 +12,14 @@ function arg(name: string): string | undefined {
   return process.argv[i + 1]
 }
 
+function hasFlag(name: string): boolean {
+  return process.argv.includes(name)
+}
+
 function printHelp(): void {
   console.log(`Storebase node
 
+  storebase update [--check] [--force] [--no-restart]
   npm start [-- --port 4780 --host 127.0.0.1 --dir ./data]
   npm run init -- --reserve 100 [--dir ./data]
   npm run update
@@ -55,22 +60,33 @@ async function start(): Promise<void> {
 
 async function update(): Promise<void> {
   const config = nodeConfig()
-  const checked = await checkGithub(config)
-  if (checked.lastError) {
-    console.error(checked.lastError)
-    process.exit(1)
-  }
-  if (!checked.available) {
-    console.log(`Already current (${checked.currentSha?.slice(0, 7) ?? 'unknown'})`)
+  if (hasFlag('--check')) {
+    const checked = await checkGithub(config)
+    const cur = checked.currentSha?.slice(0, 7) ?? 'unknown'
+    const latest = checked.latestSha?.slice(0, 7) ?? 'unknown'
+    if (checked.lastError) {
+      console.error(checked.lastError)
+      process.exit(1)
+    }
+    if (checked.available) {
+      console.log(`Update available: ${cur} → ${latest}`)
+      if (checked.latestMessage) console.log(checked.latestMessage)
+    } else {
+      console.log(`Already current (${cur})`)
+    }
     return
   }
-  console.log(`Updating ${checked.currentSha?.slice(0, 7)} → ${checked.latestSha?.slice(0, 7)}`)
-  const result = await applyUpdate(config)
+  const restart = !hasFlag('--no-restart')
+  const force = hasFlag('--force') || !hasFlag('--if-available')
+  console.log('Pulling GitHub main and rebuilding.')
+  const result = await applyUpdate(config, { restart, force })
   if (result.lastError) {
     console.error(result.lastError)
     process.exit(1)
   }
-  console.log('Updated. Restart the node if it did not exit on its own.')
+  const sha = result.currentSha?.slice(0, 7) ?? 'unknown'
+  console.log(`Updated to ${sha}`)
+  if (!restart) console.log('Restart the node to load the new build.')
 }
 
 const cmd = process.argv[2] ?? 'start'

@@ -356,14 +356,16 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
         onSignOut={() => void signOut()}
       />
       {settingsOpen ? (
-        <Settings
-          account={{ ...account, ...profile }}
-          initialSection={settingsSection}
-          onClose={() => setSettingsOpen(false)}
-          onAccount={(next) => setProfile(next)}
-          onPlatform={(next) => setView(next.defaultView)}
-          onToast={notify}
-        />
+        <div className="flex min-h-0 flex-1 overflow-hidden">
+          <Settings
+            account={{ ...account, ...profile }}
+            initialSection={settingsSection}
+            onClose={() => setSettingsOpen(false)}
+            onAccount={(next) => setProfile(next)}
+            onPlatform={(next) => setView(next.defaultView)}
+            onToast={notify}
+          />
+        </div>
       ) : (
       <div className="flex min-h-0 flex-1 bg-[#1a1a1a]">
         <Sidebar

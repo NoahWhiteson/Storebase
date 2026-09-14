@@ -161,69 +161,6 @@ EOF
 chmod +x "$START_SH"
 
 WRAPPER="$INSTALL/storebase"
-cat > "$WRAPPER" <<EOF
-#!/usr/bin/env bash
-set -euo pipefail
-INSTALL="$INSTALL"
-ENV_FILE="$ENV_FILE"
-UNIT="storebase"
-cmd="\${1:-status}"
-shift || true
-case "\$cmd" in
-  start)
-    if command -v systemctl >/dev/null 2>&1 && [ -f "\$HOME/.config/systemd/user/storebase.service" ]; then
-      systemctl --user start "\$UNIT"
-    elif [ -f "\$HOME/Library/LaunchAgents/com.storebase.node.plist" ]; then
-      launchctl load -w "\$HOME/Library/LaunchAgents/com.storebase.node.plist" 2>/dev/null || launchctl start com.storebase.node
-    else
-      nohup "$START_SH" >"\$INSTALL/storebase.log" 2>&1 & echo \$! >"\$INSTALL/storebase.pid"
-    fi
-    ;;
-  stop)
-    if command -v systemctl >/dev/null 2>&1 && [ -f "\$HOME/.config/systemd/user/storebase.service" ]; then
-      systemctl --user stop "\$UNIT"
-    elif [ -f "\$HOME/Library/LaunchAgents/com.storebase.node.plist" ]; then
-      launchctl stop com.storebase.node 2>/dev/null || true
-      launchctl unload "\$HOME/Library/LaunchAgents/com.storebase.node.plist" 2>/dev/null || true
-    elif [ -f "\$INSTALL/storebase.pid" ]; then
-      kill "\$(cat "\$INSTALL/storebase.pid")" 2>/dev/null || true
-      rm -f "\$INSTALL/storebase.pid"
-    fi
-    ;;
-  restart) "\$0" stop; "\$0" start ;;
-  update)
-    set -a
-    # shellcheck disable=SC1091
-    . "\$ENV_FILE"
-    set +a
-    cd "\$INSTALL/server"
-    "$NODE_BIN" "$INSTALL/server/node_modules/tsx/dist/cli.mjs" src/cli.ts update
-    "\$0" restart
-    ;;
-  logs)
-    if command -v journalctl >/dev/null 2>&1 && [ -f "\$HOME/.config/systemd/user/storebase.service" ]; then
-      journalctl --user -u "\$UNIT" -f
-    else
-      tail -f "\$INSTALL/storebase.log"
-    fi
-    ;;
-  status)
-    set -a
-    # shellcheck disable=SC1091
-    . "\$ENV_FILE"
-    set +a
-    echo "Install: \$INSTALL"
-    echo "URL:     http://\${STOREBASE_HOST}:\${STOREBASE_PORT}"
-    if command -v systemctl >/dev/null 2>&1 && [ -f "\$HOME/.config/systemd/user/storebase.service" ]; then
-      systemctl --user --no-pager status "\$UNIT" || true
-    fi
-    ;;
-  *)
-    echo "Usage: storebase start|stop|restart|update|logs|status"
-    exit 1
-    ;;
-esac
-EOF
 chmod +x "$WRAPPER"
 
 BIN_DIR="$HOME/.local/bin"
