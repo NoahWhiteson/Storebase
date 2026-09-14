@@ -380,7 +380,7 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
           />
         </div>
       ) : (
-      <div className="flex min-h-0 flex-1 bg-[#1a1a1a]">
+      <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden bg-[#1a1a1a]">
         <Sidebar
           section={section}
           terminalsOpen={terminalsOpen}

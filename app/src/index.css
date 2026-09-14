@@ -153,6 +153,20 @@
   background: transparent;
 }
 
+.term-host,
+.term-host .xterm,
+.term-host .xterm-screen,
+.term-host .xterm-helpers {
+  width: 100% !important;
+  max-width: 100% !important;
+  overflow: hidden !important;
+}
+
+.term-host .xterm-viewport {
+  overflow-x: hidden !important;
+  overflow-y: auto;
+}
+
 .disk-slider::-moz-range-thumb {
   width: 22px;
   height: 22px;

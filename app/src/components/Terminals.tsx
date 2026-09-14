@@ -59,8 +59,8 @@ export function Terminals({ onToast }: { onToast: (message: string) => void }) {
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col bg-[#1a1a1a]">
-      <div className="flex items-center gap-2 px-4 pt-3 pb-2">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-[#1a1a1a]">
+      <div className="flex shrink-0 items-center gap-2 px-4 pt-3 pb-2">
         <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
           {sessions.map((session) => (
             <button
@@ -104,13 +104,13 @@ export function Terminals({ onToast }: { onToast: (message: string) => void }) {
           New
         </Button>
       </div>
-      <p className="px-5 pb-2 text-xs text-[#8d8d8d]">
+      <p className="shrink-0 px-5 pb-2 text-xs text-[#8d8d8d]">
         Shell on this machine. {max} live max
         {idleMinutes > 0 ? ` · idle kill after ${idleMinutes} min` : ' · no idle expiry'}.
       </p>
       {error ? <p className="px-5 pb-2 text-sm text-[#f28b82]">{error}</p> : null}
       {activeId ? (
-        <div className="min-h-0 flex-1">
+        <div className="relative min-h-0 min-w-0 flex-1 overflow-hidden">
           <TermPane key={activeId} id={activeId} onDead={() => void reload()} onToast={onToast} />
         </div>
       ) : (
@@ -151,6 +151,7 @@ function TermPane({
       cursorBlink: true,
       fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
       fontSize: 13,
+      scrollback: 4000,
       theme: {
         background: '#141414',
         foreground: '#e8e8e8',
@@ -161,14 +162,18 @@ function TermPane({
     const fit = new FitAddon()
     term.loadAddon(fit)
     term.open(el)
-    fit.fit()
     const ws = terminalSocket(id)
     const sendResize = () => {
-      fit.fit()
+      const dims = fit.proposeDimensions()
+      if (!dims) return
+      const cols = Math.max(20, dims.cols - 1)
+      const rows = Math.max(8, dims.rows)
+      if (term.cols !== cols || term.rows !== rows) term.resize(cols, rows)
       if (ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }))
+        ws.send(JSON.stringify({ type: 'resize', cols, rows }))
       }
     }
+    requestAnimationFrame(sendResize)
     ws.onopen = () => sendResize()
     ws.onmessage = (ev) => {
       try {
@@ -208,5 +213,5 @@ function TermPane({
     }
   }, [id, onDead, onToast])
 
-  return <div ref={hostRef} className="h-full min-h-0 w-full px-3 pb-3" />
+  return <div ref={hostRef} className="term-host absolute inset-0 overflow-hidden p-3" />
 }
