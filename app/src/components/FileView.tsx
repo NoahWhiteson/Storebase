@@ -10,7 +10,7 @@ import { formatBytes, formatDate } from '@/lib/format'
 import type { DriveItem, SectionId } from '@/types'
 import { cn } from 'cn'
 import type { ReactNode } from 'react'
-import { Download, FolderOpen, Pencil, Share2, Star, Trash2, Undo2 } from 'lucide-react'
+import { Download, FolderOpen, Pencil, Share2, Star, Trash2, Undo2, UserMinus, Users } from 'lucide-react'
 
 type FileViewProps = {
   items: DriveItem[]
@@ -25,6 +25,8 @@ type FileViewProps = {
   onRename: (id: string) => void
   onTrash: (id: string) => void
   onRestore: (id: string) => void
+  onDeleteForever: (id: string) => void
+  onRemoveShare: (id: string) => void
   onDownload: (item: DriveItem) => void
 }
 
@@ -41,6 +43,8 @@ export function FileView({
   onRename,
   onTrash,
   onRestore,
+  onDeleteForever,
+  onRemoveShare,
   onDownload,
 }: FileViewProps) {
   if (items.length === 0) {
@@ -58,6 +62,8 @@ export function FileView({
     onRename,
     onTrash,
     onRestore,
+    onDeleteForever,
+    onRemoveShare,
     onDownload,
   }
 
@@ -67,7 +73,7 @@ export function FileView({
         <div className="hidden grid-cols-[minmax(0,2fr)_140px_160px_100px] gap-3 px-3 py-2 text-xs font-medium text-[#8d8d8d] md:grid">
           <span>Name</span>
           <span>Owner</span>
-          <span>Date modified</span>
+          <span>{section === 'trash' ? 'Retention' : 'Date modified'}</span>
           <span className="text-right">File size</span>
         </div>
         {items.map((item) => (
@@ -87,10 +93,10 @@ export function FileView({
               <span className="flex min-w-0 items-center gap-3">
                 <FileGlyph kind={item.kind} size="sm" />
                 <span className="truncate text-sm">{item.name}</span>
-                {item.starred ? <Star className="size-3.5 shrink-0 fill-[#fdd663] text-[#fdd663]" /> : null}
+                <Marks item={item} />
               </span>
               <span className="hidden truncate text-sm text-[#8d8d8d] md:block">{item.owner}</span>
-              <span className="hidden text-sm text-[#8d8d8d] md:block">{formatDate(item.modifiedAt)}</span>
+              <span className="hidden text-sm text-[#8d8d8d] md:block">{when(item)}</span>
               <span className="text-right text-sm text-[#8d8d8d]">
                 {item.kind === 'folder' ? '—' : formatBytes(item.size)}
               </span>
@@ -123,7 +129,7 @@ export function FileView({
                 >
                   <FileGlyph kind="folder" size="sm" />
                   <span className="min-w-0 flex-1 truncate text-sm font-medium">{item.name}</span>
-                  {item.starred ? <Star className="size-3.5 shrink-0 fill-[#fdd663] text-[#fdd663]" /> : null}
+                  <Marks item={item} />
                 </button>
               </ItemMenu>
             ))}
@@ -156,9 +162,9 @@ export function FileView({
                     <FileGlyph kind={item.kind} size="sm" />
                     <div className="min-w-0">
                       <div className="truncate text-sm font-medium">{item.name}</div>
-                      <div className="truncate text-xs text-[#8d8d8d]">{formatDate(item.modifiedAt)}</div>
+                      <div className="truncate text-xs text-[#8d8d8d]">{when(item)}</div>
                     </div>
-                    {item.starred ? <Star className="ml-auto size-3.5 shrink-0 fill-[#fdd663] text-[#fdd663]" /> : null}
+                    <Marks item={item} className="ml-auto" />
                   </div>
                 </button>
               </ItemMenu>
@@ -167,6 +173,23 @@ export function FileView({
         </section>
       ) : null}
     </div>
+  )
+}
+
+function when(item: DriveItem): string {
+  if (item.trashed && item.daysLeft != null) {
+    if (item.daysLeft <= 0) return 'Expires today'
+    return `${item.daysLeft} day${item.daysLeft === 1 ? '' : 's'} left`
+  }
+  return formatDate(item.modifiedAt)
+}
+
+function Marks({ item, className }: { item: DriveItem; className?: string }) {
+  return (
+    <span className={cn('flex shrink-0 items-center gap-1', className)}>
+      {item.shared && item.owned !== false ? <Users className="size-3.5 text-[#8d8d8d]" /> : null}
+      {item.starred ? <Star className="size-3.5 fill-[#fdd663] text-[#fdd663]" /> : null}
+    </span>
   )
 }
 
@@ -179,6 +202,8 @@ function ItemMenu({
   onRename,
   onTrash,
   onRestore,
+  onDeleteForever,
+  onRemoveShare,
   onDownload,
 }: {
   item: DriveItem
@@ -189,42 +214,66 @@ function ItemMenu({
   onRename: (id: string) => void
   onTrash: (id: string) => void
   onRestore: (id: string) => void
+  onDeleteForever: (id: string) => void
+  onRemoveShare: (id: string) => void
   onDownload: (item: DriveItem) => void
 }) {
+  const inbound = item.owned === false
+  const shareRoot = inbound && Boolean(item.shareId) && item.id === `share:${item.shareId}`
+
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
-      <ContextMenuContent className="w-52">
+      <ContextMenuContent className="w-56">
         <ContextMenuItem onSelect={() => onOpen(item)}>
           <FolderOpen />
           Open
         </ContextMenuItem>
-        <ContextMenuItem onSelect={() => onShare(item.id)}>
-          <Share2 />
-          Share
-        </ContextMenuItem>
-        <ContextMenuItem onSelect={() => onStar(item.id)}>
-          <Star />
-          {item.starred ? 'Remove star' : 'Add to starred'}
-        </ContextMenuItem>
-        <ContextMenuItem onSelect={() => onRename(item.id)}>
-          <Pencil />
-          Rename
-        </ContextMenuItem>
+        {inbound ? null : (
+          <ContextMenuItem onSelect={() => onShare(item.id)}>
+            <Share2 />
+            Share
+          </ContextMenuItem>
+        )}
+        {inbound || item.trashed ? null : (
+          <ContextMenuItem onSelect={() => onStar(item.id)}>
+            <Star />
+            {item.starred ? 'Remove star' : 'Add to starred'}
+          </ContextMenuItem>
+        )}
+        {inbound || item.trashed ? null : (
+          <ContextMenuItem onSelect={() => onRename(item.id)}>
+            <Pencil />
+            Rename
+          </ContextMenuItem>
+        )}
         <ContextMenuItem onSelect={() => onDownload(item)}>
           <Download />
           Download
         </ContextMenuItem>
-        <ContextMenuSeparator />
+        {item.trashed || !inbound || shareRoot ? <ContextMenuSeparator /> : null}
         {item.trashed ? (
-          <ContextMenuItem onSelect={() => onRestore(item.id)}>
-            <Undo2 />
-            Restore
-          </ContextMenuItem>
+          <>
+            <ContextMenuItem onSelect={() => onRestore(item.id)}>
+              <Undo2 />
+              Restore
+            </ContextMenuItem>
+            <ContextMenuItem variant="destructive" onSelect={() => onDeleteForever(item.id)}>
+              <Trash2 />
+              Delete forever
+            </ContextMenuItem>
+          </>
+        ) : inbound ? (
+          shareRoot ? (
+            <ContextMenuItem onSelect={() => onRemoveShare(item.id)}>
+              <UserMinus />
+              Remove
+            </ContextMenuItem>
+          ) : null
         ) : (
           <ContextMenuItem variant="destructive" onSelect={() => onTrash(item.id)}>
             <Trash2 />
-            Move to trash
+            {item.size != null && item.size > 20 * 1024 ** 3 ? 'Delete permanently' : 'Move to trash'}
           </ContextMenuItem>
         )}
       </ContextMenuContent>
@@ -244,10 +293,10 @@ function EmptyState({ section, search }: { section: SectionId; search: string })
     body = 'Star items you want to find fast. They show up here.'
   } else if (section === 'trash') {
     title = 'Trash is empty'
-    body = 'Items you delete hang out here until you empty it.'
+    body = 'Files stay 30 days, then they’re gone. Empty trash to wipe now. Anything over 20 GB skips trash.'
   } else if (section === 'shared') {
     title = 'Nothing shared with you'
-    body = 'Files other people share will land here.'
+    body = 'When someone on this node shares a file, it lands here.'
   } else if (section === 'spam') {
     title = 'Spam is empty'
     body = 'Suspicious shares get parked here.'

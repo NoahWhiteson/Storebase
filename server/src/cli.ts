@@ -4,7 +4,8 @@ import { expandHome, loadConfig, parseReserveGb } from './config.ts'
 import { describeReserve, initPool, readManifest } from './pool.ts'
 import { loadPlatform } from './platform.ts'
 import { applyUpdate, checkGithub, startUpdateLoop } from './update.ts'
-import { isConfigured } from './users.ts'
+import { purgeExpiredTrash } from './trash.ts'
+import { ensureUserDrive, isConfigured, loadUsers } from './users.ts'
 
 function arg(name: string): string | undefined {
   const i = process.argv.indexOf(name)
@@ -51,6 +52,10 @@ async function start(): Promise<void> {
       const manifest = await readManifest(config)
       const reserve = manifest ? describeReserve(manifest) : 'unknown'
       console.log(`Drive ${config.driveDir} · reserved ${reserve}`)
+      const users = await loadUsers(config)
+      for (const user of users) {
+        await purgeExpiredTrash(await ensureUserDrive(config, user.id))
+      }
     } else {
       console.log('Not configured. Open the app to finish onboarding.')
     }

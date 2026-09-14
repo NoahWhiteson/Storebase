@@ -22,7 +22,7 @@ After it finishes:
 
 1. Open `http://127.0.0.1:<port>` on that machine, or `http://<lan-ip>:<port>` from another device if you bound `0.0.0.0`.
 2. First visit is onboarding: admin, storage cap, optional extra users. Each user gets their own drive under `data/drive/<userId>/`.
-3. Later visits are sign-in. Uploads, folders, trash, stars, and downloads hit the node.
+3. Later visits are sign-in. Uploads, folders, shares, trash, stars, and downloads hit the node.
 
 Helper (the `storebase` script in the clone, also linked to `~/.local/bin/storebase`):
 
@@ -51,6 +51,8 @@ App `43123`, API `4780`. Vite proxies `/api`. Production installs serve the buil
 - Each signed-in user has an isolated folder on the node.
 - Quota is the reserve you picked at onboarding, shared across the machine.
 - Passwords are scrypt hashes in `data/users.json`. Sessions are httpOnly cookies.
-- Hidden `.trash` and `.storebase-meta.json` live in that user’s folder.
+- Hidden `.trash`, `.trash-index.json`, and `.storebase-meta.json` live in that user’s folder.
+- Right-click Share to give another account on this node access. They see it under Shared with me. Shares live in `data/shares.json`.
+- Trash keeps files for 30 days, then the node deletes them. Empty trash wipes now. Files over 20 GB skip trash — the UI warns you and delete is permanent.
 - Admins open Settings (gear) for platform, bind address, storage cap, users, terminals, updates, and session rotation. Everyone can edit their own account. Platform copy lives in `data/settings.json`. Bind/auto-update writes `.env` and apply on restart.
 - Terminal in the sidebar/top bar opens a real shell on the node. Settings → Terminals has a master on/off, plus per-user max and idle expiry. Off hides the tab and kills live shells.

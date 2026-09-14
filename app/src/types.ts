@@ -33,4 +33,8 @@ export type DriveItem = {
   trashed: boolean
   spam: boolean
   computer: boolean
+  owned?: boolean
+  daysLeft?: number
+  shareId?: string
+  shareName?: string
 }

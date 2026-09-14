@@ -180,16 +180,39 @@ export async function listTrash(root: string): Promise<DriveEntry[]> {
   return out.sort((a, b) => a.name.localeCompare(b.name))
 }
 
-export async function restoreFromTrash(root: string, relPath: string): Promise<DriveEntry> {
+export async function restoreFromTrash(root: string, relPath: string, originalPath?: string): Promise<DriveEntry> {
   const full = resolveSafe(root, relPath)
   const trash = join(root, TRASH_DIR)
   const rel = relative(trash, full)
-  if (rel.startsWith('..')) throw new Error('Not in trash')
-  const destName = await uniqueIn(root, basename(full))
-  const dest = join(root, destName)
+  if (rel.startsWith('..') || rel === '') throw new Error('Not in trash')
+  let dest: string
+  if (originalPath) {
+    const wanted = resolveSafe(root, originalPath)
+    await mkdir(dirname(wanted), { recursive: true })
+    try {
+      await stat(wanted)
+      dest = join(dirname(wanted), await uniqueIn(dirname(wanted), basename(wanted)))
+    } catch {
+      dest = wanted
+    }
+  } else {
+    dest = join(root, await uniqueIn(root, basename(full)))
+  }
   await rename(full, dest)
   const info = await stat(dest)
   return toEntry(root, dest, info)
+}
+
+export async function entrySize(root: string, relPath: string): Promise<number> {
+  const full = resolveSafe(root, relPath)
+  const info = await stat(full)
+  if (info.isDirectory()) return folderSize(full)
+  return info.size
+}
+
+export function isTrashPath(relPath: string): boolean {
+  const clean = relPath.replaceAll('\\', '/').replace(/^\/+/, '')
+  return clean === TRASH_DIR || clean.startsWith(`${TRASH_DIR}/`)
 }
 
 export async function removePath(root: string, relPath: string): Promise<void> {

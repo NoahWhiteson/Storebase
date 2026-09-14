@@ -1,6 +1,7 @@
 import { FileGlyph } from '@/components/FileGlyph'
 import { FileView } from '@/components/FileView'
 import { Settings, type SettingsSection } from '@/components/Settings'
+import { ShareDialog } from '@/components/ShareDialog'
 import { Sidebar } from '@/components/Sidebar'
 import { Terminals } from '@/components/Terminals'
 import { TopBar } from '@/components/TopBar'
@@ -15,11 +16,17 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import {
+  ApiError,
+  HARD_DELETE_BYTES,
+  deleteFile,
+  deleteShare,
   downloadUrl,
+  emptyTrash,
   initials,
   listFiles,
   logout,
   mkdir,
+  parseSharePath,
   renameFile,
   restoreFile,
   starFile,
@@ -28,6 +35,7 @@ import {
   uploadFile,
   type FileEntry,
 } from '@/lib/api'
+import { formatBytes } from '@/lib/format'
 import type { DriveItem, FileKind, SectionId } from '@/types'
 import { ChevronRight } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -82,6 +90,11 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
   const [loadError, setLoadError] = useState<string | null>(null)
   const [dialog, setDialog] = useState<null | { mode: 'create' | 'rename'; id?: string }>(null)
   const [nameDraft, setNameDraft] = useState('')
+  const [shareLabel, setShareLabel] = useState('Shared')
+  const [shareTarget, setShareTarget] = useState<DriveItem | null>(null)
+  const [confirm, setConfirm] = useState<
+    null | { mode: 'permanent'; id: string; name: string; size: number } | { mode: 'empty-trash' } | { mode: 'delete-forever'; id: string; name: string }
+  >(null)
   const uploadRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -92,12 +105,25 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
 
   const crumbs = useMemo(() => {
     if (!folderPath) return []
+    const shared = parseSharePath(folderPath)
+    if (shared) {
+      const root = { id: `share:${shared.shareId}`, name: shareLabel || 'Shared' }
+      if (!shared.sub) return [root]
+      const parts = shared.sub.split('/')
+      return [
+        root,
+        ...parts.map((name, i) => ({
+          id: `share:${shared.shareId}/${parts.slice(0, i + 1).join('/')}`,
+          name,
+        })),
+      ]
+    }
     const parts = folderPath.split('/')
     return parts.map((name, i) => ({
       id: parts.slice(0, i + 1).join('/'),
       name,
     }))
-  }, [folderPath])
+  }, [folderPath, shareLabel])
 
   const refresh = useCallback(async () => {
     setLoadError(null)
@@ -113,7 +139,15 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
         entries = await listFiles({ view: 'starred' })
       } else if (section === 'recent' || section === 'home') {
         entries = await listFiles({ view: 'recent' })
-      } else if (section === 'shared' || section === 'spam') {
+      } else if (section === 'shared') {
+        const shared = parseSharePath(folderPath)
+        if (shared) {
+          entries = await listFiles({ view: 'shared', share: shared.shareId, path: shared.sub })
+          if (entries[0]?.shareName) setShareLabel(entries[0].shareName)
+        } else {
+          entries = await listFiles({ view: 'shared' })
+        }
+      } else if (section === 'spam') {
         entries = []
       } else if (section === 'computers' && !folderPath) {
         entries = []
@@ -204,7 +238,8 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
         setSearch('')
         return
       }
-      setSection('my-drive')
+      if (item.shareName) setShareLabel(item.shareName)
+      setSection(item.id.startsWith('share:') ? 'shared' : 'my-drive')
       setFolderPath(item.id)
       setSelectedIds([])
       setSearch('')
@@ -225,16 +260,60 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
     }
   }
 
-  async function trash(id: string) {
+  async function trash(id: string, confirmed = false) {
+    const item = items.find((entry) => entry.id === id)
+    if (!item) return
+    if (!confirmed && item.size != null && item.size > HARD_DELETE_BYTES) {
+      setConfirm({ mode: 'permanent', id, name: item.name, size: item.size })
+      return
+    }
+    try {
+      const result = await trashFile(id, confirmed)
+      setSelectedIds((current) => current.filter((x) => x !== id))
+      notify(result.permanent ? `Deleted ${item.name} permanently` : `Moved ${item.name} to trash`)
+      await refresh()
+    } catch (err) {
+      if (err instanceof ApiError && err.code === 'PERMANENT_DELETE') {
+        setConfirm({ mode: 'permanent', id, name: item.name, size: err.size ?? item.size ?? 0 })
+        return
+      }
+      notify(err instanceof Error ? err.message : 'Could not trash')
+    }
+  }
+
+  async function removeForever(id: string) {
     const item = items.find((entry) => entry.id === id)
     if (!item) return
     try {
-      await trashFile(id)
+      await deleteFile(id)
       setSelectedIds((current) => current.filter((x) => x !== id))
-      notify(`Moved ${item.name} to trash`)
+      notify(`Deleted ${item.name}`)
       await refresh()
     } catch (err) {
-      notify(err instanceof Error ? err.message : 'Could not trash')
+      notify(err instanceof Error ? err.message : 'Could not delete')
+    }
+  }
+
+  async function wipeTrash() {
+    try {
+      await emptyTrash()
+      notify('Trash emptied')
+      await refresh()
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Could not empty trash')
+    }
+  }
+
+  async function removeShare(id: string) {
+    const parsed = parseSharePath(id)
+    if (!parsed) return
+    try {
+      await deleteShare(parsed.shareId)
+      notify('Removed from Shared with me')
+      setFolderPath('')
+      await refresh()
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Could not remove')
     }
   }
 
@@ -252,9 +331,8 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
 
   function share(id: string) {
     const item = items.find((entry) => entry.id === id)
-    if (!item) return
-    void navigator.clipboard?.writeText(`${window.location.origin}${downloadUrl(item.id)}`)
-    notify(`Link copied for ${item.name} — only works if you’re signed in`)
+    if (!item || item.owned === false) return
+    setShareTarget(item)
   }
 
   function openRename(id: string) {
@@ -421,8 +499,12 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
             <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
               {folderPath && !search.trim() ? (
                 <>
-                  <button type="button" className="hover:text-foreground" onClick={() => goSection('my-drive')}>
-                    My files
+                  <button
+                    type="button"
+                    className="hover:text-foreground"
+                    onClick={() => goSection(section === 'shared' ? 'shared' : 'my-drive')}
+                  >
+                    {section === 'shared' ? 'Shared with me' : 'My files'}
                   </button>
                   {crumbs.map((crumb, i) => (
                     <span key={crumb.id} className="flex items-center gap-2">
@@ -441,7 +523,18 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
                   ))}
                 </>
               ) : (
-                <h1 className="text-2xl font-normal tracking-tight text-foreground">{heading}</h1>
+                <div className="flex w-full flex-wrap items-center justify-between gap-3">
+                  <h1 className="text-2xl font-normal tracking-tight text-foreground">{heading}</h1>
+                  {section === 'trash' && items.length > 0 ? (
+                    <Button
+                      variant="ghost"
+                      className="h-9 rounded-full text-[#f28b82] hover:bg-white/5 hover:text-[#f28b82]"
+                      onClick={() => setConfirm({ mode: 'empty-trash' })}
+                    >
+                      Empty trash
+                    </Button>
+                  ) : null}
+                </div>
               )}
             </div>
 
@@ -486,6 +579,12 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
                 onRename={openRename}
                 onTrash={(id) => void trash(id)}
                 onRestore={(id) => void restore(id)}
+                onDeleteForever={(id) => {
+                  const item = items.find((entry) => entry.id === id)
+                  if (!item) return
+                  setConfirm({ mode: 'delete-forever', id, name: item.name })
+                }}
+                onRemoveShare={(id) => void removeShare(id)}
                 onDownload={(item) => {
                   window.open(downloadUrl(item.id), '_blank')
                 }}
@@ -533,6 +632,59 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
             </Button>
             <Button onClick={() => void submitDialog()} disabled={!nameDraft.trim()}>
               {dialog?.mode === 'rename' ? 'Save' : 'Create'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {shareTarget ? (
+        <ShareDialog
+          path={shareTarget.id}
+          name={shareTarget.name}
+          onClose={() => {
+            setShareTarget(null)
+            void refresh()
+          }}
+          onToast={notify}
+        />
+      ) : null}
+
+      <Dialog open={confirm !== null} onOpenChange={(open) => !open && setConfirm(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {confirm?.mode === 'empty-trash'
+                ? 'Empty trash?'
+                : confirm?.mode === 'delete-forever'
+                  ? 'Delete forever?'
+                  : 'No trash for this file'}
+            </DialogTitle>
+            <DialogDescription>
+              {confirm?.mode === 'empty-trash'
+                ? 'Everything in trash is deleted now. This cannot be undone.'
+                : confirm?.mode === 'delete-forever'
+                  ? `${confirm.name} leaves trash and is gone.`
+                  : confirm?.mode === 'permanent'
+                    ? `${confirm.name} is ${formatBytes(confirm.size)}. Files over 20 GB skip the 30-day trash and are deleted immediately.`
+                    : ''}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setConfirm(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              className="bg-[#c5221f] text-white hover:bg-[#a50e0e]"
+              onClick={() => {
+                const next = confirm
+                setConfirm(null)
+                if (next?.mode === 'empty-trash') void wipeTrash()
+                if (next?.mode === 'delete-forever') void removeForever(next.id)
+                if (next?.mode === 'permanent') void trash(next.id, true)
+              }}
+            >
+              Delete
             </Button>
           </DialogFooter>
         </DialogContent>

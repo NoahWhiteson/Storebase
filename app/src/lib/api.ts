@@ -9,6 +9,40 @@ export type FileEntry = {
   modifiedAt: string
   starred?: boolean
   trashed?: boolean
+  shared?: boolean
+  owner?: string
+  ownerId?: string
+  shareId?: string
+  shareName?: string
+  trashedAt?: string
+  expiresAt?: string
+  daysLeft?: number
+}
+
+export const HARD_DELETE_BYTES = 20 * 1024 ** 3
+
+export type Person = { id: string; name: string; email: string }
+
+export type ShareInfo = {
+  id: string
+  path: string
+  toUserId: string
+  toName: string
+  toEmail: string
+  createdAt: string
+}
+
+export class ApiError extends Error {
+  status: number
+  code?: string
+  size?: number
+  constructor(message: string, status: number, extra?: { code?: string; size?: number }) {
+    super(message)
+    this.name = 'ApiError'
+    this.status = status
+    this.code = extra?.code
+    this.size = extra?.size
+  }
 }
 
 export type Me = {
@@ -53,21 +87,30 @@ export function toDriveItem(entry: FileEntry, owner: { name: string }): DriveIte
     name: entry.name,
     kind: entry.type === 'folder' ? 'folder' : kindFromName(entry.name),
     parentId: parentOf(entry.path),
-    owner: owner.name,
-    ownerInitials: initials(owner.name),
+    owner: entry.owner ?? owner.name,
+    ownerInitials: initials(entry.owner ?? owner.name),
     modifiedAt: entry.modifiedAt,
     size: entry.type === 'folder' ? null : entry.size,
     starred: Boolean(entry.starred),
-    shared: false,
+    shared: Boolean(entry.shared),
     trashed: Boolean(entry.trashed),
     spam: false,
     computer: false,
+    owned: !entry.path.startsWith('share:'),
+    daysLeft: entry.daysLeft,
+    shareId: entry.shareId,
+    shareName: entry.shareName,
   }
 }
 
 async function parse<T>(res: Response): Promise<T> {
-  const body = (await res.json().catch(() => ({}))) as T & { error?: string }
-  if (!res.ok) throw new Error(body.error ?? `Request failed (${res.status})`)
+  const body = (await res.json().catch(() => ({}))) as T & { error?: string; code?: string; size?: number }
+  if (!res.ok) {
+    throw new ApiError(body.error ?? `Request failed (${res.status})`, res.status, {
+      code: body.code,
+      size: body.size,
+    })
+  }
   return body
 }
 
@@ -114,11 +157,18 @@ export async function logout(): Promise<void> {
   await api('/api/logout', { method: 'POST' })
 }
 
-export async function listFiles(opts: { path?: string; view?: string; q?: string }): Promise<FileEntry[]> {
+export function parseSharePath(id: string): { shareId: string; sub: string } | null {
+  const match = id.match(/^share:([^/]+)(?:\/(.*))?$/)
+  if (!match) return null
+  return { shareId: match[1], sub: match[2] ?? '' }
+}
+
+export async function listFiles(opts: { path?: string; view?: string; q?: string; share?: string }): Promise<FileEntry[]> {
   const params = new URLSearchParams()
   if (opts.path) params.set('path', opts.path)
   if (opts.view) params.set('view', opts.view)
   if (opts.q) params.set('q', opts.q)
+  if (opts.share) params.set('share', opts.share)
   const qs = params.toString()
   const body = await api<{ items: FileEntry[] }>(`/api/files${qs ? `?${qs}` : ''}`)
   return body.items
@@ -152,8 +202,11 @@ export async function starFile(path: string, starred: boolean): Promise<void> {
   await api('/api/files/star', { method: 'POST', body: JSON.stringify({ path, starred }) })
 }
 
-export async function trashFile(path: string): Promise<void> {
-  await api('/api/files/trash', { method: 'POST', body: JSON.stringify({ path }) })
+export async function trashFile(
+  path: string,
+  confirm?: boolean,
+): Promise<{ permanent?: boolean; size?: number }> {
+  return api('/api/files/trash', { method: 'POST', body: JSON.stringify({ path, confirm }) })
 }
 
 export async function restoreFile(path: string): Promise<void> {
@@ -164,6 +217,38 @@ export async function deleteFile(path: string): Promise<void> {
   await api(`/api/files?path=${encodeURIComponent(path)}`, { method: 'DELETE' })
 }
 
+export async function emptyTrash(): Promise<void> {
+  await api('/api/files/empty-trash', { method: 'POST' })
+}
+
+export async function listPeople(): Promise<Person[]> {
+  const body = await api<{ people: Person[] }>('/api/people')
+  return body.people
+}
+
+export async function listShares(path: string): Promise<ShareInfo[]> {
+  const body = await api<{ shares: ShareInfo[] }>(`/api/shares?path=${encodeURIComponent(path)}`)
+  return body.shares
+}
+
+export async function createShare(path: string, email: string): Promise<ShareInfo[]> {
+  const body = await api<{ shares: ShareInfo[] }>('/api/shares', {
+    method: 'POST',
+    body: JSON.stringify({ path, email }),
+  })
+  return body.shares
+}
+
+export async function deleteShare(id: string): Promise<void> {
+  await api(`/api/shares/${id}`, { method: 'DELETE' })
+}
+
 export function downloadUrl(path: string): string {
+  const parsed = parseSharePath(path)
+  if (parsed) {
+    const qs = new URLSearchParams({ share: parsed.shareId })
+    if (parsed.sub) qs.set('path', parsed.sub)
+    return `/api/files/download?${qs}`
+  }
   return `/api/files/download?path=${encodeURIComponent(path)}`
 }

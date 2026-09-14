@@ -11,19 +11,40 @@ import { QuotaError, folderSize } from './quota.ts'
 import { clearSession, issueSession, readSessionUserId } from './session.ts'
 import { completeSetup, getSetupState, SetupError } from './setup.ts'
 import {
+  createShare,
+  deleteShare,
+  dropSharesForPath,
+  listIncoming,
+  listOutgoing,
+  listSharedFolder,
+  listSharesForPath,
+  openSharedDownload,
+  parseSharePath,
+  pathIsShared,
+  rewriteShares,
+  ShareError,
+} from './shares.ts'
+import {
   ensureDir,
   entryAt,
+  entrySize,
+  isTrashPath,
   listPath,
-  listTrash,
   makeFolder,
-  moveToTrash,
   openDownload,
   removePath,
   renameEntry,
-  restoreFromTrash,
   saveFile,
   walkVisible,
 } from './storage.ts'
+import {
+  emptyTrash,
+  forgetTrashPath,
+  HARD_DELETE_BYTES,
+  listTrashItems,
+  restoreTrash,
+  trashEntry,
+} from './trash.ts'
 import { applyUpdate, checkGithub, updateStatus } from './update.ts'
 import { mountTerminals } from './terminal-api.ts'
 import { attachTerminalWs } from './terminal-ws.ts'
@@ -183,30 +204,99 @@ export function createApp(config: ServerConfig) {
     return c.json(await applyUpdate(config, { restart: true, force }))
   })
 
+  app.get('/api/people', async (c) => {
+    const me = c.get('user')
+    const users = await loadUsers(config)
+    return c.json({
+      people: users
+        .filter((person) => person.id !== me.id)
+        .map((person) => ({ id: person.id, name: person.name, email: person.email })),
+    })
+  })
+
+  app.get('/api/shares', async (c) => {
+    const user = c.get('user')
+    const path = c.req.query('path') ?? ''
+    if (!path) return c.json({ error: 'path required' }, 400)
+    return c.json({ shares: await listSharesForPath(config, user, path) })
+  })
+
+  app.post('/api/shares', async (c) => {
+    const user = c.get('user')
+    const body = await c.req.json<{ path?: string; email?: string }>()
+    if (!body.path || !body.email) return c.json({ error: 'path and email required' }, 400)
+    try {
+      const share = await createShare(config, user, body.path, body.email)
+      const shares = await listSharesForPath(config, user, body.path)
+      return c.json({ share, shares }, 201)
+    } catch (err) {
+      if (err instanceof ShareError) return c.json({ error: err.message }, err.status)
+      throw err
+    }
+  })
+
+  app.delete('/api/shares/:id', async (c) => {
+    const user = c.get('user')
+    try {
+      await deleteShare(config, user, c.req.param('id'))
+      return c.json({ ok: true })
+    } catch (err) {
+      if (err instanceof ShareError) return c.json({ error: err.message }, err.status)
+      throw err
+    }
+  })
+
   app.get('/api/files', async (c) => {
+    const user = c.get('user')
     const root = c.get('root')
     const view = c.req.query('view') ?? 'drive'
     const path = c.req.query('path') ?? ''
+    const shareId = c.req.query('share') ?? ''
     const q = (c.req.query('q') ?? '').trim().toLowerCase()
     const meta = await loadMeta(root)
     const starred = new Set(meta.starred)
+    const outgoing = await listOutgoing(config, user.id)
+    const sharedFlag = (rel: string) =>
+      outgoing.some((share) => share.path === rel || rel.startsWith(`${share.path}/`))
 
     function decorate(items: Awaited<ReturnType<typeof listPath>>, trashed = false) {
       return items.map((item) => ({
         ...item,
         starred: starred.has(item.path),
         trashed,
+        shared: !trashed && sharedFlag(item.path),
       }))
     }
 
+    if (view === 'shared') {
+      try {
+        if (shareId) {
+          const listed = await listSharedFolder(config, user, shareId, path)
+          return c.json({
+            path: path ? `share:${shareId}/${path}` : `share:${shareId}`,
+            shareName: listed.shareName,
+            items: listed.items.map((item) => ({ ...item, starred: false, trashed: false })),
+          })
+        }
+        const items = await listIncoming(config, user)
+        return c.json({ path: '', items: items.map((item) => ({ ...item, starred: false, trashed: false })) })
+      } catch (err) {
+        if (err instanceof ShareError) return c.json({ error: err.message }, err.status)
+        throw err
+      }
+    }
     if (view === 'trash') {
-      return c.json({ path: '.trash', items: decorate(await listTrash(root), true) })
+      const items = await listTrashItems(root)
+      return c.json({
+        path: '.trash',
+        items: items.map((item) => ({ ...item, starred: false, trashed: true, shared: false })),
+      })
     }
     if (view === 'starred') {
       const items = []
       for (const rel of meta.starred) {
         const item = await entryAt(root, rel)
-        if (item) items.push({ ...item, starred: true, trashed: false })
+        if (item) items.push({ ...item, starred: true, trashed: false, shared: sharedFlag(item.path) })
       }
       return c.json({ path: '', items })
     }
@@ -214,7 +304,14 @@ export function createApp(config: ServerConfig) {
       const items = []
       for (const rec of meta.recents) {
         const item = await entryAt(root, rec.path)
-        if (item && item.type === 'file') items.push({ ...item, starred: starred.has(item.path), trashed: false })
+        if (item && item.type === 'file') {
+          items.push({
+            ...item,
+            starred: starred.has(item.path),
+            trashed: false,
+            shared: sharedFlag(item.path),
+          })
+        }
       }
       return c.json({ path: '', items })
     }
@@ -260,7 +357,15 @@ export function createApp(config: ServerConfig) {
     if (!body.path || !body.name) return c.json({ error: 'path and name required' }, 400)
     const item = await renameEntry(root, body.path, body.name)
     await rewritePath(root, body.path, item.path)
-    return c.json({ item: { ...item, starred: (await loadMeta(root)).starred.includes(item.path), trashed: false } })
+    await rewriteShares(config, c.get('user').id, body.path, item.path)
+    return c.json({
+      item: {
+        ...item,
+        starred: (await loadMeta(root)).starred.includes(item.path),
+        trashed: false,
+        shared: await pathIsShared(config, c.get('user').id, item.path),
+      },
+    })
   })
 
   app.post('/api/files/star', async (c) => {
@@ -272,26 +377,92 @@ export function createApp(config: ServerConfig) {
   })
 
   app.post('/api/files/trash', async (c) => {
+    const user = c.get('user')
     const root = c.get('root')
-    const body = await c.req.json<{ path?: string }>()
+    const body = await c.req.json<{ path?: string; confirm?: boolean }>()
     if (!body.path) return c.json({ error: 'path required' }, 400)
-    const item = await moveToTrash(root, body.path)
+    if (isTrashPath(body.path)) return c.json({ error: 'Already in trash' }, 400)
+    const size = await entrySize(root, body.path)
+    if (size > HARD_DELETE_BYTES) {
+      if (!body.confirm) {
+        return c.json(
+          {
+            error: 'This is over 20 GB. Delete is permanent — no trash.',
+            code: 'PERMANENT_DELETE',
+            size,
+          },
+          409,
+        )
+      }
+      await removePath(root, body.path)
+      await dropPath(root, body.path)
+      await dropSharesForPath(config, user.id, body.path)
+      return c.json({ ok: true, permanent: true, size })
+    }
+    const { item, record } = await trashEntry(root, body.path)
     await dropPath(root, body.path)
-    return c.json({ item: { ...item, starred: false, trashed: true } })
+    return c.json({
+      item: { ...item, starred: false, trashed: true, shared: false, trashedAt: record.trashedAt, daysLeft: 30 },
+      permanent: false,
+    })
   })
 
   app.post('/api/files/restore', async (c) => {
     const root = c.get('root')
     const body = await c.req.json<{ path?: string }>()
     if (!body.path) return c.json({ error: 'path required' }, 400)
-    const item = await restoreFromTrash(root, body.path)
-    return c.json({ item: { ...item, starred: false, trashed: false } })
+    const item = await restoreTrash(root, body.path)
+    return c.json({ item: { ...item, starred: false, trashed: false, shared: await pathIsShared(config, c.get('user').id, item.path) } })
+  })
+
+  app.post('/api/files/empty-trash', async (c) => {
+    const user = c.get('user')
+    const root = c.get('root')
+    const originals = await emptyTrash(root)
+    for (const path of originals) {
+      await dropPath(root, path)
+      await dropSharesForPath(config, user.id, path)
+    }
+    return c.json({ ok: true })
   })
 
   app.get('/api/files/download', async (c) => {
+    const user = c.get('user')
     const root = c.get('root')
-    const path = c.req.query('path')
+    const shareId = c.req.query('share')
+    const path = c.req.query('path') ?? ''
+    if (shareId) {
+      try {
+        const file = await openSharedDownload(config, user, shareId, path)
+        return new Response(Readable.toWeb(file.stream) as unknown as ReadableStream, {
+          headers: {
+            'content-type': 'application/octet-stream',
+            'content-disposition': `attachment; filename="${file.name}"`,
+            'content-length': String(file.size),
+          },
+        })
+      } catch (err) {
+        if (err instanceof ShareError) return c.json({ error: err.message }, err.status)
+        throw err
+      }
+    }
     if (!path) return c.json({ error: 'path required' }, 400)
+    const parsed = parseSharePath(path)
+    if (parsed) {
+      try {
+        const file = await openSharedDownload(config, user, parsed.shareId, parsed.sub)
+        return new Response(Readable.toWeb(file.stream) as unknown as ReadableStream, {
+          headers: {
+            'content-type': 'application/octet-stream',
+            'content-disposition': `attachment; filename="${file.name}"`,
+            'content-length': String(file.size),
+          },
+        })
+      } catch (err) {
+        if (err instanceof ShareError) return c.json({ error: err.message }, err.status)
+        throw err
+      }
+    }
     const file = await openDownload(root, path)
     await touchRecent(root, path)
     return new Response(Readable.toWeb(file.stream) as unknown as ReadableStream, {
@@ -304,11 +475,17 @@ export function createApp(config: ServerConfig) {
   })
 
   app.delete('/api/files', async (c) => {
+    const user = c.get('user')
     const root = c.get('root')
     const path = c.req.query('path')
     if (!path) return c.json({ error: 'path required' }, 400)
+    if (!isTrashPath(path)) {
+      return c.json({ error: 'Delete forever only works in trash. Over 20 GB skips trash with a confirm.' }, 400)
+    }
+    const original = await forgetTrashPath(root, path)
     await removePath(root, path)
     await dropPath(root, path)
+    if (original) await dropSharesForPath(config, user.id, original)
     return c.json({ ok: true })
   })
 
