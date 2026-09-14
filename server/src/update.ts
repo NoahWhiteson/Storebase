@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process'
 import { existsSync } from 'node:fs'
+import { rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import type { ServerConfig } from './config.ts'
@@ -52,6 +53,17 @@ async function npm(cwd: string, args: string[]): Promise<void> {
   } catch (err) {
     const e = err as { stderr?: string; stdout?: string; message?: string }
     throw new Error((e.stderr || e.stdout || e.message || 'npm failed').trim())
+  }
+}
+
+async function clearIncomingUntracked(home: string, incoming: string): Promise<void> {
+  const incomingFiles = new Set(
+    (await git(home, ['ls-tree', '-r', '--name-only', incoming])).split('\n').filter(Boolean),
+  )
+  const untracked = (await git(home, ['ls-files', '--others', '--exclude-standard'])).split('\n').filter(Boolean)
+  for (const file of untracked) {
+    if (!incomingFiles.has(file)) continue
+    await rm(join(home, file), { force: true })
   }
 }
 
@@ -140,7 +152,8 @@ export async function applyUpdate(
       state.lastCheckedAt = new Date().toISOString()
       return updateStatus()
     }
-    await git(config.homeDir, ['reset', '--hard', 'FETCH_HEAD'])
+    await clearIncomingUntracked(config.homeDir, incoming)
+    await git(config.homeDir, ['reset', '--hard', incoming])
     await git(config.homeDir, ['checkout', '-B', 'main'])
     await npm(join(config.homeDir, 'app'), ['install'])
     await npm(join(config.homeDir, 'server'), ['install'])

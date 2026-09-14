@@ -94,8 +94,9 @@ INSTALL="$(cd "$INSTALL" && pwd)"
 
 if [ -d "$INSTALL/.git" ] && [ -f "$INSTALL/server/package.json" ]; then
   say "Using existing clone at $INSTALL"
-  git -C "$INSTALL" fetch origin main >/dev/null 2>&1 || true
-  git -C "$INSTALL" merge --ff-only origin/main >/dev/null 2>&1 || true
+  git -C "$INSTALL" fetch origin main >/dev/null 2>&1 || git -C "$INSTALL" fetch "$REPO" main >/dev/null 2>&1 || true
+  rm -f "$INSTALL/storebase"
+  git -C "$INSTALL" reset --hard FETCH_HEAD >/dev/null 2>&1 || git -C "$INSTALL" merge --ff-only origin/main >/dev/null 2>&1 || true
 else
   need_cmd git || err "git is required"
   if [ -n "$(ls -A "$INSTALL" 2>/dev/null || true)" ]; then
