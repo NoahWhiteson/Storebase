@@ -3,7 +3,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { formatBytes } from '@/lib/format'
 import { submitSetup, type DiskInfo } from '@/lib/setup'
-import { useMemo, useState, type KeyboardEvent, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type KeyboardEvent, type ReactNode } from 'react'
 
 type ExtraUser = {
   key: string
@@ -17,6 +17,21 @@ const fieldClass =
 
 function bytesToGb(bytes: number): number {
   return bytes / 1024 ** 3
+}
+
+function gbToBytes(gb: number): number {
+  return gb * 1024 ** 3
+}
+
+function prettyGb(gb: number): string {
+  if (gb >= 100) return gb.toFixed(0)
+  if (gb >= 10) return gb.toFixed(1)
+  return gb.toFixed(1)
+}
+
+function clamp(n: number, min: number, max: number): number {
+  if (!Number.isFinite(n)) return min
+  return Math.min(max, Math.max(min, n))
 }
 
 type Phase =
@@ -51,9 +66,6 @@ export function Onboarding({
   const [draft, setDraft] = useState<ExtraUser>({ key: '', name: '', email: '', password: '' })
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-
-  const remaining = disk.freeBytes - reserveGb * 1024 ** 3
-  const usedPct = maxGb > 0 ? Math.min(100, (reserveGb / maxGb) * 100) : 0
 
   const extraPayload = useMemo(
     () =>
@@ -170,7 +182,11 @@ export function Onboarding({
         <span className="text-[20px] font-medium tracking-tight">Storebase</span>
       </header>
 
-      <main className="mx-auto flex w-full max-w-lg flex-1 flex-col justify-center px-5 pb-16">
+      <main
+        className={`mx-auto flex w-full flex-1 flex-col justify-center px-5 pb-16 ${
+          phase === 'storage' ? 'max-w-xl' : 'max-w-lg'
+        }`}
+      >
         {phase === 'name' ? (
           <Question title="Admin name" hint="This account owns the node.">
             <Input
@@ -228,40 +244,16 @@ export function Onboarding({
 
         {phase === 'storage' ? (
           <Question
-            title="How much storage should Storebase use?"
-            hint={`${formatBytes(disk.totalBytes)} on this machine, ${formatBytes(disk.freeBytes)} free. Storebase will not write past this reserve.`}
+            title="How much storage?"
+            hint="Hard cap for this node. The rest of the disk stays for the OS and everything else."
           >
-            <div className="rounded-2xl bg-white/[0.04] px-4 py-5">
-              <div className="flex items-center justify-end gap-2">
-                <Input
-                  autoFocus
-                  type="number"
-                  min={0.1}
-                  max={maxGb}
-                  step={0.1}
-                  value={Number(reserveGb.toFixed(1))}
-                  onChange={(e) => setReserveGb(Number(e.target.value))}
-                  onKeyDown={onEnter}
-                  className="h-10 w-28 rounded-xl border-0 bg-[#242424] text-right outline-none focus-visible:ring-0"
-                />
-                <span className="text-sm text-[#8d8d8d]">GB</span>
-              </div>
-              <input
-                type="range"
-                min={0.1}
-                max={maxGb}
-                step={0.1}
-                value={Math.min(reserveGb, maxGb)}
-                onChange={(e) => setReserveGb(Number(e.target.value))}
-                className="mt-4 w-full accent-white"
-              />
-              <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-white/10">
-                <div className="h-full bg-white" style={{ width: `${usedPct}%` }} />
-              </div>
-              <p className="mt-3 text-xs text-[#8d8d8d]">
-                {formatBytes(Math.max(0, remaining))} stays free after this reserve.
-              </p>
-            </div>
+            <StoragePicker
+              disk={disk}
+              maxGb={maxGb}
+              reserveGb={reserveGb}
+              onChange={(gb) => setReserveGb(clamp(gb, 0.1, maxGb))}
+              onEnter={onEnter}
+            />
           </Question>
         ) : null}
 
@@ -362,6 +354,191 @@ export function Onboarding({
           )}
         </div>
       </main>
+    </div>
+  )
+}
+
+function StoragePicker({
+  disk,
+  maxGb,
+  reserveGb,
+  onChange,
+  onEnter,
+}: {
+  disk: DiskInfo
+  maxGb: number
+  reserveGb: number
+  onChange: (gb: number) => void
+  onEnter: (e: KeyboardEvent) => void
+}) {
+  const [text, setText] = useState(prettyGb(reserveGb))
+  const [focused, setFocused] = useState(false)
+
+  useEffect(() => {
+    if (!focused) setText(prettyGb(reserveGb))
+  }, [focused, reserveGb])
+
+  const reservedBytes = gbToBytes(reserveGb)
+  const leftover = Math.max(0, disk.freeBytes - reservedBytes)
+  const occupied = Math.max(0, disk.totalBytes - disk.freeBytes)
+  const total = Math.max(1, disk.totalBytes)
+  const fillPct = maxGb > 0 ? (reserveGb / maxGb) * 100 : 0
+  const step = maxGb >= 100 ? 1 : 0.1
+  const tight = leftover < 2 * 1024 ** 3
+
+  const occupiedPct = (occupied / total) * 100
+  const reservedPct = (reservedBytes / total) * 100
+  const leftoverPct = (leftover / total) * 100
+
+  const presets = [
+    { label: '25%', gb: clamp(Math.round(maxGb * 0.25 * 10) / 10, 0.1, maxGb) },
+    { label: '50%', gb: clamp(Math.round(maxGb * 0.5 * 10) / 10, 0.1, maxGb) },
+    { label: '75%', gb: clamp(Math.round(maxGb * 0.75 * 10) / 10, 0.1, maxGb) },
+    { label: 'All free', gb: maxGb },
+  ].filter((preset, index, list) => list.findIndex((item) => Math.abs(item.gb - preset.gb) < 0.05) === index)
+
+  function commitText(raw: string) {
+    const parsed = Number(raw.replace(/[^\d.]/g, ''))
+    if (!Number.isFinite(parsed) || raw.trim() === '') {
+      setText(prettyGb(reserveGb))
+      return
+    }
+    onChange(clamp(Math.round(parsed * 10) / 10, 0.1, maxGb))
+  }
+
+  const shown = focused ? text : prettyGb(reserveGb)
+
+  return (
+    <div className="space-y-7">
+      <div>
+        <div className="flex items-end gap-2">
+          <input
+            aria-label="Reserve gigabytes"
+            type="text"
+            inputMode="decimal"
+            autoComplete="off"
+            spellCheck={false}
+            value={shown}
+            onFocus={() => {
+              setFocused(true)
+              setText(prettyGb(reserveGb))
+            }}
+            onBlur={() => {
+              commitText(text)
+              setFocused(false)
+            }}
+            onChange={(e) => {
+              const next = e.target.value
+              setText(next)
+              const parsed = Number(next)
+              if (Number.isFinite(parsed) && parsed > 0) {
+                onChange(clamp(Math.round(parsed * 10) / 10, 0.1, maxGb))
+              }
+            }}
+            onKeyDown={(e) => {
+              if (e.key !== 'Enter') return
+              commitText(text)
+              onEnter(e)
+            }}
+            className="bg-transparent p-0 font-medium tracking-tight tabular-nums outline-none"
+            style={{
+              width: `${Math.max(2, shown.length)}ch`,
+              fontSize: shown.length > 5 ? 56 : 72,
+              lineHeight: 1,
+            }}
+          />
+          <span className="mb-2 text-xl text-[#8d8d8d]">GB</span>
+        </div>
+        <p className="mt-2 text-sm text-[#8d8d8d]">
+          of {formatBytes(disk.freeBytes)} free · {formatBytes(disk.totalBytes)} disk
+        </p>
+      </div>
+
+      <div>
+        <div className="relative flex h-7 items-center">
+          <div className="pointer-events-none absolute inset-x-[11px] h-2 rounded-full bg-[#2a2a2a]">
+            <div className="h-full rounded-full bg-white" style={{ width: `${fillPct}%` }} />
+          </div>
+          <input
+            type="range"
+            min={0.1}
+            max={maxGb}
+            step={step}
+            value={reserveGb}
+            aria-valuemin={0.1}
+            aria-valuemax={maxGb}
+            aria-valuenow={reserveGb}
+            aria-label="Storage reserve"
+            onChange={(e) => onChange(Number(e.target.value))}
+            className="disk-slider relative z-10"
+          />
+        </div>
+        <div className="mt-1.5 flex justify-between text-[11px] text-[#6b6b6b]">
+          <span>0.1 GB</span>
+          <span>{prettyGb(maxGb)} GB max</span>
+        </div>
+      </div>
+
+      <div className="flex flex-wrap gap-2">
+        {presets.map((preset) => {
+          const active = Math.abs(preset.gb - reserveGb) < (step === 1 ? 0.51 : 0.05)
+          return (
+            <button
+              key={preset.label}
+              type="button"
+              onClick={() => onChange(preset.gb)}
+              className={`h-8 rounded-full px-3 text-sm ${
+                active
+                  ? 'bg-white text-[#1a1a1a]'
+                  : 'bg-white/[0.08] text-[#e8e8e8] hover:bg-white/[0.12]'
+              }`}
+            >
+              {preset.label}
+            </button>
+          )
+        })}
+      </div>
+
+      <div>
+        <p className="mb-2 text-[11px] tracking-wide text-[#6b6b6b] uppercase">This disk</p>
+        <div className="flex h-2.5 overflow-hidden rounded-full bg-[#2a2a2a]">
+          {occupiedPct > 0.2 ? (
+            <div className="bg-[#5a5a5a]" style={{ width: `${occupiedPct}%` }} />
+          ) : null}
+          <div className="bg-white" style={{ width: `${Math.max(0.6, reservedPct)}%` }} />
+          {leftoverPct > 0.2 ? (
+            <div className="bg-[#2f2f2f]" style={{ width: `${leftoverPct}%` }} />
+          ) : null}
+        </div>
+        <div className="mt-3 grid grid-cols-3 gap-3 text-xs">
+          <div>
+            <div className="mb-1 flex items-center gap-1.5 text-[#8d8d8d]">
+              <span className="size-2 rounded-full bg-[#5a5a5a]" />
+              Other
+            </div>
+            <div className="tabular-nums text-[#e8e8e8]">{formatBytes(occupied)}</div>
+          </div>
+          <div>
+            <div className="mb-1 flex items-center gap-1.5 text-[#8d8d8d]">
+              <span className="size-2 rounded-full bg-white" />
+              Storebase
+            </div>
+            <div className="tabular-nums text-[#e8e8e8]">{formatBytes(reservedBytes)}</div>
+          </div>
+          <div>
+            <div className="mb-1 flex items-center gap-1.5 text-[#8d8d8d]">
+              <span className="size-2 rounded-full bg-[#2f2f2f] ring-1 ring-white/15" />
+              Left free
+            </div>
+            <div className="tabular-nums text-[#e8e8e8]">{formatBytes(leftover)}</div>
+          </div>
+        </div>
+        {tight ? (
+          <p className="mt-3 text-sm text-[#e8c07d]">
+            That’s almost all free space. Leave a little for the OS.
+          </p>
+        ) : null}
+      </div>
     </div>
   )
 }
