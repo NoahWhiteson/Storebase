@@ -10,8 +10,8 @@
   --color-card-foreground: #e8e8e8;
   --color-popover: #2a2a2a;
   --color-popover-foreground: #e8e8e8;
-  --color-primary: #8ab4f8;
-  --color-primary-foreground: #0d1117;
+  --color-primary: #e8e8e8;
+  --color-primary-foreground: #1a1a1a;
   --color-secondary: #2c2c2c;
   --color-secondary-foreground: #e8e8e8;
   --color-muted: #262626;
@@ -21,7 +21,7 @@
   --color-destructive: #f28b82;
   --color-border: #333333;
   --color-input: #333333;
-  --color-ring: #8ab4f8;
+  --color-ring: #e8e8e8;
   --radius-sm: 0.375rem;
   --radius-md: 0.5rem;
   --radius-lg: 0.75rem;

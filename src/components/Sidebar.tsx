@@ -9,7 +9,6 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Progress } from '@/components/ui/progress'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { Separator } from '@/components/ui/separator'
 import { formatBytes } from '@/lib/format'
 import type { FileKind, SectionId } from '@/types'
 import { cn } from 'cn'
@@ -68,22 +67,22 @@ export function Sidebar({
   const usedPct = Math.min(100, Math.round((usedBytes / quotaBytes) * 100))
 
   const body = (
-    <div className="flex h-full w-[272px] shrink-0 flex-col bg-background">
+    <div className="flex h-full w-[256px] shrink-0 flex-col bg-[#1a1a1a]">
       <div className="flex items-center justify-between px-4 pt-3 pb-1 md:hidden">
         <div className="flex items-center gap-2.5">
           <StorebaseLogo className="size-7" />
-          <span className="text-[20px] font-medium tracking-tight text-[#e3e3e3]">Storebase</span>
+          <span className="text-[20px] font-medium tracking-tight text-white">Storebase</span>
         </div>
         <Button variant="ghost" size="icon" onClick={onCloseMobile} aria-label="Close menu">
           <X />
         </Button>
       </div>
 
-      <div className="px-4 pt-3 pb-2">
+      <div className="px-4 pt-2 pb-3">
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <button className="flex h-14 w-[118px] items-center gap-3 rounded-2xl bg-[#e3e3e3] px-4 text-[15px] font-medium text-[#1f1f1f] shadow-[0_1px_3px_rgba(0,0,0,0.4)] transition hover:shadow-[0_2px_8px_rgba(0,0,0,0.45)]">
-              <Plus className="size-6" strokeWidth={1.75} />
+            <button className="flex h-12 items-center gap-3 rounded-2xl bg-white px-5 text-[15px] font-medium text-[#1a1a1a] transition hover:bg-[#f2f2f2]">
+              <Plus className="size-5" strokeWidth={2} />
               New
             </button>
           </DropdownMenuTrigger>
@@ -114,7 +113,7 @@ export function Sidebar({
         </DropdownMenu>
       </div>
 
-      <ScrollArea className="flex-1 px-2">
+      <ScrollArea className="flex-1 px-3">
         <nav className="flex flex-col gap-0.5 py-1">
           {nav.map((item) => {
             const Icon = item.icon
@@ -127,8 +126,8 @@ export function Sidebar({
                 className={cn(
                   'flex h-10 items-center gap-3 rounded-full px-4 text-sm font-medium transition-colors',
                   active
-                    ? 'bg-[#394457] text-[#d3e3fd]'
-                    : 'text-[#c4c7c5] hover:bg-[#2c2c2c]',
+                    ? 'bg-white/10 text-white'
+                    : 'text-[#b3b3b3] hover:bg-white/5 hover:text-white',
                 )}
               >
                 <Icon className="size-[18px]" strokeWidth={active ? 2 : 1.75} />
@@ -139,20 +138,19 @@ export function Sidebar({
         </nav>
       </ScrollArea>
 
-      <Separator />
       <div className="px-5 py-4">
-        <div className="mb-2 flex items-center gap-3 text-sm font-medium text-[#c4c7c5]">
+        <div className="mb-2 flex items-center gap-3 text-sm font-medium text-[#b3b3b3]">
           <HardDrive className="size-[18px]" />
           Storage
         </div>
-        <Progress value={usedPct} className="h-1 bg-[#3c4043]" />
-        <p className="mt-2 text-xs text-muted-foreground">
+        <Progress value={usedPct} className="h-1 bg-white/10" />
+        <p className="mt-2 text-xs text-[#8d8d8d]">
           {formatBytes(usedBytes)} of {formatBytes(quotaBytes)} used
         </p>
         <Button
           variant="outline"
           size="sm"
-          className="mt-3 h-8 rounded-full border-[#8ab4f8]/40 text-[#8ab4f8] hover:bg-[#8ab4f8]/10 hover:text-[#8ab4f8]"
+          className="mt-3 h-8 rounded-full border-white/20 bg-transparent text-white hover:bg-white/10 hover:text-white"
         >
           Get more storage
         </Button>
@@ -171,7 +169,7 @@ export function Sidebar({
             aria-label="Close sidebar"
             onClick={onCloseMobile}
           />
-          <div className="relative z-10 h-full shadow-2xl">{body}</div>
+          <div className="relative z-10 h-full bg-[#1a1a1a]">{body}</div>
         </div>
       ) : null}
     </>

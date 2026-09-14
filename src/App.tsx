@@ -1,4 +1,3 @@
-import { DetailsPanel } from '@/components/DetailsPanel'
 import { FileGlyph } from '@/components/FileGlyph'
 import { FileView } from '@/components/FileView'
 import { Sidebar } from '@/components/Sidebar'
@@ -52,7 +51,6 @@ export default function App() {
   const [search, setSearch] = useState('')
   const [view, setView] = useState<'grid' | 'list'>('grid')
   const [selectedIds, setSelectedIds] = useState<string[]>([])
-  const [detailsOpen, setDetailsOpen] = useState(true)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
   const [dialog, setDialog] = useState<null | { mode: 'create' | 'rename'; id?: string }>(null)
@@ -122,8 +120,6 @@ export default function App() {
     [items],
   )
 
-  const selected = selectedIds.map((id) => byId.get(id)).filter((item): item is DriveItem => Boolean(item))
-  const active = selected[selected.length - 1] ?? null
   const usedBytes = items.reduce((sum, item) => (item.trashed ? sum : sum + (item.size ?? 0)), 0)
 
   function notify(message: string) {
@@ -296,23 +292,17 @@ export default function App() {
   const heading =
     search.trim() ? `Results for "${search.trim()}"` : folderId ? crumbs[crumbs.length - 1]?.name ?? titles[section] : titles[section]
 
-  const location = crumbs.length
-    ? [section === 'computers' ? 'Computers' : 'My files', ...crumbs.map((c) => c.name)].join(' / ')
-    : titles[section]
-
   return (
-    <div className="flex h-full min-h-0 flex-col bg-background text-foreground">
+    <div className="flex h-full min-h-0 flex-col bg-[#1a1a1a] text-foreground">
       <TopBar
         search={search}
         view={view}
-        detailsOpen={detailsOpen}
         files={items}
         onSearch={setSearch}
         onView={setView}
-        onToggleDetails={() => setDetailsOpen((v) => !v)}
         onOpenSidebar={() => setSidebarOpen(true)}
       />
-      <div className="flex min-h-0 flex-1">
+      <div className="flex min-h-0 flex-1 bg-[#1a1a1a]">
         <Sidebar
           section={section}
           usedBytes={usedBytes}
@@ -327,9 +317,9 @@ export default function App() {
           onCreateFile={createUntitled}
           onUpload={() => uploadRef.current?.click()}
         />
-        <main className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-tl-2xl bg-[#202124]">
+        <main className="flex min-w-0 flex-1 flex-col overflow-hidden bg-[#1a1a1a]">
           <div
-            className="flex flex-col gap-4 overflow-y-auto p-4 md:p-6"
+            className="flex flex-col gap-6 overflow-y-auto px-4 py-4 md:px-6 md:py-5"
             onClick={() => setSelectedIds([])}
           >
             <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
@@ -372,7 +362,7 @@ export default function App() {
                       key={folder.id}
                       type="button"
                       onClick={() => openItem(folder)}
-                      className="flex min-w-[180px] items-center gap-3 rounded-xl bg-[#2c2c2c] px-3 py-3 text-left hover:bg-[#333]"
+                      className="flex min-w-[200px] items-center gap-3 rounded-xl px-3 py-3 text-left hover:bg-white/5"
                     >
                       <FileGlyph kind="folder" size="sm" />
                       <span className="truncate text-sm">{folder.name}</span>
@@ -402,16 +392,6 @@ export default function App() {
             />
           </div>
         </main>
-        {detailsOpen ? (
-          <div className="hidden h-full lg:flex">
-            <DetailsPanel
-              item={active}
-              location={active ? (active.parentId ? location : titles[section]) : location}
-              onClose={() => setDetailsOpen(false)}
-              onStar={star}
-            />
-          </div>
-        ) : null}
       </div>
 
       <input

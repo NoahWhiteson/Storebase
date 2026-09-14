@@ -60,7 +60,7 @@ export function AskAI({
       <DialogContent className="flex max-h-[min(640px,85vh)] flex-col gap-0 overflow-hidden p-0 sm:max-w-lg">
         <DialogHeader className="border-b border-border px-6 py-4">
           <DialogTitle className="flex items-center gap-2">
-            <Sparkles className="size-4 text-primary" />
+            <Sparkles className="size-4" />
             Ask AI
           </DialogTitle>
           <DialogDescription>Answers from the files currently in this Storebase.</DialogDescription>
@@ -72,7 +72,7 @@ export function AskAI({
                 key={message.id}
                 className={
                   message.role === 'user'
-                    ? 'ml-8 rounded-2xl rounded-br-md bg-[#394457] px-3.5 py-2.5 text-sm'
+                    ? 'ml-8 rounded-2xl rounded-br-md bg-white/10 px-3.5 py-2.5 text-sm'
                     : 'mr-8 whitespace-pre-wrap rounded-2xl rounded-bl-md bg-[#2c2c2c] px-3.5 py-2.5 text-sm'
                 }
               >
@@ -108,7 +108,7 @@ export function AskAI({
               placeholder="Ask about your files"
               className="h-10"
             />
-            <Button type="submit" className="h-10" disabled={!draft.trim()}>
+            <Button type="submit" className="h-10 bg-white text-[#1a1a1a] hover:bg-[#f2f2f2]" disabled={!draft.trim()}>
               Ask
             </Button>
           </form>

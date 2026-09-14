@@ -42,97 +42,127 @@ export function FileView({
   onRestore,
 }: FileViewProps) {
   if (items.length === 0) {
+    return <EmptyState section={section} search={search} />
+  }
+
+  const folders = items.filter((item) => item.kind === 'folder')
+  const files = items.filter((item) => item.kind !== 'folder')
+  const showSplit = view === 'grid' && folders.length > 0 && files.length > 0
+
+  const menu = {
+    onOpen,
+    onStar,
+    onShare,
+    onRename,
+    onTrash,
+    onRestore,
+  }
+
+  if (view === 'list') {
     return (
-      <EmptyState section={section} search={search} />
+      <div>
+        <div className="hidden grid-cols-[minmax(0,2fr)_140px_160px_100px] gap-3 px-3 py-2 text-xs font-medium text-[#8d8d8d] md:grid">
+          <span>Name</span>
+          <span>Owner</span>
+          <span>Date modified</span>
+          <span className="text-right">File size</span>
+        </div>
+        {items.map((item) => (
+          <ItemMenu key={item.id} item={item} {...menu}>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation()
+                onSelect(item.id, e.metaKey || e.ctrlKey)
+              }}
+              onDoubleClick={() => onOpen(item)}
+              className={cn(
+                'grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-full px-3 py-2.5 text-left hover:bg-white/5 md:grid-cols-[minmax(0,2fr)_140px_160px_100px]',
+                selectedIds.includes(item.id) && 'bg-white/10 hover:bg-white/10',
+              )}
+            >
+              <span className="flex min-w-0 items-center gap-3">
+                <FileGlyph kind={item.kind} size="sm" />
+                <span className="truncate text-sm">{item.name}</span>
+                {item.starred ? <Star className="size-3.5 shrink-0 fill-[#fdd663] text-[#fdd663]" /> : null}
+              </span>
+              <span className="hidden truncate text-sm text-[#8d8d8d] md:block">{item.owner}</span>
+              <span className="hidden text-sm text-[#8d8d8d] md:block">{formatDate(item.modifiedAt)}</span>
+              <span className="text-right text-sm text-[#8d8d8d]">
+                {item.kind === 'folder' ? '—' : formatBytes(item.size)}
+              </span>
+            </button>
+          </ItemMenu>
+        ))}
+      </div>
     )
   }
 
-  return view === 'grid' ? (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
-      {items.map((item) => (
-        <ItemMenu
-          key={item.id}
-          item={item}
-          onOpen={onOpen}
-          onStar={onStar}
-          onShare={onShare}
-          onRename={onRename}
-          onTrash={onTrash}
-          onRestore={onRestore}
-        >
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation()
-              onSelect(item.id, e.metaKey || e.ctrlKey)
-            }}
-            onDoubleClick={() => onOpen(item)}
-            className={cn(
-              'flex w-full flex-col items-stretch rounded-xl border border-transparent bg-[#222222] p-3 text-left transition hover:bg-[#2a2a2a]',
-              selectedIds.includes(item.id) && 'border-[#8ab4f8]/40 bg-[#394457]',
-            )}
-          >
-            <div className="flex h-28 items-center justify-center rounded-lg bg-[#1a1a1a]/60">
-              <FileGlyph kind={item.kind} size="lg" />
-            </div>
-            <div className="mt-3 flex items-start gap-2">
-              <FileGlyph kind={item.kind} size="sm" />
-              <div className="min-w-0">
-                <div className="truncate text-sm font-medium">{item.name}</div>
-                <div className="truncate text-xs text-muted-foreground">
-                  {item.kind === 'folder' ? 'Folder' : formatDate(item.modifiedAt)}
-                </div>
-              </div>
-              {item.starred ? <Star className="ml-auto size-3.5 shrink-0 fill-[#fdd663] text-[#fdd663]" /> : null}
-            </div>
-          </button>
-        </ItemMenu>
-      ))}
-    </div>
-  ) : (
-    <div className="overflow-hidden rounded-xl border border-[#2e2e2e]">
-      <div className="hidden grid-cols-[minmax(0,2fr)_140px_160px_100px] gap-3 border-b border-[#2e2e2e] px-4 py-2 text-xs font-medium text-muted-foreground md:grid">
-        <span>Name</span>
-        <span>Owner</span>
-        <span>Date modified</span>
-        <span className="text-right">Size</span>
-      </div>
-      {items.map((item) => (
-        <ItemMenu
-          key={item.id}
-          item={item}
-          onOpen={onOpen}
-          onStar={onStar}
-          onShare={onShare}
-          onRename={onRename}
-          onTrash={onTrash}
-          onRestore={onRestore}
-        >
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation()
-              onSelect(item.id, e.metaKey || e.ctrlKey)
-            }}
-            onDoubleClick={() => onOpen(item)}
-            className={cn(
-              'grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-b border-[#2e2e2e] px-4 py-2.5 text-left last:border-0 hover:bg-[#242424] md:grid-cols-[minmax(0,2fr)_140px_160px_100px]',
-              selectedIds.includes(item.id) && 'bg-[#394457] hover:bg-[#394457]',
-            )}
-          >
-            <span className="flex min-w-0 items-center gap-3">
-              <FileGlyph kind={item.kind} size="sm" />
-              <span className="truncate text-sm">{item.name}</span>
-              {item.starred ? <Star className="size-3.5 shrink-0 fill-[#fdd663] text-[#fdd663]" /> : null}
-            </span>
-            <span className="hidden truncate text-sm text-muted-foreground md:block">{item.owner}</span>
-            <span className="hidden text-sm text-muted-foreground md:block">{formatDate(item.modifiedAt)}</span>
-            <span className="text-right text-sm text-muted-foreground">
-              {item.kind === 'folder' ? '—' : formatBytes(item.size)}
-            </span>
-          </button>
-        </ItemMenu>
-      ))}
+  return (
+    <div className="flex flex-col gap-8">
+      {folders.length > 0 ? (
+        <section>
+          {showSplit ? <h2 className="mb-3 text-sm font-medium text-[#8d8d8d]">Folders</h2> : null}
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+            {folders.map((item) => (
+              <ItemMenu key={item.id} item={item} {...menu}>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onSelect(item.id, e.metaKey || e.ctrlKey)
+                  }}
+                  onDoubleClick={() => onOpen(item)}
+                  className={cn(
+                    'flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left hover:bg-white/5',
+                    selectedIds.includes(item.id) && 'bg-white/10 hover:bg-white/10',
+                  )}
+                >
+                  <FileGlyph kind="folder" size="sm" />
+                  <span className="min-w-0 flex-1 truncate text-sm font-medium">{item.name}</span>
+                  {item.starred ? <Star className="size-3.5 shrink-0 fill-[#fdd663] text-[#fdd663]" /> : null}
+                </button>
+              </ItemMenu>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      {files.length > 0 ? (
+        <section>
+          {showSplit ? <h2 className="mb-3 text-sm font-medium text-[#8d8d8d]">Files</h2> : null}
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
+            {files.map((item) => (
+              <ItemMenu key={item.id} item={item} {...menu}>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onSelect(item.id, e.metaKey || e.ctrlKey)
+                  }}
+                  onDoubleClick={() => onOpen(item)}
+                  className={cn(
+                    'flex w-full flex-col items-stretch rounded-xl p-2 text-left hover:bg-white/5',
+                    selectedIds.includes(item.id) && 'bg-white/10 hover:bg-white/10',
+                  )}
+                >
+                  <div className="flex h-28 items-center justify-center rounded-lg bg-white/[0.04]">
+                    <FileGlyph kind={item.kind} size="lg" />
+                  </div>
+                  <div className="mt-3 flex items-start gap-2 px-1 pb-1">
+                    <FileGlyph kind={item.kind} size="sm" />
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-medium">{item.name}</div>
+                      <div className="truncate text-xs text-[#8d8d8d]">{formatDate(item.modifiedAt)}</div>
+                    </div>
+                    {item.starred ? <Star className="ml-auto size-3.5 shrink-0 fill-[#fdd663] text-[#fdd663]" /> : null}
+                  </div>
+                </button>
+              </ItemMenu>
+            ))}
+          </div>
+        </section>
+      ) : null}
     </div>
   )
 }
@@ -225,10 +255,10 @@ function EmptyState({ section, search }: { section: SectionId; search: string })
   }
 
   return (
-    <div className="flex min-h-[320px] flex-col items-center justify-center rounded-xl border border-dashed border-[#333] px-6 text-center">
+    <div className="flex min-h-[320px] flex-col items-center justify-center px-6 text-center">
       <FileGlyph kind="folder" size="lg" />
       <h2 className="mt-4 text-lg font-medium">{title}</h2>
-      <p className="mt-1 max-w-sm text-sm text-muted-foreground">{body}</p>
+      <p className="mt-1 max-w-sm text-sm text-[#8d8d8d]">{body}</p>
     </div>
   )
 }

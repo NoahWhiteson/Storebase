@@ -17,35 +17,31 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import type { DriveItem } from '@/types'
-import { Grid2x2, Info, List, Menu, Search, Settings, Sparkles } from 'lucide-react'
+import { Grid2x2, List, Menu, Search, Settings, Sparkles } from 'lucide-react'
 import { useState } from 'react'
 
 type TopBarProps = {
   search: string
   view: 'grid' | 'list'
-  detailsOpen: boolean
   files: DriveItem[]
   onSearch: (value: string) => void
   onView: (view: 'grid' | 'list') => void
-  onToggleDetails: () => void
   onOpenSidebar: () => void
 }
 
 export function TopBar({
   search,
   view,
-  detailsOpen,
   files,
   onSearch,
   onView,
-  onToggleDetails,
   onOpenSidebar,
 }: TopBarProps) {
   const [askOpen, setAskOpen] = useState(false)
 
   return (
-    <header className="flex h-16 shrink-0 items-center">
-      <div className="flex h-full w-auto shrink-0 items-center gap-2 px-3 md:w-[272px] md:gap-2.5 md:px-4">
+    <header className="flex h-16 shrink-0 items-center bg-[#1a1a1a]">
+      <div className="flex h-full w-auto shrink-0 items-center gap-2 px-3 md:w-[256px] md:gap-2.5 md:px-4">
         <Button
           variant="ghost"
           size="icon"
@@ -56,17 +52,17 @@ export function TopBar({
           <Menu />
         </Button>
         <StorebaseLogo className="size-8" />
-        <span className="text-[20px] font-medium tracking-tight text-[#e3e3e3]">Storebase</span>
+        <span className="text-[20px] font-medium tracking-tight text-white">Storebase</span>
       </div>
 
-      <div className="flex h-full min-w-0 flex-1 items-center gap-2 px-3 md:gap-3 md:pr-4 md:pl-6">
-        <div className="relative flex h-10 min-w-0 flex-1 items-center">
-          <Search className="pointer-events-none absolute left-3.5 size-4 text-muted-foreground" />
+      <div className="flex h-full min-w-0 flex-1 items-center gap-2 px-3 md:gap-3 md:pr-4 md:pl-2">
+        <div className="relative flex h-12 min-w-0 flex-1 items-center">
+          <Search className="pointer-events-none absolute left-4 size-[18px] text-[#9a9a9a]" />
           <Input
             value={search}
             onChange={(e) => onSearch(e.target.value)}
             placeholder="Search in Storebase"
-            className="h-10 rounded-full border-0 bg-[#2c2c2c] pl-11 text-sm shadow-none placeholder:text-[#9aa0a6] focus-visible:ring-1 focus-visible:ring-[#8ab4f8]/40"
+            className="h-12 rounded-full border-0 bg-[#242424] pl-12 text-[15px] shadow-none placeholder:text-[#8d8d8d] focus-visible:bg-[#2a2a2a] focus-visible:ring-1 focus-visible:ring-white/15"
           />
         </div>
 
@@ -75,9 +71,9 @@ export function TopBar({
           variant="secondary"
           aria-label="Ask AI"
           onClick={() => setAskOpen(true)}
-          className="h-10 shrink-0 rounded-full bg-[#2c2c2c] px-3 text-sm font-medium text-foreground hover:bg-[#333] md:px-4"
+          className="h-10 shrink-0 rounded-full bg-[#242424] px-3 text-sm font-medium text-white hover:bg-[#2e2e2e] md:px-4"
         >
-          <Sparkles className="size-4 text-primary" />
+          <Sparkles className="size-4" />
           <span className="hidden sm:inline">Ask AI</span>
         </Button>
 
@@ -98,20 +94,6 @@ export function TopBar({
           </Tooltip>
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className={detailsOpen ? 'size-10 bg-[#2c2c2c]' : 'size-10'}
-                aria-label="View details"
-                onClick={onToggleDetails}
-              >
-                <Info />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>View details</TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
               <Button variant="ghost" size="icon" className="size-10" aria-label="Settings">
                 <Settings />
               </Button>
@@ -120,9 +102,9 @@ export function TopBar({
           </Tooltip>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <button className="ml-1 rounded-full outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring">
+              <button className="ml-1 rounded-full outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-white/30">
                 <Avatar>
-                  <AvatarFallback className="bg-[#394457] text-sm font-medium text-[#d3e3fd]">
+                  <AvatarFallback className="bg-[#2a2a2a] text-sm font-medium text-white">
                     NW
                   </AvatarFallback>
                 </Avatar>

@@ -19,7 +19,7 @@ npm run preview
 ## What it does
 
 - Sidebar: Home, My files, Computers, Shared, Recent, Starred, Spam, Trash, storage meter
-- Search, Ask AI, grid/list toggle, details panel
+- Search, Ask AI, grid/list toggle
 - Open folders, star, share, rename, trash/restore, new folder, local file upload (stays in memory)
 - Right-click context menus
 
