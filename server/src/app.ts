@@ -82,7 +82,13 @@ export function createApp(config: ServerConfig) {
 
   app.onError((err, c) => {
     const message = err instanceof Error ? err.message : 'Server error'
-    const status = message.includes('escapes') || message.includes('Refusing') ? 400 : 500
+    if (message.includes('escapes') || message.includes('Refusing')) {
+      return c.json({ error: message }, 400)
+    }
+    if (message.includes('ENOENT') || message.includes('no such file')) {
+      return c.json({ error: 'Not found' }, 404)
+    }
+    const status = 500
     return c.json({ error: message }, status)
   })
 
