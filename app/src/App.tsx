@@ -12,10 +12,23 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
-import { initialItems } from '@/data/files'
+import {
+  downloadUrl,
+  initials,
+  listFiles,
+  logout,
+  mkdir,
+  renameFile,
+  restoreFile,
+  starFile,
+  toDriveItem,
+  trashFile,
+  uploadFile,
+  type FileEntry,
+} from '@/lib/api'
 import type { DriveItem, FileKind, SectionId } from '@/types'
 import { ChevronRight } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 const titles: Record<SectionId, string> = {
   home: 'Welcome to Storebase',
@@ -28,43 +41,36 @@ const titles: Record<SectionId, string> = {
   trash: 'Trash',
 }
 
-function kindFromName(name: string): FileKind {
-  const ext = name.split('.').pop()?.toLowerCase() ?? ''
-  if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'].includes(ext)) return 'image'
-  if (['mp4', 'mov', 'webm'].includes(ext)) return 'video'
-  if (['mp3', 'wav', 'aac'].includes(ext)) return 'audio'
-  if (['xls', 'xlsx', 'csv'].includes(ext)) return 'sheet'
-  if (['ppt', 'pptx'].includes(ext)) return 'slide'
-  if (ext === 'pdf') return 'pdf'
-  if (['zip', 'rar', '7z'].includes(ext)) return 'zip'
-  if (['doc', 'docx', 'txt', 'md'].includes(ext)) return 'doc'
-  return 'doc'
-}
-
 type Account = {
+  id: string
   name: string
   email: string
+  role: 'admin' | 'user'
   reservedBytes: number
+  usedBytes: number
+  host: string
 }
 
-function initials(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean)
-  if (parts.length === 0) return '?'
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase()
-  return `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase()
+function joinPath(dir: string, name: string): string {
+  return dir ? `${dir}/${name}` : name
 }
 
-export default function App({ account }: { account: Account }) {
+export default function App({ account, onSignedOut }: { account: Account; onSignedOut: () => void }) {
   const me = { owner: account.name, ownerInitials: initials(account.name) }
   const quota = account.reservedBytes > 0 ? account.reservedBytes : 100 * 1024 ** 3
-  const [items, setItems] = useState<DriveItem[]>(initialItems)
+  const [items, setItems] = useState<DriveItem[]>([])
+  const [suggested, setSuggested] = useState<DriveItem[]>([])
+  const [usedBytes, setUsedBytes] = useState(account.usedBytes)
+  const [host, setHost] = useState(account.host)
   const [section, setSection] = useState<SectionId>('home')
-  const [folderId, setFolderId] = useState<string | null>(null)
+  const [folderPath, setFolderPath] = useState('')
   const [search, setSearch] = useState('')
   const [view, setView] = useState<'grid' | 'list'>('grid')
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [dialog, setDialog] = useState<null | { mode: 'create' | 'rename'; id?: string }>(null)
   const [nameDraft, setNameDraft] = useState('')
   const uploadRef = useRef<HTMLInputElement>(null)
@@ -75,64 +81,64 @@ export default function App({ account }: { account: Account }) {
     return () => window.clearTimeout(t)
   }, [toast])
 
-  const byId = useMemo(() => new Map(items.map((item) => [item.id, item])), [items])
-
   const crumbs = useMemo(() => {
-    const path: DriveItem[] = []
-    let cursor = folderId
-    while (cursor) {
-      const node = byId.get(cursor)
-      if (!node) break
-      path.unshift(node)
-      cursor = node.parentId
-    }
-    return path
-  }, [byId, folderId])
+    if (!folderPath) return []
+    const parts = folderPath.split('/')
+    return parts.map((name, i) => ({
+      id: parts.slice(0, i + 1).join('/'),
+      name,
+    }))
+  }, [folderPath])
 
-  const visible = useMemo(() => {
-    const q = search.trim().toLowerCase()
-    let list = items.filter((item) => {
+  const refresh = useCallback(async () => {
+    setLoadError(null)
+    setLoading(true)
+    try {
+      const q = search.trim()
+      let entries: FileEntry[]
       if (q) {
-        if (item.trashed || item.spam) return false
-        return item.name.toLowerCase().includes(q)
+        entries = await listFiles({ view: 'search', q })
+      } else if (section === 'trash') {
+        entries = await listFiles({ view: 'trash' })
+      } else if (section === 'starred') {
+        entries = await listFiles({ view: 'starred' })
+      } else if (section === 'recent' || section === 'home') {
+        entries = await listFiles({ view: 'recent' })
+      } else if (section === 'shared' || section === 'spam') {
+        entries = []
+      } else if (section === 'computers' && !folderPath) {
+        entries = []
+      } else {
+        entries = await listFiles({ path: folderPath })
       }
-      if (section === 'trash') return item.trashed
-      if (section === 'spam') return item.spam && !item.trashed
-      if (item.trashed || item.spam) return false
-      if (section === 'starred') return item.starred
-      if (section === 'shared') return item.shared && item.owner !== me.owner
-      if (section === 'recent') return item.kind !== 'folder'
-      if (section === 'computers') {
-        if (folderId) return item.parentId === folderId
-        return item.computer && item.parentId === null
+      setItems(entries.map((entry) => toDriveItem(entry, { name: account.name })))
+      if (section === 'home' && !q) {
+        const root = await listFiles({ path: '' })
+        setSuggested(
+          root.filter((entry) => entry.type === 'folder').slice(0, 8).map((entry) => toDriveItem(entry, { name: account.name })),
+        )
+        if (entries.length === 0) {
+          const files = root.filter((entry) => entry.type === 'file')
+          setItems(files.map((entry) => toDriveItem(entry, { name: account.name })))
+        }
+      } else {
+        setSuggested([])
       }
-      if (section === 'home') return item.kind !== 'folder' && !item.computer
-      if (section === 'my-drive') {
-        if (item.computer) return false
-        if (item.parentId !== folderId) return false
-        return folderId !== null || item.owner === me.owner
-      }
-      return item.parentId === folderId
-    })
-
-    if (section === 'recent' || section === 'home') {
-      list = [...list].sort((a, b) => +new Date(b.modifiedAt) - +new Date(a.modifiedAt)).slice(0, 18)
-    } else {
-      list = [...list].sort((a, b) => {
-        if (a.kind === 'folder' && b.kind !== 'folder') return -1
-        if (a.kind !== 'folder' && b.kind === 'folder') return 1
-        return a.name.localeCompare(b.name)
-      })
+      const status = await fetch('/api/status', { credentials: 'include' }).then(
+        (res) => res.json() as Promise<{ usedBytes?: number; host?: string }>,
+      )
+      if (typeof status.usedBytes === 'number') setUsedBytes(status.usedBytes)
+      if (status.host) setHost(status.host)
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : 'Could not load files')
+    } finally {
+      setLoading(false)
     }
-    return list
-  }, [folderId, items, me.owner, search, section])
+  }, [account.name, folderPath, search, section])
 
-  const suggested = useMemo(
-    () => items.filter((item) => item.kind === 'folder' && !item.trashed && !item.spam && !item.computer && item.parentId === null).slice(0, 4),
-    [items],
-  )
-
-  const usedBytes = items.reduce((sum, item) => (item.trashed ? sum : sum + (item.size ?? 0)), 0)
+  useEffect(() => {
+    void refresh()
+  }, [refresh])
 
   function notify(message: string) {
     setToast(message)
@@ -140,7 +146,7 @@ export default function App({ account }: { account: Account }) {
 
   function goSection(id: SectionId) {
     setSection(id)
-    setFolderId(null)
+    setFolderPath('')
     setSelectedIds([])
     setSearch('')
     setSidebarOpen(false)
@@ -161,148 +167,166 @@ export default function App({ account }: { account: Account }) {
       return
     }
     if (item.kind === 'folder') {
-      setSection(item.computer ? 'computers' : 'my-drive')
-      setFolderId(item.id)
+      if (item.computer) {
+        setSection('my-drive')
+        setFolderPath('')
+        setSelectedIds([])
+        setSearch('')
+        return
+      }
+      setSection('my-drive')
+      setFolderPath(item.id)
       setSelectedIds([])
       setSearch('')
       return
     }
-    notify(`Opening ${item.name}`)
+    window.open(downloadUrl(item.id), '_blank')
   }
 
-  function patch(id: string, update: Partial<DriveItem>) {
-    setItems((current) => current.map((item) => (item.id === id ? { ...item, ...update } : item)))
-  }
-
-  function star(id: string) {
-    const item = byId.get(id)
+  async function star(id: string) {
+    const item = items.find((entry) => entry.id === id)
     if (!item) return
-    patch(id, { starred: !item.starred })
-    notify(item.starred ? `Removed star from ${item.name}` : `Starred ${item.name}`)
+    try {
+      await starFile(id, !item.starred)
+      notify(item.starred ? `Removed star from ${item.name}` : `Starred ${item.name}`)
+      await refresh()
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Could not star')
+    }
   }
 
-  function trash(id: string) {
-    const item = byId.get(id)
+  async function trash(id: string) {
+    const item = items.find((entry) => entry.id === id)
     if (!item) return
-    patch(id, { trashed: true, starred: false })
-    setSelectedIds((current) => current.filter((x) => x !== id))
-    notify(`Moved ${item.name} to trash`)
+    try {
+      await trashFile(id)
+      setSelectedIds((current) => current.filter((x) => x !== id))
+      notify(`Moved ${item.name} to trash`)
+      await refresh()
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Could not trash')
+    }
   }
 
-  function restore(id: string) {
-    const item = byId.get(id)
+  async function restore(id: string) {
+    const item = items.find((entry) => entry.id === id)
     if (!item) return
-    patch(id, { trashed: false, spam: false })
-    notify(`Restored ${item.name}`)
+    try {
+      await restoreFile(id)
+      notify(`Restored ${item.name}`)
+      await refresh()
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Could not restore')
+    }
   }
 
   function share(id: string) {
-    const item = byId.get(id)
+    const item = items.find((entry) => entry.id === id)
     if (!item) return
-    patch(id, { shared: true })
-    notify(`Link copied for ${item.name}`)
+    void navigator.clipboard?.writeText(`${window.location.origin}${downloadUrl(item.id)}`)
+    notify(`Link copied for ${item.name} — only works if you’re signed in`)
   }
 
   function openRename(id: string) {
-    const item = byId.get(id)
+    const item = items.find((entry) => entry.id === id)
     if (!item) return
     setNameDraft(item.name)
     setDialog({ mode: 'rename', id })
   }
 
-  function submitDialog() {
+  async function submitDialog() {
     const name = nameDraft.trim()
     if (!name) return
-    if (dialog?.mode === 'create') {
-      const id = crypto.randomUUID()
-      const now = new Date().toISOString()
-      const parent = section === 'my-drive' || section === 'computers' ? folderId : null
-      setItems((current) => [
-        {
-          id,
-          name,
+    try {
+      if (dialog?.mode === 'create') {
+        const path = joinPath(section === 'my-drive' ? folderPath : '', name)
+        await mkdir(path)
+        notify(`Created ${name}`)
+      }
+      if (dialog?.mode === 'rename' && dialog.id) {
+        await renameFile(dialog.id, name)
+        notify(`Renamed to ${name}`)
+      }
+      setDialog(null)
+      setNameDraft('')
+      await refresh()
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Could not save')
+    }
+  }
+
+  async function createUntitled(kind: FileKind) {
+    const names: Record<FileKind, string> = {
+      folder: 'Untitled folder',
+      doc: 'Untitled document.txt',
+      sheet: 'Untitled spreadsheet.csv',
+      slide: 'Untitled presentation.txt',
+      pdf: 'Untitled.pdf',
+      image: 'Untitled.txt',
+      video: 'Untitled.txt',
+      audio: 'Untitled.txt',
+      zip: 'Untitled.txt',
+    }
+    const dir = section === 'computers' ? '' : folderPath
+    try {
+      if (kind === 'folder') {
+        await mkdir(joinPath(dir, names.folder))
+      } else {
+        await uploadFile(dir, new File([''], names[kind]))
+      }
+      setSection('my-drive')
+      notify(`Created ${names[kind]}`)
+      await refresh()
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Could not create')
+    }
+  }
+
+  async function onUpload(files: FileList | null) {
+    if (!files?.length) return
+    const dir = section === 'computers' ? '' : folderPath
+    try {
+      for (const file of Array.from(files)) {
+        await uploadFile(dir, file)
+      }
+      setSection('my-drive')
+      notify(files.length === 1 ? `Uploaded ${files[0].name}` : `Uploaded ${files.length} files`)
+      await refresh()
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Upload failed')
+    }
+  }
+
+  async function signOut() {
+    await logout()
+    onSignedOut()
+  }
+
+  const computerItem: DriveItem | null =
+    section === 'computers' && !folderPath && !search.trim()
+      ? {
+          id: '__node__',
+          name: host || 'This node',
           kind: 'folder',
-          parentId: parent,
-          ...me,
-          modifiedAt: now,
+          parentId: null,
+          owner: account.name,
+          ownerInitials: me.ownerInitials,
+          modifiedAt: new Date().toISOString(),
           size: null,
           starred: false,
           shared: false,
           trashed: false,
           spam: false,
-          computer: section === 'computers',
-        },
-        ...current,
-      ])
-      notify(`Created ${name}`)
-    }
-    if (dialog?.mode === 'rename' && dialog.id) {
-      patch(dialog.id, { name, modifiedAt: new Date().toISOString() })
-      notify(`Renamed to ${name}`)
-    }
-    setDialog(null)
-    setNameDraft('')
-  }
+          computer: true,
+        }
+      : null
 
-  function createUntitled(kind: FileKind) {
-    const names: Record<FileKind, string> = {
-      folder: 'Untitled folder',
-      doc: 'Untitled document',
-      sheet: 'Untitled spreadsheet',
-      slide: 'Untitled presentation',
-      pdf: 'Untitled.pdf',
-      image: 'Untitled image',
-      video: 'Untitled video',
-      audio: 'Untitled audio',
-      zip: 'Untitled.zip',
-    }
-    const now = new Date().toISOString()
-    const parent = section === 'my-drive' || section === 'computers' ? folderId : null
-    const created: DriveItem = {
-      id: crypto.randomUUID(),
-      name: names[kind],
-      kind,
-      parentId: parent,
-      ...me,
-      modifiedAt: now,
-      size: kind === 'folder' ? null : 0,
-      starred: false,
-      shared: false,
-      trashed: false,
-      spam: false,
-      computer: section === 'computers',
-    }
-    setItems((current) => [created, ...current])
-    setSection(section === 'computers' ? 'computers' : 'my-drive')
-    setSelectedIds([created.id])
-    notify(`Created ${created.name}`)
-  }
-
-  function onUpload(files: FileList | null) {
-    if (!files?.length) return
-    const now = new Date().toISOString()
-    const parent = section === 'my-drive' || section === 'computers' ? folderId : null
-    const next: DriveItem[] = Array.from(files).map((file) => ({
-      id: crypto.randomUUID(),
-      name: file.name,
-      kind: kindFromName(file.name),
-      parentId: parent,
-      ...me,
-      modifiedAt: now,
-      size: file.size,
-      starred: false,
-      shared: false,
-      trashed: false,
-      spam: false,
-      computer: section === 'computers',
-    }))
-    setItems((current) => [...next, ...current])
-    setSection(parent ? (section === 'computers' ? 'computers' : 'my-drive') : 'my-drive')
-    notify(next.length === 1 ? `Uploaded ${next[0].name}` : `Uploaded ${next.length} files`)
-  }
-
-  const heading =
-    search.trim() ? `Results for "${search.trim()}"` : folderId ? crumbs[crumbs.length - 1]?.name ?? titles[section] : titles[section]
+  const visible = computerItem ? [computerItem] : items
+  const heading = search.trim()
+    ? `Results for "${search.trim()}"`
+    : folderPath
+      ? crumbs[crumbs.length - 1]?.name ?? titles[section]
+      : titles[section]
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-[#1a1a1a] text-foreground">
@@ -315,6 +339,7 @@ export default function App({ account }: { account: Account }) {
         onSearch={setSearch}
         onView={setView}
         onOpenSidebar={() => setSidebarOpen(true)}
+        onSignOut={() => void signOut()}
       />
       <div className="flex min-h-0 flex-1 bg-[#1a1a1a]">
         <Sidebar
@@ -328,7 +353,7 @@ export default function App({ account }: { account: Account }) {
             setNameDraft('')
             setDialog({ mode: 'create' })
           }}
-          onCreateFile={createUntitled}
+          onCreateFile={(kind) => void createUntitled(kind)}
           onUpload={() => uploadRef.current?.click()}
         />
         <main className="flex min-w-0 flex-1 flex-col overflow-hidden bg-[#1a1a1a]">
@@ -337,14 +362,10 @@ export default function App({ account }: { account: Account }) {
             onClick={() => setSelectedIds([])}
           >
             <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-              {folderId && !search.trim() ? (
+              {folderPath && !search.trim() ? (
                 <>
-                  <button
-                    type="button"
-                    className="hover:text-foreground"
-                    onClick={() => goSection(section === 'computers' ? 'computers' : 'my-drive')}
-                  >
-                    {section === 'computers' ? 'Computers' : 'My files'}
+                  <button type="button" className="hover:text-foreground" onClick={() => goSection('my-drive')}>
+                    My files
                   </button>
                   {crumbs.map((crumb, i) => (
                     <span key={crumb.id} className="flex items-center gap-2">
@@ -353,7 +374,7 @@ export default function App({ account }: { account: Account }) {
                         type="button"
                         className={i === crumbs.length - 1 ? 'font-medium text-foreground' : 'hover:text-foreground'}
                         onClick={() => {
-                          setFolderId(crumb.id)
+                          setFolderPath(crumb.id)
                           setSelectedIds([])
                         }}
                       >
@@ -367,7 +388,9 @@ export default function App({ account }: { account: Account }) {
               )}
             </div>
 
-            {section === 'home' && !search.trim() ? (
+            {loadError ? <p className="text-sm text-[#f28b82]">{loadError}</p> : null}
+
+            {section === 'home' && !search.trim() && suggested.length > 0 ? (
               <section>
                 <h2 className="mb-3 text-sm font-medium text-muted-foreground">Suggested folders</h2>
                 <div className="flex gap-3 overflow-x-auto pb-1">
@@ -390,20 +413,27 @@ export default function App({ account }: { account: Account }) {
               <h2 className="text-sm font-medium text-muted-foreground">Files</h2>
             ) : null}
 
-            <FileView
-              items={visible}
-              view={view}
-              section={section}
-              selectedIds={selectedIds}
-              search={search}
-              onSelect={select}
-              onOpen={openItem}
-              onStar={star}
-              onShare={share}
-              onRename={openRename}
-              onTrash={trash}
-              onRestore={restore}
-            />
+            {loading && items.length === 0 && !computerItem ? (
+              <p className="text-sm text-[#8d8d8d]">Loading your files…</p>
+            ) : (
+              <FileView
+                items={visible}
+                view={view}
+                section={section}
+                selectedIds={selectedIds}
+                search={search}
+                onSelect={select}
+                onOpen={openItem}
+                onStar={(id) => void star(id)}
+                onShare={share}
+                onRename={openRename}
+                onTrash={(id) => void trash(id)}
+                onRestore={(id) => void restore(id)}
+                onDownload={(item) => {
+                  window.open(downloadUrl(item.id), '_blank')
+                }}
+              />
+            )}
           </div>
         </main>
       </div>
@@ -414,7 +444,7 @@ export default function App({ account }: { account: Account }) {
         multiple
         className="hidden"
         onChange={(e) => {
-          onUpload(e.target.files)
+          void onUpload(e.target.files)
           e.target.value = ''
         }}
       />
@@ -424,7 +454,9 @@ export default function App({ account }: { account: Account }) {
           <DialogHeader>
             <DialogTitle>{dialog?.mode === 'rename' ? 'Rename' : 'New folder'}</DialogTitle>
             <DialogDescription>
-              {dialog?.mode === 'rename' ? 'Update the file name. Extension stays yours to keep or drop.' : 'Folders live in the current location.'}
+              {dialog?.mode === 'rename'
+                ? 'Update the file name. Extension stays yours to keep or drop.'
+                : 'Folders live in the current location.'}
             </DialogDescription>
           </DialogHeader>
           <Input
@@ -433,14 +465,14 @@ export default function App({ account }: { account: Account }) {
             placeholder="Untitled folder"
             onChange={(e) => setNameDraft(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter') submitDialog()
+              if (e.key === 'Enter') void submitDialog()
             }}
           />
           <DialogFooter>
             <Button variant="ghost" onClick={() => setDialog(null)}>
               Cancel
             </Button>
-            <Button onClick={submitDialog} disabled={!nameDraft.trim()}>
+            <Button onClick={() => void submitDialog()} disabled={!nameDraft.trim()}>
               {dialog?.mode === 'rename' ? 'Save' : 'Create'}
             </Button>
           </DialogFooter>

@@ -1,37 +1,52 @@
 # Storebase
 
-Install it on a machine you own. Pick how much disk to reserve. That box becomes your drive — open it from anywhere in the Storebase app.
+Self-hosted Drive. Install it on a machine you own, reserve disk, and every account gets a real profile with files that live on that node — not in the browser.
 
 ```
 app/       web client
-server/    node that turns a folder on this machine into the drive
+server/    node: per-user drives, auth, quota, auto-update
+install.sh one-command installer
 ```
 
-## Run
+## Install on another machine
 
-Server first, then the app.
-
-`npm start` is enough. If nobody has finished onboarding, the app sends you there: admin name/email/password, how much disk to reserve, optional extra users.
+That’s the path you want. One command, a few questions (directory, bind address, port, auto-update, firewall), then it clones, installs Node if needed, builds, opens the port, and starts the service.
 
 ```bash
-cd server
-npm install
-npm start
+curl -fsSL https://raw.githubusercontent.com/NoahWhiteson/Storebase/main/install.sh | bash
 ```
+
+Needs: `curl`, `git`, and either Node 20+ or network to download Node. Linux (systemd user service) and macOS (launchd) are supported.
+
+After it finishes:
+
+1. Open `http://127.0.0.1:<port>` on that machine, or `http://<lan-ip>:<port>` from another device if you bound `0.0.0.0`.
+2. First visit is onboarding: admin, storage cap, optional extra users. Each user gets their own drive under `data/drive/<userId>/`.
+3. Later visits are sign-in. Uploads, folders, trash, stars, and downloads hit the node.
+
+Helper (linked to `~/.local/bin/storebase`):
 
 ```bash
-cd app
-npm install
-npm run dev
+storebase status
+storebase logs
+storebase update
+storebase restart
 ```
 
-Default ports: app `43123`, server `4780`. Vite proxies `/api` to the server. Files live under `server/data/drive`. Passwords are stored as scrypt hashes in `server/data/users.json`.
+Auto-update (on if you said yes): the node checks GitHub `main` on boot and every 6 hours, fast-forwards, rebuilds, and restarts.
 
-## How it works
+## Dev on this repo
 
-1. You install Storebase on a computer with spare disk.
-2. First visit runs onboarding: admin account, storage reserve, optional extra users.
-3. The server serves that folder as your drive.
-4. The app is the client. Same UI at home or on the road, as long as it can reach the node.
+```bash
+cd server && npm install && npm start
+cd app && npm install && npm run dev
+```
 
-This repo is the UI plus a server framework: health, quota, directory listing, upload/download. Auth, remote access, and multi-node come next.
+App `43123`, API `4780`. Vite proxies `/api`. Production installs serve the built app from the node port directly.
+
+## How files work
+
+- Each signed-in user has an isolated folder on the node.
+- Quota is the reserve you picked at onboarding, shared across the machine.
+- Passwords are scrypt hashes in `data/users.json`. Sessions are httpOnly cookies.
+- Hidden `.trash` and `.storebase-meta.json` live in that user’s folder.

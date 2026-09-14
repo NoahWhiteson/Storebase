@@ -24,7 +24,7 @@ export type SetupState =
     }
 
 export async function fetchSetup(): Promise<SetupState> {
-  const res = await fetch('/api/setup')
+  const res = await fetch('/api/setup', { credentials: 'include' })
   if (!res.ok) throw new Error('Could not reach the Storebase node')
   return res.json() as Promise<SetupState>
 }
@@ -36,6 +36,7 @@ export async function submitSetup(payload: {
 }): Promise<{ admin: PublicUser; reservedBytes: number }> {
   const res = await fetch('/api/setup', {
     method: 'POST',
+    credentials: 'include',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(payload),
   })

@@ -1,5 +1,6 @@
-import { randomBytes, scrypt } from 'node:crypto'
-import { readFile, writeFile } from 'node:fs/promises'
+import { randomBytes, scrypt, timingSafeEqual } from 'node:crypto'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import { promisify } from 'node:util'
 import type { ServerConfig } from './config.ts'
 
@@ -62,6 +63,31 @@ export function findAdmin(users: UserRecord[]): UserRecord | undefined {
 
 export function validEmail(email: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizeEmail(email))
+}
+
+export function findByEmail(users: UserRecord[], email: string): UserRecord | undefined {
+  const needle = normalizeEmail(email)
+  return users.find((user) => user.email === needle)
+}
+
+export function findById(users: UserRecord[], id: string): UserRecord | undefined {
+  return users.find((user) => user.id === id)
+}
+
+export async function verifyPassword(user: UserRecord, password: string): Promise<boolean> {
+  const [saltHex, hashHex] = user.password.split(':')
+  if (!saltHex || !hashHex) return false
+  const salt = Buffer.from(saltHex, 'hex')
+  const expected = Buffer.from(hashHex, 'hex')
+  const actual = (await scryptAsync(password, salt, 64)) as Buffer
+  if (actual.length !== expected.length) return false
+  return timingSafeEqual(actual, expected)
+}
+
+export async function ensureUserDrive(config: ServerConfig, userId: string): Promise<string> {
+  const root = join(config.driveDir, userId)
+  await mkdir(root, { recursive: true })
+  return root
 }
 
 export async function createUser(input: {

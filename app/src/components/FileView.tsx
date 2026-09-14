@@ -25,6 +25,7 @@ type FileViewProps = {
   onRename: (id: string) => void
   onTrash: (id: string) => void
   onRestore: (id: string) => void
+  onDownload: (item: DriveItem) => void
 }
 
 export function FileView({
@@ -40,6 +41,7 @@ export function FileView({
   onRename,
   onTrash,
   onRestore,
+  onDownload,
 }: FileViewProps) {
   if (items.length === 0) {
     return <EmptyState section={section} search={search} />
@@ -56,6 +58,7 @@ export function FileView({
     onRename,
     onTrash,
     onRestore,
+    onDownload,
   }
 
   if (view === 'list') {
@@ -176,6 +179,7 @@ function ItemMenu({
   onRename,
   onTrash,
   onRestore,
+  onDownload,
 }: {
   item: DriveItem
   children: ReactNode
@@ -185,6 +189,7 @@ function ItemMenu({
   onRename: (id: string) => void
   onTrash: (id: string) => void
   onRestore: (id: string) => void
+  onDownload: (item: DriveItem) => void
 }) {
   return (
     <ContextMenu>
@@ -206,7 +211,7 @@ function ItemMenu({
           <Pencil />
           Rename
         </ContextMenuItem>
-        <ContextMenuItem>
+        <ContextMenuItem onSelect={() => onDownload(item)}>
           <Download />
           Download
         </ContextMenuItem>

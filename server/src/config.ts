@@ -1,5 +1,12 @@
 import { homedir } from 'node:os'
-import { resolve } from 'node:path'
+import { dirname, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const here = dirname(fileURLToPath(import.meta.url))
+
+export function repoRoot(): string {
+  return resolve(process.env.STOREBASE_HOME ?? resolve(here, '../..'))
+}
 
 export type ServerConfig = {
   host: string
@@ -8,7 +15,11 @@ export type ServerConfig = {
   driveDir: string
   manifestPath: string
   usersPath: string
+  secretPath: string
   reserveBytes: number
+  homeDir: string
+  appDist: string
+  autoUpdate: boolean
 }
 
 export function gbToBytes(gb: number): number {
@@ -33,6 +44,7 @@ export function loadConfig(overrides: {
 } = {}): ServerConfig {
   const dataDir = resolve(overrides.dataDir ?? process.env.STOREBASE_DATA_DIR ?? './data')
   const reserveGb = overrides.reserveGb ?? parseReserveGb(process.env.STOREBASE_RESERVE_GB, 10)
+  const homeDir = repoRoot()
   return {
     host: overrides.host ?? process.env.STOREBASE_HOST ?? '127.0.0.1',
     port: overrides.port ?? Number(process.env.STOREBASE_PORT ?? 4780),
@@ -40,7 +52,11 @@ export function loadConfig(overrides: {
     driveDir: resolve(dataDir, 'drive'),
     manifestPath: resolve(dataDir, 'storebase.json'),
     usersPath: resolve(dataDir, 'users.json'),
+    secretPath: resolve(dataDir, 'secret.json'),
     reserveBytes: gbToBytes(reserveGb),
+    homeDir,
+    appDist: resolve(process.env.STOREBASE_APP_DIST ?? resolve(homeDir, 'app/dist')),
+    autoUpdate: process.env.STOREBASE_AUTO_UPDATE === '1',
   }
 }
 

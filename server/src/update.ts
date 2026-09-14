@@ -1,0 +1,116 @@
+import { execFile } from 'node:child_process'
+import { existsSync } from 'node:fs'
+import { join } from 'node:path'
+import { promisify } from 'node:util'
+import type { ServerConfig } from './config.ts'
+
+const exec = promisify(execFile)
+const REPO = 'NoahWhiteson/Storebase'
+const INTERVAL_MS = 6 * 60 * 60 * 1000
+
+export type UpdateState = {
+  currentSha: string | null
+  latestSha: string | null
+  latestMessage: string | null
+  available: boolean
+  updating: boolean
+  lastCheckedAt: string | null
+  lastError: string | null
+}
+
+const state: UpdateState = {
+  currentSha: null,
+  latestSha: null,
+  latestMessage: null,
+  available: false,
+  updating: false,
+  lastCheckedAt: null,
+  lastError: null,
+}
+
+function gitOk(home: string): boolean {
+  return existsSync(join(home, '.git'))
+}
+
+async function git(home: string, args: string[]): Promise<string> {
+  const { stdout } = await exec('git', ['-C', home, ...args], { encoding: 'utf8' })
+  return stdout.trim()
+}
+
+async function npm(cwd: string, args: string[]): Promise<void> {
+  await exec('npm', args, { cwd, encoding: 'utf8' })
+}
+
+export function updateStatus(): UpdateState {
+  return { ...state }
+}
+
+export async function localSha(home: string): Promise<string | null> {
+  if (!gitOk(home)) return null
+  try {
+    return await git(home, ['rev-parse', 'HEAD'])
+  } catch {
+    return null
+  }
+}
+
+export async function checkGithub(config: ServerConfig): Promise<UpdateState> {
+  state.currentSha = await localSha(config.homeDir)
+  const headers: Record<string, string> = {
+    Accept: 'application/vnd.github+json',
+    'User-Agent': 'storebase',
+  }
+  if (process.env.GITHUB_TOKEN) headers.Authorization = `Bearer ${process.env.GITHUB_TOKEN}`
+  try {
+    const res = await fetch(`https://api.github.com/repos/${REPO}/commits/main`, { headers })
+    if (!res.ok) throw new Error(`GitHub ${res.status}`)
+    const body = (await res.json()) as { sha?: string; commit?: { message?: string } }
+    state.latestSha = body.sha ?? null
+    state.latestMessage = body.commit?.message?.split('\n')[0] ?? null
+    state.available = Boolean(state.latestSha && state.currentSha && state.latestSha !== state.currentSha)
+    state.lastError = null
+  } catch (err) {
+    state.lastError = err instanceof Error ? err.message : 'Update check failed'
+  }
+  state.lastCheckedAt = new Date().toISOString()
+  return updateStatus()
+}
+
+export async function applyUpdate(config: ServerConfig): Promise<UpdateState> {
+  if (state.updating) return updateStatus()
+  if (!gitOk(config.homeDir)) {
+    state.lastError = 'This install is not a git clone, so it cannot auto-update'
+    return updateStatus()
+  }
+  state.updating = true
+  try {
+    await git(config.homeDir, ['fetch', 'origin', 'main'])
+    await git(config.homeDir, ['merge', '--ff-only', 'origin/main'])
+    await npm(join(config.homeDir, 'app'), ['install'])
+    await npm(join(config.homeDir, 'server'), ['install'])
+    await npm(join(config.homeDir, 'app'), ['run', 'build'])
+    state.currentSha = await localSha(config.homeDir)
+    state.available = false
+    state.lastError = null
+    state.lastCheckedAt = new Date().toISOString()
+    setTimeout(() => process.exit(0), 400)
+  } catch (err) {
+    state.lastError = err instanceof Error ? err.message : 'Update failed'
+  } finally {
+    state.updating = false
+  }
+  return updateStatus()
+}
+
+export function startUpdateLoop(config: ServerConfig): void {
+  if (!config.autoUpdate) return
+  const tick = async () => {
+    const next = await checkGithub(config)
+    if (next.available && !next.updating) {
+      console.log(`Storebase update ${next.currentSha?.slice(0, 7)} → ${next.latestSha?.slice(0, 7)}. Applying.`)
+      await applyUpdate(config)
+    }
+  }
+  void tick()
+  setInterval(() => void tick(), INTERVAL_MS)
+}

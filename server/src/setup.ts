@@ -5,6 +5,7 @@ import { initPool, readManifest } from './pool.ts'
 import { folderSize } from './quota.ts'
 import {
   createUser,
+  ensureUserDrive,
   findAdmin,
   isConfigured,
   loadUsers,
@@ -110,6 +111,8 @@ export async function completeSetup(config: ServerConfig, payload: SetupPayload)
     extraPeople.map((person) => createUser({ ...person, role: 'user' })),
   )
   await saveUsers(config, [admin, ...others])
+  await ensureUserDrive(config, admin.id)
+  await Promise.all(others.map((user) => ensureUserDrive(config, user.id)))
 
   const publicUsers: PublicUser[] = [toPublic(admin), ...others.map(toPublic)]
   return {

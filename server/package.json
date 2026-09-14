@@ -6,7 +6,8 @@
   "scripts": {
     "init": "tsx src/cli.ts init",
     "start": "tsx src/cli.ts start",
-    "dev": "tsx watch src/cli.ts start"
+    "dev": "tsx watch src/cli.ts start",
+    "update": "tsx src/cli.ts update"
   },
   "dependencies": {
     "@hono/node-server": "^1.19.0",

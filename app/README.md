@@ -14,5 +14,4 @@ npm run build
 npm run preview
 ```
 
-The file list is still mock data in `src/data/files.ts` until the client talks to `GET /api/files`. First visit hits `/api/setup` and onboarding if the node has no admin.
-
+First visit hits `/api/setup` and onboarding if the node has no admin. After that, sign in. Files are per-user on the node (`GET/POST /api/files`).

@@ -29,6 +29,7 @@ type TopBarProps = {
   onSearch: (value: string) => void
   onView: (view: 'grid' | 'list') => void
   onOpenSidebar: () => void
+  onSignOut: () => void
 }
 
 export function TopBar({
@@ -40,6 +41,7 @@ export function TopBar({
   onSearch,
   onView,
   onOpenSidebar,
+  onSignOut,
 }: TopBarProps) {
   const [askOpen, setAskOpen] = useState(false)
 
@@ -123,7 +125,7 @@ export function TopBar({
               <DropdownMenuItem>Account</DropdownMenuItem>
               <DropdownMenuItem>Storage</DropdownMenuItem>
               <DropdownMenuSeparator />
-              <DropdownMenuItem>Sign out</DropdownMenuItem>
+              <DropdownMenuItem onSelect={onSignOut}>Sign out</DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
