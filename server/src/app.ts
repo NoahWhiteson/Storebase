@@ -2,8 +2,10 @@ import { hostname } from 'node:os'
 import { Readable } from 'node:stream'
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
+import { mountAdmin } from './admin.ts'
 import { bytesToGb, type ServerConfig } from './config.ts'
 import { dropPath, loadMeta, rewritePath, setStarred, touchRecent } from './meta.ts'
+import { loadPlatform } from './platform.ts'
 import { requirePool } from './pool.ts'
 import { QuotaError, folderSize } from './quota.ts'
 import { clearSession, issueSession, readSessionUserId } from './session.ts'
@@ -83,10 +85,14 @@ export function createApp(config: ServerConfig) {
     await issueSession(c, config, user.id)
     const manifest = await requirePool(config)
     const usedBytes = await folderSize(root)
+    const platform = await loadPlatform(config)
     return c.json({
       user: toPublic(user),
+      host: hostname(),
       reservedBytes: manifest.reservedBytes,
       usedBytes,
+      nodeName: platform.nodeName,
+      defaultView: platform.defaultView,
     })
   })
 
@@ -121,6 +127,7 @@ export function createApp(config: ServerConfig) {
     const root = c.get('root')
     const manifest = await requirePool(config)
     const usedBytes = await folderSize(root)
+    const platform = await loadPlatform(config)
     return c.json({
       user: toPublic(user),
       host: hostname(),
@@ -128,6 +135,8 @@ export function createApp(config: ServerConfig) {
       usedBytes,
       usedGb: bytesToGb(usedBytes),
       reservedGb: bytesToGb(manifest.reservedBytes),
+      nodeName: platform.nodeName,
+      defaultView: platform.defaultView,
     })
   })
 
@@ -152,7 +161,8 @@ export function createApp(config: ServerConfig) {
 
   app.get('/api/update', async (c) => {
     if (c.get('user').role !== 'admin') return c.json({ error: 'Admin only' }, 403)
-    return c.json(await checkGithub(config))
+    const platform = await loadPlatform(config)
+    return c.json({ ...(await checkGithub(config)), autoUpdate: platform.autoUpdate })
   })
 
   app.post('/api/update', async (c) => {
@@ -305,6 +315,7 @@ export function createApp(config: ServerConfig) {
     return c.json({ error: message }, 500)
   })
 
+  mountAdmin(app, config)
   mountApp(app, config.appDist)
   return app
 }

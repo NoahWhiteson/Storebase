@@ -22,6 +22,7 @@ export type PublicUser = {
   name: string
   email: string
   role: UserRole
+  createdAt: string
 }
 
 function normalizeEmail(email: string): string {
@@ -49,7 +50,7 @@ export async function saveUsers(config: ServerConfig, users: UserRecord[]): Prom
 }
 
 export function toPublic(user: UserRecord): PublicUser {
-  return { id: user.id, name: user.name, email: user.email, role: user.role }
+  return { id: user.id, name: user.name, email: user.email, role: user.role, createdAt: user.createdAt }
 }
 
 export async function isConfigured(config: ServerConfig): Promise<boolean> {

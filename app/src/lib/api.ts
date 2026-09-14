@@ -16,6 +16,8 @@ export type Me = {
   host: string
   reservedBytes: number
   usedBytes: number
+  nodeName?: string
+  defaultView?: 'grid' | 'list'
 }
 
 function kindFromName(name: string): FileKind {
@@ -84,15 +86,24 @@ export async function fetchMe(): Promise<Me | null> {
 }
 
 export async function login(email: string, password: string): Promise<Me> {
-  const body = await api<{ user: PublicUser; reservedBytes: number; usedBytes: number }>('/api/login', {
+  const body = await api<{
+    user: PublicUser
+    reservedBytes: number
+    usedBytes: number
+    host?: string
+    nodeName?: string
+    defaultView?: 'grid' | 'list'
+  }>('/api/login', {
     method: 'POST',
     body: JSON.stringify({ email, password }),
   })
   return {
     user: body.user,
-    host: '',
+    host: body.host ?? '',
     reservedBytes: body.reservedBytes,
     usedBytes: body.usedBytes,
+    nodeName: body.nodeName,
+    defaultView: body.defaultView,
   }
 }
 

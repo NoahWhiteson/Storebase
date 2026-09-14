@@ -2,6 +2,7 @@ import { serve } from '@hono/node-server'
 import { createApp } from './app.ts'
 import { expandHome, loadConfig, parseReserveGb } from './config.ts'
 import { describeReserve, initPool, readManifest } from './pool.ts'
+import { loadPlatform } from './platform.ts'
 import { applyUpdate, checkGithub, startUpdateLoop } from './update.ts'
 import { isConfigured } from './users.ts'
 
@@ -48,7 +49,7 @@ async function start(): Promise<void> {
     } else {
       console.log('Not configured. Open the app to finish onboarding.')
     }
-    startUpdateLoop(config)
+    startUpdateLoop(config, async () => (await loadPlatform(config)).autoUpdate)
   })
 }
 

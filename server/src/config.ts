@@ -16,6 +16,7 @@ export type ServerConfig = {
   manifestPath: string
   usersPath: string
   secretPath: string
+  settingsPath: string
   reserveBytes: number
   homeDir: string
   appDist: string
@@ -53,6 +54,7 @@ export function loadConfig(overrides: {
     manifestPath: resolve(dataDir, 'storebase.json'),
     usersPath: resolve(dataDir, 'users.json'),
     secretPath: resolve(dataDir, 'secret.json'),
+    settingsPath: resolve(dataDir, 'settings.json'),
     reserveBytes: gbToBytes(reserveGb),
     homeDir,
     appDist: resolve(process.env.STOREBASE_APP_DIST ?? resolve(homeDir, 'app/dist')),

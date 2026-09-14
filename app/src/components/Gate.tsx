@@ -81,6 +81,8 @@ export function Gate() {
   if (phase === 'login') {
     return (
       <Login
+        nodeName={setup && setup.configured ? setup.nodeName : undefined}
+        signInMessage={setup && setup.configured ? setup.signInMessage : undefined}
         onDone={(session) => {
           setMe(session)
           setPhase('ready')
@@ -100,6 +102,7 @@ export function Gate() {
           reservedBytes: me.reservedBytes,
           usedBytes: me.usedBytes,
           host: me.host,
+          defaultView: me.defaultView,
         }}
         onSignedOut={() => {
           setMe(null)

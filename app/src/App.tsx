@@ -1,5 +1,6 @@
 import { FileGlyph } from '@/components/FileGlyph'
 import { FileView } from '@/components/FileView'
+import { Settings, type SettingsSection } from '@/components/Settings'
 import { Sidebar } from '@/components/Sidebar'
 import { TopBar } from '@/components/TopBar'
 import { Button } from '@/components/ui/button'
@@ -49,6 +50,7 @@ type Account = {
   reservedBytes: number
   usedBytes: number
   host: string
+  defaultView?: 'grid' | 'list'
 }
 
 function joinPath(dir: string, name: string): string {
@@ -56,16 +58,19 @@ function joinPath(dir: string, name: string): string {
 }
 
 export default function App({ account, onSignedOut }: { account: Account; onSignedOut: () => void }) {
-  const me = { owner: account.name, ownerInitials: initials(account.name) }
   const quota = account.reservedBytes > 0 ? account.reservedBytes : 100 * 1024 ** 3
   const [items, setItems] = useState<DriveItem[]>([])
   const [suggested, setSuggested] = useState<DriveItem[]>([])
   const [usedBytes, setUsedBytes] = useState(account.usedBytes)
   const [host, setHost] = useState(account.host)
+  const [profile, setProfile] = useState({ name: account.name, email: account.email })
+  const me = { owner: profile.name, ownerInitials: initials(profile.name) }
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [settingsSection, setSettingsSection] = useState<SettingsSection>('account')
   const [section, setSection] = useState<SectionId>('home')
   const [folderPath, setFolderPath] = useState('')
   const [search, setSearch] = useState('')
-  const [view, setView] = useState<'grid' | 'list'>('grid')
+  const [view, setView] = useState<'grid' | 'list'>(account.defaultView === 'list' ? 'list' : 'grid')
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
@@ -111,15 +116,15 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
       } else {
         entries = await listFiles({ path: folderPath })
       }
-      setItems(entries.map((entry) => toDriveItem(entry, { name: account.name })))
+      setItems(entries.map((entry) => toDriveItem(entry, { name: profile.name })))
       if (section === 'home' && !q) {
         const root = await listFiles({ path: '' })
         setSuggested(
-          root.filter((entry) => entry.type === 'folder').slice(0, 8).map((entry) => toDriveItem(entry, { name: account.name })),
+          root.filter((entry) => entry.type === 'folder').slice(0, 8).map((entry) => toDriveItem(entry, { name: profile.name })),
         )
         if (entries.length === 0) {
           const files = root.filter((entry) => entry.type === 'file')
-          setItems(files.map((entry) => toDriveItem(entry, { name: account.name })))
+          setItems(files.map((entry) => toDriveItem(entry, { name: profile.name })))
         }
       } else {
         setSuggested([])
@@ -134,7 +139,7 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
     } finally {
       setLoading(false)
     }
-  }, [account.name, folderPath, search, section])
+  }, [folderPath, profile.name, search, section])
 
   useEffect(() => {
     void refresh()
@@ -142,6 +147,13 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
 
   function notify(message: string) {
     setToast(message)
+  }
+
+  function openSettings(section: SettingsSection = 'account') {
+    const next = account.role === 'admin' || section === 'account' ? section : 'account'
+    setSettingsSection(next)
+    setSettingsOpen(true)
+    setSidebarOpen(false)
   }
 
   function goSection(id: SectionId) {
@@ -309,7 +321,7 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
           name: host || 'This node',
           kind: 'folder',
           parentId: null,
-          owner: account.name,
+          owner: profile.name,
           ownerInitials: me.ownerInitials,
           modifiedAt: new Date().toISOString(),
           size: null,
@@ -334,13 +346,25 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
         search={search}
         view={view}
         files={items}
-        account={account}
+        account={profile}
         initials={me.ownerInitials}
+        settingsOpen={settingsOpen}
         onSearch={setSearch}
         onView={setView}
         onOpenSidebar={() => setSidebarOpen(true)}
+        onOpenSettings={openSettings}
         onSignOut={() => void signOut()}
       />
+      {settingsOpen ? (
+        <Settings
+          account={{ ...account, ...profile }}
+          initialSection={settingsSection}
+          onClose={() => setSettingsOpen(false)}
+          onAccount={(next) => setProfile(next)}
+          onPlatform={(next) => setView(next.defaultView)}
+          onToast={notify}
+        />
+      ) : (
       <div className="flex min-h-0 flex-1 bg-[#1a1a1a]">
         <Sidebar
           section={section}
@@ -355,6 +379,7 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
           }}
           onCreateFile={(kind) => void createUntitled(kind)}
           onUpload={() => uploadRef.current?.click()}
+          onOpenSettings={() => openSettings(account.role === 'admin' ? 'storage' : 'account')}
         />
         <main className="flex min-w-0 flex-1 flex-col overflow-hidden bg-[#1a1a1a]">
           <div
@@ -437,6 +462,7 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
           </div>
         </main>
       </div>
+      )}
 
       <input
         ref={uploadRef}

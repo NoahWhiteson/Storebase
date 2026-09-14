@@ -29,6 +29,19 @@ export async function initPool(config: ServerConfig): Promise<Manifest> {
   return manifest
 }
 
+export async function writeManifest(config: ServerConfig, reservedBytes: number): Promise<Manifest> {
+  await mkdir(config.driveDir, { recursive: true })
+  const now = new Date().toISOString()
+  const existing = await readManifest(config)
+  const manifest: Manifest = {
+    reservedBytes,
+    createdAt: existing?.createdAt ?? now,
+    updatedAt: now,
+  }
+  await writeFile(config.manifestPath, `${JSON.stringify(manifest, null, 2)}\n`)
+  return manifest
+}
+
 export async function requirePool(config: ServerConfig): Promise<Manifest> {
   const manifest = await readManifest(config)
   if (!manifest) {

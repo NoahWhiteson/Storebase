@@ -1,6 +1,7 @@
 import { hostname } from 'node:os'
 import { gbToBytes, type ServerConfig } from './config.ts'
 import { diskInfo } from './disk.ts'
+import { defaultPlatform, loadPlatform, savePlatform } from './platform.ts'
 import { initPool, readManifest } from './pool.ts'
 import { folderSize } from './quota.ts'
 import {
@@ -57,11 +58,14 @@ export async function getSetupState(config: ServerConfig) {
     const users = await loadUsers(config)
     const admin = findAdmin(users)
     const manifest = await readManifest(config)
+    const platform = await loadPlatform(config)
     return {
       configured: true as const,
       admin: admin ? toPublic(admin) : null,
       reservedBytes: manifest?.reservedBytes ?? 0,
       disk,
+      nodeName: platform.nodeName,
+      signInMessage: platform.signInMessage,
     }
   }
   return {
@@ -113,6 +117,7 @@ export async function completeSetup(config: ServerConfig, payload: SetupPayload)
   await saveUsers(config, [admin, ...others])
   await ensureUserDrive(config, admin.id)
   await Promise.all(others.map((user) => ensureUserDrive(config, user.id)))
+  await savePlatform(config, defaultPlatform(config))
 
   const publicUsers: PublicUser[] = [toPublic(admin), ...others.map(toPublic)]
   return {

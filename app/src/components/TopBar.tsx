@@ -16,6 +16,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
+import type { SettingsSection } from '@/components/Settings'
 import type { DriveItem } from '@/types'
 import { Grid2x2, List, Menu, Search, Settings, Sparkles } from 'lucide-react'
 import { useState } from 'react'
@@ -26,9 +27,11 @@ type TopBarProps = {
   files: DriveItem[]
   account: { name: string; email: string }
   initials: string
+  settingsOpen: boolean
   onSearch: (value: string) => void
   onView: (view: 'grid' | 'list') => void
   onOpenSidebar: () => void
+  onOpenSettings: (section?: SettingsSection) => void
   onSignOut: () => void
 }
 
@@ -38,9 +41,11 @@ export function TopBar({
   files,
   account,
   initials,
+  settingsOpen,
   onSearch,
   onView,
   onOpenSidebar,
+  onOpenSettings,
   onSignOut,
 }: TopBarProps) {
   const [askOpen, setAskOpen] = useState(false)
@@ -62,16 +67,21 @@ export function TopBar({
       </div>
 
       <div className="flex h-full min-w-0 flex-1 items-center gap-2 px-3 md:gap-3 md:pr-4 md:pl-2">
-        <div className="relative flex h-12 min-w-0 flex-1 items-center">
-          <Search className="pointer-events-none absolute left-4 size-[18px] text-[#9a9a9a]" />
-          <Input
-            value={search}
-            onChange={(e) => onSearch(e.target.value)}
-            placeholder="Search in Storebase"
-            className="h-12 rounded-full border-0 bg-[#242424] pl-12 text-[15px] shadow-none placeholder:text-[#8d8d8d] outline-none focus-visible:bg-[#2a2a2a] focus-visible:ring-0"
-          />
-        </div>
+        {settingsOpen ? (
+          <div className="min-w-0 flex-1 text-[15px] font-medium text-white">Settings</div>
+        ) : (
+          <div className="relative flex h-12 min-w-0 flex-1 items-center">
+            <Search className="pointer-events-none absolute left-4 size-[18px] text-[#9a9a9a]" />
+            <Input
+              value={search}
+              onChange={(e) => onSearch(e.target.value)}
+              placeholder="Search in Storebase"
+              className="h-12 rounded-full border-0 bg-[#242424] pl-12 text-[15px] shadow-none placeholder:text-[#8d8d8d] outline-none focus-visible:bg-[#2a2a2a] focus-visible:ring-0"
+            />
+          </div>
+        )}
 
+        {settingsOpen ? null : (
         <Button
           type="button"
           variant="secondary"
@@ -82,6 +92,7 @@ export function TopBar({
           <Sparkles className="size-4" />
           <span className="hidden sm:inline">Ask AI</span>
         </Button>
+        )}
 
         <div className="flex shrink-0 items-center gap-0.5">
           <Tooltip>
@@ -100,7 +111,7 @@ export function TopBar({
           </Tooltip>
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button variant="ghost" size="icon" className="size-10" aria-label="Settings">
+              <Button variant="ghost" size="icon" className="size-10" aria-label="Settings" onClick={() => onOpenSettings()}>
                 <Settings />
               </Button>
             </TooltipTrigger>
@@ -122,8 +133,8 @@ export function TopBar({
                 <div className="font-normal text-muted-foreground">{account.email}</div>
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
-              <DropdownMenuItem>Account</DropdownMenuItem>
-              <DropdownMenuItem>Storage</DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => onOpenSettings('account')}>Account</DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => onOpenSettings('storage')}>Storage</DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem onSelect={onSignOut}>Sign out</DropdownMenuItem>
             </DropdownMenuContent>

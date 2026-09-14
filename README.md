@@ -50,3 +50,4 @@ App `43123`, API `4780`. Vite proxies `/api`. Production installs serve the buil
 - Quota is the reserve you picked at onboarding, shared across the machine.
 - Passwords are scrypt hashes in `data/users.json`. Sessions are httpOnly cookies.
 - Hidden `.trash` and `.storebase-meta.json` live in that user’s folder.
+- Admins open Settings (gear) for platform, bind address, storage cap, users, updates, and session rotation. Everyone can edit their own account. Platform copy lives in `data/settings.json`. Bind/auto-update writes `.env` and apply on restart.

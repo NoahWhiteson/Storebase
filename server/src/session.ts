@@ -62,3 +62,9 @@ export async function readSessionUserId(c: Context, config: ServerConfig): Promi
 export function clearSession(c: Context): void {
   deleteCookie(c, COOKIE, { path: '/' })
 }
+
+export async function rotateSecret(config: ServerConfig): Promise<void> {
+  const secret = randomBytes(32).toString('hex')
+  await mkdir(dirname(config.secretPath), { recursive: true })
+  await writeFile(config.secretPath, `${JSON.stringify({ secret }, null, 2)}\n`)
+}

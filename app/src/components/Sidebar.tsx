@@ -51,6 +51,7 @@ type SidebarProps = {
   onNewFolder: () => void
   onUpload: () => void
   onCreateFile: (kind: FileKind) => void
+  onOpenSettings: () => void
 }
 
 export function Sidebar({
@@ -63,6 +64,7 @@ export function Sidebar({
   onNewFolder,
   onUpload,
   onCreateFile,
+  onOpenSettings,
 }: SidebarProps) {
   const usedPct = Math.min(100, Math.round((usedBytes / quotaBytes) * 100))
 
@@ -151,8 +153,9 @@ export function Sidebar({
           variant="outline"
           size="sm"
           className="mt-3 h-8 rounded-full border-white/20 bg-transparent text-white hover:bg-white/10 hover:text-white"
+          onClick={onOpenSettings}
         >
-          Get more storage
+          Manage storage
         </Button>
       </div>
     </div>

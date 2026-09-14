@@ -8,6 +8,7 @@ export type PublicUser = {
   name: string
   email: string
   role: 'admin' | 'user'
+  createdAt?: string
 }
 
 export type SetupState =
@@ -21,6 +22,8 @@ export type SetupState =
       admin: PublicUser | null
       reservedBytes: number
       disk: DiskInfo
+      nodeName?: string
+      signInMessage?: string
     }
 
 export async function fetchSetup(): Promise<SetupState> {

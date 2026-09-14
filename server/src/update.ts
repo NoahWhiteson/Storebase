@@ -102,9 +102,9 @@ export async function applyUpdate(config: ServerConfig): Promise<UpdateState> {
   return updateStatus()
 }
 
-export function startUpdateLoop(config: ServerConfig): void {
-  if (!config.autoUpdate) return
+export function startUpdateLoop(config: ServerConfig, enabled: () => Promise<boolean>): void {
   const tick = async () => {
+    if (!(await enabled())) return
     const next = await checkGithub(config)
     if (next.available && !next.updating) {
       console.log(`Storebase update ${next.currentSha?.slice(0, 7)} → ${next.latestSha?.slice(0, 7)}. Applying.`)

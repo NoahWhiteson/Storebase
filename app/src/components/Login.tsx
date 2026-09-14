@@ -7,7 +7,15 @@ import { useState, type KeyboardEvent } from 'react'
 const fieldClass =
   'h-12 rounded-xl border-0 bg-[#242424] text-white shadow-none placeholder:text-[#8d8d8d] outline-none focus:outline-none focus-visible:outline-none focus-visible:ring-0'
 
-export function Login({ onDone }: { onDone: (me: Me) => void }) {
+export function Login({
+  onDone,
+  nodeName,
+  signInMessage,
+}: {
+  onDone: (me: Me) => void
+  nodeName?: string
+  signInMessage?: string
+}) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -42,7 +50,10 @@ export function Login({ onDone }: { onDone: (me: Me) => void }) {
       </header>
       <main className="mx-auto flex w-full max-w-lg flex-1 flex-col justify-center px-5 pb-16">
         <h1 className="text-3xl font-medium tracking-tight">Sign in</h1>
-        <p className="mt-2 text-sm text-[#8d8d8d]">Use the account from this node’s onboarding.</p>
+        <p className="mt-2 text-sm text-[#8d8d8d]">
+          {signInMessage?.trim() ||
+            (nodeName ? `Sign in to ${nodeName}.` : 'Use the account from this node’s onboarding.')}
+        </p>
         <div className="mt-8 space-y-3">
           <Input
             autoFocus
