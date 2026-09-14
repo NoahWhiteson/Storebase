@@ -52,6 +52,7 @@ type Account = {
   usedBytes: number
   host: string
   defaultView?: 'grid' | 'list'
+  terminalsEnabled?: boolean
 }
 
 function joinPath(dir: string, name: string): string {
@@ -69,6 +70,7 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('account')
   const [terminalsOpen, setTerminalsOpen] = useState(false)
+  const [terminalsEnabled, setTerminalsEnabled] = useState(account.terminalsEnabled !== false)
   const [section, setSection] = useState<SectionId>('home')
   const [folderPath, setFolderPath] = useState('')
   const [search, setSearch] = useState('')
@@ -160,10 +162,15 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
   }
 
   function openTerminals() {
+    if (!terminalsEnabled) return
     setTerminalsOpen(true)
     setSettingsOpen(false)
     setSidebarOpen(false)
   }
+
+  useEffect(() => {
+    if (!terminalsEnabled) setTerminalsOpen(false)
+  }, [terminalsEnabled])
 
   function goSection(id: SectionId) {
     setSection(id)
@@ -361,6 +368,7 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
         initials={me.ownerInitials}
         settingsOpen={settingsOpen}
         terminalsOpen={terminalsOpen}
+        terminalsEnabled={terminalsEnabled}
         onSearch={setSearch}
         onView={setView}
         onOpenSidebar={() => setSidebarOpen(true)}
@@ -375,7 +383,10 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
             initialSection={settingsSection}
             onClose={() => setSettingsOpen(false)}
             onAccount={(next) => setProfile(next)}
-            onPlatform={(next) => setView(next.defaultView)}
+            onPlatform={(next) => {
+              if (next.defaultView) setView(next.defaultView)
+              if (next.terminalsEnabled !== undefined) setTerminalsEnabled(next.terminalsEnabled)
+            }}
             onToast={notify}
           />
         </div>
@@ -384,6 +395,7 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
         <Sidebar
           section={section}
           terminalsOpen={terminalsOpen}
+          terminalsEnabled={terminalsEnabled}
           usedBytes={usedBytes}
           quotaBytes={quota}
           mobileOpen={sidebarOpen}
@@ -399,7 +411,7 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
           onOpenTerminals={openTerminals}
         />
         {terminalsOpen ? (
-          <Terminals onToast={notify} />
+          <Terminals onToast={notify} onDisabled={() => setTerminalsEnabled(false)} />
         ) : (
         <main className="flex min-w-0 flex-1 flex-col overflow-hidden bg-[#1a1a1a]">
           <div

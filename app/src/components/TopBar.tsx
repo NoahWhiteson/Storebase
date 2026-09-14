@@ -30,6 +30,7 @@ type TopBarProps = {
   initials: string
   settingsOpen: boolean
   terminalsOpen: boolean
+  terminalsEnabled?: boolean
   onSearch: (value: string) => void
   onView: (view: 'grid' | 'list') => void
   onOpenSidebar: () => void
@@ -46,6 +47,7 @@ export function TopBar({
   initials,
   settingsOpen,
   terminalsOpen,
+  terminalsEnabled = true,
   onSearch,
   onView,
   onOpenSidebar,
@@ -116,20 +118,22 @@ export function TopBar({
             </TooltipTrigger>
             <TooltipContent>{view === 'grid' ? 'List view' : 'Grid view'}</TooltipContent>
           </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className={cn('size-10', terminalsOpen ? 'bg-white/10' : '')}
-                aria-label="Terminal"
-                onClick={onOpenTerminals}
-              >
-                <SquareTerminal />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Terminal</TooltipContent>
-          </Tooltip>
+          {terminalsEnabled ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className={cn('size-10', terminalsOpen ? 'bg-white/10' : '')}
+                  aria-label="Terminal"
+                  onClick={onOpenTerminals}
+                >
+                  <SquareTerminal />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Terminal</TooltipContent>
+            </Tooltip>
+          ) : null}
           <Tooltip>
             <TooltipTrigger asChild>
               <Button variant="ghost" size="icon" className="size-10" aria-label="Settings" onClick={() => onOpenSettings()}>

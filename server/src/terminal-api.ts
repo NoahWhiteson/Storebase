@@ -1,4 +1,5 @@
 import type { Hono } from 'hono'
+import { terminalsAllowed } from './platform.ts'
 import { TerminalError, type TerminalHub } from './terminals.ts'
 import type { UserRecord } from './users.ts'
 
@@ -16,11 +17,9 @@ export function mountTerminals(app: Hono<{ Variables: Vars }>, hub: TerminalHub)
   app.get('/api/terminals', async (c) => {
     const user = c.get('user')
     const platform = await hub.settings()
-    if (user.role !== 'admin' && !platform.terminalUsers) {
-      return c.json({ error: 'Terminals are admin-only on this node' }, 403)
-    }
     return c.json({
-      terminals: hub.list(user.id),
+      enabled: terminalsAllowed(user, platform),
+      terminals: platform.terminalEnabled ? hub.list(user.id) : [],
       max: platform.terminalMax,
       idleMinutes: platform.terminalIdleMinutes,
     })

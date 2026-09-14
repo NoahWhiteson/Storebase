@@ -15,6 +15,7 @@ export type SettingsPayload = {
     autoUpdate?: boolean
     bindHost?: string
     bindPort?: number
+    terminalEnabled?: boolean
     terminalMax?: number
     terminalIdleMinutes?: number
     terminalUsers?: boolean

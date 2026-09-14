@@ -53,4 +53,4 @@ App `43123`, API `4780`. Vite proxies `/api`. Production installs serve the buil
 - Passwords are scrypt hashes in `data/users.json`. Sessions are httpOnly cookies.
 - Hidden `.trash` and `.storebase-meta.json` live in that user’s folder.
 - Admins open Settings (gear) for platform, bind address, storage cap, users, terminals, updates, and session rotation. Everyone can edit their own account. Platform copy lives in `data/settings.json`. Bind/auto-update writes `.env` and apply on restart.
-- Terminal in the sidebar/top bar opens a real shell on the node. Settings → Terminals sets per-user max and idle expiry.
+- Terminal in the sidebar/top bar opens a real shell on the node. Settings → Terminals has a master on/off, plus per-user max and idle expiry. Off hides the tab and kills live shells.

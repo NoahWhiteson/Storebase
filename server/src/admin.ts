@@ -9,6 +9,7 @@ import { requirePool, writeManifest } from './pool.ts'
 import { folderSize } from './quota.ts'
 import { issueSession, rotateSecret } from './session.ts'
 import { updateStatus } from './update.ts'
+import type { TerminalHub } from './terminals.ts'
 import {
   createUser,
   ensureUserDrive,
@@ -35,7 +36,7 @@ function adminCount(users: UserRecord[]): number {
   return users.filter((user) => user.role === 'admin').length
 }
 
-export function mountAdmin(app: Hono<{ Variables: Vars }>, config: ServerConfig): void {
+export function mountAdmin(app: Hono<{ Variables: Vars }>, config: ServerConfig, hub: TerminalHub): void {
   app.get('/api/settings', async (c) => {
     const user = c.get('user')
     const root = c.get('root')
@@ -115,10 +116,13 @@ export function mountAdmin(app: Hono<{ Variables: Vars }>, config: ServerConfig)
         body.platform?.terminalIdleMinutes != null
           ? Math.min(10080, Math.max(0, Math.round(Number(body.platform.terminalIdleMinutes))))
           : current.terminalIdleMinutes,
+      terminalEnabled:
+        typeof body.platform?.terminalEnabled === 'boolean' ? body.platform.terminalEnabled : current.terminalEnabled,
       terminalUsers:
         typeof body.platform?.terminalUsers === 'boolean' ? body.platform.terminalUsers : current.terminalUsers,
     }
     await savePlatform(config, next)
+    if (current.terminalEnabled && !next.terminalEnabled) hub.killAll('disabled')
 
     if (body.storage?.reserveGb != null) {
       const gb = Number(body.storage.reserveGb)

@@ -69,6 +69,7 @@ export function Gate() {
             host: '',
             reservedBytes: account.reservedBytes,
             usedBytes: 0,
+            terminalsEnabled: true,
           })
           const session = await fetchMe()
           if (session) setMe(session)
@@ -103,6 +104,7 @@ export function Gate() {
           usedBytes: me.usedBytes,
           host: me.host,
           defaultView: me.defaultView,
+          terminalsEnabled: me.terminalsEnabled !== false,
         }}
         onSignedOut={() => {
           setMe(null)

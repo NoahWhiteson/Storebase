@@ -12,6 +12,7 @@ export type PlatformSettings = {
   autoUpdate: boolean
   bindHost: string
   bindPort: number
+  terminalEnabled: boolean
   terminalMax: number
   terminalIdleMinutes: number
   terminalUsers: boolean
@@ -25,6 +26,7 @@ export function defaultPlatform(config: ServerConfig): PlatformSettings {
     autoUpdate: config.autoUpdate,
     bindHost: config.host,
     bindPort: config.port,
+    terminalEnabled: true,
     terminalMax: 4,
     terminalIdleMinutes: 30,
     terminalUsers: true,
@@ -51,6 +53,7 @@ export async function loadPlatform(config: ServerConfig): Promise<PlatformSettin
       autoUpdate: typeof parsed.autoUpdate === 'boolean' ? parsed.autoUpdate : fallback.autoUpdate,
       bindHost: parsed.bindHost?.trim() || fallback.bindHost,
       bindPort: Number.isFinite(port) && port > 0 ? port : fallback.bindPort,
+      terminalEnabled: typeof parsed.terminalEnabled === 'boolean' ? parsed.terminalEnabled : fallback.terminalEnabled,
       terminalMax: clampInt(parsed.terminalMax, fallback.terminalMax, 1, 32),
       terminalIdleMinutes: clampInt(parsed.terminalIdleMinutes, fallback.terminalIdleMinutes, 0, 10080),
       terminalUsers: typeof parsed.terminalUsers === 'boolean' ? parsed.terminalUsers : fallback.terminalUsers,
@@ -58,6 +61,10 @@ export async function loadPlatform(config: ServerConfig): Promise<PlatformSettin
   } catch {
     return fallback
   }
+}
+
+export function terminalsAllowed(user: { role: string }, platform: PlatformSettings): boolean {
+  return platform.terminalEnabled && (user.role === 'admin' || platform.terminalUsers)
 }
 
 export async function savePlatform(config: ServerConfig, settings: PlatformSettings): Promise<void> {

@@ -46,6 +46,7 @@ const nav: { id: SectionId; label: string; icon: typeof Home }[] = [
 type SidebarProps = {
   section: SectionId
   terminalsOpen: boolean
+  terminalsEnabled?: boolean
   usedBytes: number
   quotaBytes: number
   mobileOpen: boolean
@@ -61,6 +62,7 @@ type SidebarProps = {
 export function Sidebar({
   section,
   terminalsOpen,
+  terminalsEnabled = true,
   usedBytes,
   quotaBytes,
   mobileOpen,
@@ -143,19 +145,21 @@ export function Sidebar({
               </button>
             )
           })}
-          <button
-            type="button"
-            onClick={onOpenTerminals}
-            className={cn(
-              'flex h-10 items-center gap-3 rounded-full px-4 text-sm font-medium transition-colors',
-              terminalsOpen
-                ? 'bg-white/10 text-white'
-                : 'text-[#b3b3b3] hover:bg-white/5 hover:text-white',
-            )}
-          >
-            <SquareTerminal className="size-[18px]" strokeWidth={terminalsOpen ? 2 : 1.75} />
-            Terminal
-          </button>
+          {terminalsEnabled ? (
+            <button
+              type="button"
+              onClick={onOpenTerminals}
+              className={cn(
+                'flex h-10 items-center gap-3 rounded-full px-4 text-sm font-medium transition-colors',
+                terminalsOpen
+                  ? 'bg-white/10 text-white'
+                  : 'text-[#b3b3b3] hover:bg-white/5 hover:text-white',
+              )}
+            >
+              <SquareTerminal className="size-[18px]" strokeWidth={terminalsOpen ? 2 : 1.75} />
+              Terminal
+            </button>
+          ) : null}
           <button
             type="button"
             onClick={onOpenSettings}

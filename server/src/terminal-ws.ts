@@ -43,6 +43,10 @@ async function handleSocket(
     ws.close(4401, 'Sign in required')
     return
   }
+  if (!(await hub.allowed(user))) {
+    ws.close(4403, 'Terminals are turned off')
+    return
+  }
   let unsub: (() => void) | undefined
   try {
     unsub = hub.subscribe(id, user.id, (event) => {

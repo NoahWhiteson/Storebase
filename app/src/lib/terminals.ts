@@ -14,6 +14,7 @@ export type TerminalInfo = {
 }
 
 export async function listTerminals(): Promise<{
+  enabled: boolean
   terminals: TerminalInfo[]
   max: number
   idleMinutes: number

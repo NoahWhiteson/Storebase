@@ -7,7 +7,13 @@ import '@xterm/xterm/css/xterm.css'
 import { Plus, SquareTerminal, X } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 
-export function Terminals({ onToast }: { onToast: (message: string) => void }) {
+export function Terminals({
+  onToast,
+  onDisabled,
+}: {
+  onToast: (message: string) => void
+  onDisabled?: () => void
+}) {
   const [sessions, setSessions] = useState<TerminalInfo[]>([])
   const [activeId, setActiveId] = useState<string | null>(null)
   const [max, setMax] = useState(4)
@@ -18,6 +24,10 @@ export function Terminals({ onToast }: { onToast: (message: string) => void }) {
   const reload = useCallback(async () => {
     try {
       const data = await listTerminals()
+      if (data.enabled === false) {
+        onDisabled?.()
+        return
+      }
       setSessions(data.terminals)
       setMax(data.max)
       setIdleMinutes(data.idleMinutes)
@@ -29,10 +39,12 @@ export function Terminals({ onToast }: { onToast: (message: string) => void }) {
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not load terminals')
     }
-  }, [])
+  }, [onDisabled])
 
   useEffect(() => {
     void reload()
+    const timer = window.setInterval(() => void reload(), 8000)
+    return () => window.clearInterval(timer)
   }, [reload])
 
   async function create() {

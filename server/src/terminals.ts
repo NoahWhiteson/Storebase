@@ -2,7 +2,7 @@ import { spawn as spawnProc, type ChildProcessWithoutNullStreams } from 'node:ch
 import { createRequire } from 'node:module'
 import { homedir } from 'node:os'
 import type { IPty } from 'node-pty'
-import { loadPlatform } from './platform.ts'
+import { loadPlatform, terminalsAllowed } from './platform.ts'
 import type { ServerConfig } from './config.ts'
 import type { UserRecord } from './users.ts'
 
@@ -112,11 +112,30 @@ export class TerminalHub {
     return this.sessions.get(id)
   }
 
-  async create(user: UserRecord, name?: string): Promise<TerminalInfo> {
+  async allowed(user: UserRecord): Promise<boolean> {
+    return terminalsAllowed(user, await this.settings())
+  }
+
+  async assertAllowed(user: UserRecord): Promise<void> {
     const platform = await this.settings()
+    if (!platform.terminalEnabled) throw new TerminalError('Terminals are turned off', 403)
     if (user.role !== 'admin' && !platform.terminalUsers) {
       throw new TerminalError('Terminals are admin-only on this node', 403)
     }
+  }
+
+  killAll(reason = 'disabled'): void {
+    for (const session of [...this.sessions.values()]) {
+      if (session.info.alive) session.shell.kill()
+      session.info.alive = false
+      for (const listen of session.listeners) listen({ type: 'gone', reason })
+      this.sessions.delete(session.info.id)
+    }
+  }
+
+  async create(user: UserRecord, name?: string): Promise<TerminalInfo> {
+    await this.assertAllowed(user)
+    const platform = await this.settings()
     const mine = this.list(user.id).filter((item) => item.alive)
     if (mine.length >= platform.terminalMax) {
       throw new TerminalError(`At the limit (${platform.terminalMax} live terminals)`, 400)

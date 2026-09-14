@@ -18,6 +18,7 @@ export type Me = {
   usedBytes: number
   nodeName?: string
   defaultView?: 'grid' | 'list'
+  terminalsEnabled?: boolean
 }
 
 function kindFromName(name: string): FileKind {
@@ -93,6 +94,7 @@ export async function login(email: string, password: string): Promise<Me> {
     host?: string
     nodeName?: string
     defaultView?: 'grid' | 'list'
+    terminalsEnabled?: boolean
   }>('/api/login', {
     method: 'POST',
     body: JSON.stringify({ email, password }),
@@ -104,6 +106,7 @@ export async function login(email: string, password: string): Promise<Me> {
     usedBytes: body.usedBytes,
     nodeName: body.nodeName,
     defaultView: body.defaultView,
+    terminalsEnabled: body.terminalsEnabled,
   }
 }
 

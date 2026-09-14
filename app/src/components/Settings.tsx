@@ -50,7 +50,7 @@ export function Settings({
   initialSection?: SettingsSection
   onClose: () => void
   onAccount: (next: { name: string; email: string }) => void
-  onPlatform?: (next: { defaultView: 'grid' | 'list' }) => void
+  onPlatform?: (next: { defaultView?: 'grid' | 'list'; terminalsEnabled?: boolean }) => void
   onToast: (message: string) => void
 }) {
   const [section, setSection] = useState<SettingsSection>(
@@ -183,7 +183,7 @@ export function Settings({
           <UsersPanel meId={account.id} users={data.users ?? []} onSaved={reload} onToast={onToast} />
         ) : null}
         {data && admin && section === 'terminals' ? (
-          <TerminalsPanel data={data} onSaved={reload} onToast={onToast} />
+          <TerminalsPanel data={data} onSaved={reload} onPlatform={onPlatform} onToast={onToast} />
         ) : null}
         {data && admin && section === 'updates' ? (
           <UpdatesPanel data={data} onSaved={reload} onToast={onToast} />
@@ -203,14 +203,25 @@ function Heading({ title, hint }: { title: string; hint: string }) {
   )
 }
 
-function Toggle({ on, onChange, label }: { on: boolean; onChange: (next: boolean) => void; label: string }) {
+function Toggle({
+  on,
+  onChange,
+  label,
+  disabled,
+}: {
+  on: boolean
+  onChange: (next: boolean) => void
+  label: string
+  disabled?: boolean
+}) {
   return (
     <button
       type="button"
       role="switch"
       aria-checked={on}
+      disabled={disabled}
       onClick={() => onChange(!on)}
-      className="flex items-center justify-between gap-4 py-2 text-left"
+      className={cn('flex items-center justify-between gap-4 py-2 text-left', disabled && 'opacity-40')}
     >
       <span className="text-sm text-[#e8e8e8]">{label}</span>
       <span className={cn('relative h-6 w-11 rounded-full transition', on ? 'bg-white' : 'bg-white/20')}>
@@ -304,7 +315,7 @@ function GeneralPanel({
 }: {
   data: SettingsPayload
   onSaved: () => Promise<void>
-  onPlatform?: (next: { defaultView: 'grid' | 'list' }) => void
+  onPlatform?: (next: { defaultView?: 'grid' | 'list'; terminalsEnabled?: boolean }) => void
   onToast: (message: string) => void
 }) {
   const [nodeName, setNodeName] = useState(data.platform.nodeName)
@@ -654,29 +665,47 @@ function UsersPanel({
 function TerminalsPanel({
   data,
   onSaved,
+  onPlatform,
   onToast,
 }: {
   data: SettingsPayload
   onSaved: () => Promise<void>
+  onPlatform?: (next: { terminalsEnabled?: boolean }) => void
   onToast: (message: string) => void
 }) {
+  const [enabled, setEnabled] = useState(data.platform.terminalEnabled !== false)
   const [max, setMax] = useState(String(data.platform.terminalMax ?? 4))
   const [idle, setIdle] = useState(String(data.platform.terminalIdleMinutes ?? 30))
   const [allowUsers, setAllowUsers] = useState(data.platform.terminalUsers !== false)
   const [busy, setBusy] = useState(false)
+
+  async function saveEnabled(next: boolean) {
+    setEnabled(next)
+    try {
+      await saveSettings({ platform: { terminalEnabled: next } })
+      onPlatform?.({ terminalsEnabled: next })
+      await onSaved()
+      onToast(next ? 'Terminals on' : 'Terminals off. Live shells killed.')
+    } catch (err) {
+      setEnabled(!next)
+      onToast(err instanceof Error ? err.message : 'Could not save')
+    }
+  }
 
   async function save() {
     setBusy(true)
     try {
       await saveSettings({
         platform: {
+          terminalEnabled: enabled,
           terminalMax: Number(max),
           terminalIdleMinutes: Number(idle),
           terminalUsers: allowUsers,
         },
       })
+      onPlatform?.({ terminalsEnabled: enabled })
       await onSaved()
-      onToast('Terminal limits saved')
+      onToast('Terminal settings saved')
     } catch (err) {
       onToast(err instanceof Error ? err.message : 'Could not save')
     } finally {
@@ -686,19 +715,40 @@ function TerminalsPanel({
 
   return (
     <div className="max-w-lg">
-      <Heading title="Terminals" hint="Live shells on this machine. Idle is measured from last keystroke." />
-      <label className="mb-4 block text-sm text-[#8d8d8d]">
-        Max live terminals per user
-        <Input className={`${fieldClass} mt-1.5`} value={max} onChange={(e) => setMax(e.target.value)} />
-      </label>
-      <label className="mb-4 block text-sm text-[#8d8d8d]">
-        Idle expiry (minutes, 0 = never)
-        <Input className={`${fieldClass} mt-1.5`} value={idle} onChange={(e) => setIdle(e.target.value)} />
-      </label>
-      <Toggle on={allowUsers} onChange={setAllowUsers} label="Allow non-admin users to open terminals" />
+      <Heading
+        title="Terminals"
+        hint="Master switch for live shells on this machine. Off hides the tab and kills every session."
+      />
+      <Toggle on={enabled} onChange={(next) => void saveEnabled(next)} label="Enable terminals" />
+      <div className={cn('mt-6', !enabled && 'pointer-events-none opacity-40')}>
+        <label className="mb-4 block text-sm text-[#8d8d8d]">
+          Max live terminals per user
+          <Input
+            className={`${fieldClass} mt-1.5`}
+            value={max}
+            onChange={(e) => setMax(e.target.value)}
+            disabled={!enabled}
+          />
+        </label>
+        <label className="mb-4 block text-sm text-[#8d8d8d]">
+          Idle expiry (minutes, 0 = never)
+          <Input
+            className={`${fieldClass} mt-1.5`}
+            value={idle}
+            onChange={(e) => setIdle(e.target.value)}
+            disabled={!enabled}
+          />
+        </label>
+        <Toggle
+          on={allowUsers}
+          onChange={setAllowUsers}
+          label="Allow non-admin users to open terminals"
+          disabled={!enabled}
+        />
+      </div>
       <Button
         className="mt-6 h-11 rounded-full bg-white text-[#1a1a1a] hover:bg-[#f2f2f2]"
-        disabled={busy}
+        disabled={busy || !enabled}
         onClick={() => void save()}
       >
         {busy ? 'Saving…' : 'Save'}

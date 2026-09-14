@@ -5,7 +5,7 @@ import { cors } from 'hono/cors'
 import { mountAdmin } from './admin.ts'
 import { bytesToGb, type ServerConfig } from './config.ts'
 import { dropPath, loadMeta, rewritePath, setStarred, touchRecent } from './meta.ts'
-import { loadPlatform } from './platform.ts'
+import { loadPlatform, terminalsAllowed } from './platform.ts'
 import { requirePool } from './pool.ts'
 import { QuotaError, folderSize } from './quota.ts'
 import { clearSession, issueSession, readSessionUserId } from './session.ts'
@@ -99,6 +99,7 @@ export function createApp(config: ServerConfig) {
       usedBytes,
       nodeName: platform.nodeName,
       defaultView: platform.defaultView,
+      terminalsEnabled: terminalsAllowed(user, platform),
     })
   })
 
@@ -143,6 +144,7 @@ export function createApp(config: ServerConfig) {
       reservedGb: bytesToGb(manifest.reservedBytes),
       nodeName: platform.nodeName,
       defaultView: platform.defaultView,
+      terminalsEnabled: terminalsAllowed(user, platform),
     })
   })
 
@@ -322,7 +324,7 @@ export function createApp(config: ServerConfig) {
     return c.json({ error: message }, 500)
   })
 
-  mountAdmin(app, config)
+  mountAdmin(app, config, terminals)
   mountTerminals(app, terminals)
   mountApp(app, config.appDist)
   return {
