@@ -147,20 +147,29 @@ export function Onboarding({
 
   function advance() {
     if (transitioning || busy) return
+    const typed = liveInputValue()
     if (phase === 'name') {
-      if (!name.trim()) return setError('Name is required')
+      const value = (typed || name).trim()
+      if (!value) return setError('Name is required')
+      setName(value)
       return go('email')
     }
     if (phase === 'email') {
-      if (!email.includes('@')) return setError('Email looks wrong')
+      const value = (typed || email).trim()
+      if (!value.includes('@')) return setError('Email looks wrong')
+      setEmail(value)
       return go('password')
     }
     if (phase === 'password') {
-      if (password.length < 8) return setError('Password must be at least 8 characters')
+      const value = typed || password
+      if (value.length < 8) return setError('Password must be at least 8 characters')
+      setPassword(value)
       return go('confirm')
     }
     if (phase === 'confirm') {
-      if (password !== confirm) return setError('Passwords do not match')
+      const value = typed || confirm
+      if (password !== value) return setError('Passwords do not match')
+      setConfirm(value)
       return go('storage')
     }
     if (phase === 'storage') {
@@ -170,16 +179,24 @@ export function Onboarding({
       return go('people')
     }
     if (phase === 'user-name') {
-      if (!draft.name.trim()) return setError('Name is required')
+      const value = (typed || draft.name).trim()
+      if (!value) return setError('Name is required')
+      setDraft((current) => ({ ...current, name: value }))
       return go('user-email')
     }
     if (phase === 'user-email') {
-      if (!draft.email.includes('@')) return setError('Email looks wrong')
+      const value = (typed || draft.email).trim()
+      if (!value.includes('@')) return setError('Email looks wrong')
+      setDraft((current) => ({ ...current, email: value }))
       return go('user-password')
     }
     if (phase === 'user-password') {
-      if (draft.password.length < 8) return setError('Password must be at least 8 characters')
-      setExtras((current) => [...current, { ...draft, name: draft.name.trim(), email: draft.email.trim() }])
+      const value = typed || draft.password
+      if (value.length < 8) return setError('Password must be at least 8 characters')
+      setExtras((current) => [
+        ...current,
+        { ...draft, name: draft.name.trim(), email: draft.email.trim(), password: value },
+      ])
       setDraft({ key: '', name: '', email: '', password: '' })
       return go('people')
     }
@@ -211,6 +228,11 @@ export function Onboarding({
     } finally {
       setBusy(false)
     }
+  }
+
+  function liveInputValue(): string {
+    const root = paneRefs.current.get(live.id)
+    return root?.querySelector<HTMLInputElement>('input:not([type="range"])')?.value ?? ''
   }
 
   function onEnter(e: KeyboardEvent) {
@@ -265,7 +287,10 @@ export function Onboarding({
             <Input
               className={fieldClass}
               value={name}
-              onChange={(e) => setName(e.target.value)}
+              onChange={(e) => {
+                setError(null)
+                setName(e.target.value)
+              }}
               onKeyDown={onEnter}
               autoComplete="name"
             />
@@ -278,7 +303,10 @@ export function Onboarding({
               className={fieldClass}
               type="email"
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              onChange={(e) => {
+                setError(null)
+                setEmail(e.target.value)
+              }}
               onKeyDown={onEnter}
               autoComplete="email"
             />
@@ -291,7 +319,10 @@ export function Onboarding({
               className={fieldClass}
               type="password"
               value={password}
-              onChange={(e) => setPassword(e.target.value)}
+              onChange={(e) => {
+                setError(null)
+                setPassword(e.target.value)
+              }}
               onKeyDown={onEnter}
               autoComplete="new-password"
             />
@@ -304,7 +335,10 @@ export function Onboarding({
               className={fieldClass}
               type="password"
               value={confirm}
-              onChange={(e) => setConfirm(e.target.value)}
+              onChange={(e) => {
+                setError(null)
+                setConfirm(e.target.value)
+              }}
               onKeyDown={onEnter}
               autoComplete="new-password"
             />
