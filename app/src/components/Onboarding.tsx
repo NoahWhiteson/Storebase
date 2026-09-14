@@ -3,7 +3,15 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { formatBytes } from '@/lib/format'
 import { submitSetup, type DiskInfo } from '@/lib/setup'
-import { useEffect, useMemo, useState, type KeyboardEvent, type ReactNode } from 'react'
+import {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type ReactNode,
+} from 'react'
 
 type ExtraUser = {
   key: string
@@ -46,6 +54,9 @@ type Phase =
   | 'user-password'
 
 const order: Phase[] = ['name', 'email', 'password', 'confirm', 'storage', 'people']
+const FADE_MS = 460
+
+type Layer = { id: number; phase: Phase }
 
 export function Onboarding({
   disk,
@@ -56,7 +67,12 @@ export function Onboarding({
 }) {
   const maxGb = Math.max(0.1, Math.floor(bytesToGb(disk.freeBytes) * 10) / 10)
   const defaultGb = Math.min(100, Math.max(1, Math.floor(maxGb * 0.5)))
-  const [phase, setPhase] = useState<Phase>('name')
+  const idRef = useRef(0)
+  const paneRefs = useRef(new Map<number, HTMLDivElement>())
+  const [layers, setLayers] = useState<Array<Layer & { mode: 'enter' | 'in' | 'out' }>>([
+    { id: 0, phase: 'name', mode: 'in' },
+  ])
+  const [stageHeight, setStageHeight] = useState<number | undefined>(undefined)
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -66,6 +82,11 @@ export function Onboarding({
   const [draft, setDraft] = useState<ExtraUser>({ key: '', name: '', email: '', password: '' })
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+
+  const live = layers.find((layer) => layer.mode !== 'out') ?? layers[layers.length - 1]
+  const leaving = layers.find((layer) => layer.mode === 'out') ?? null
+  const phase = live.phase
+  const transitioning = leaving != null
 
   const extraPayload = useMemo(
     () =>
@@ -77,31 +98,55 @@ export function Onboarding({
     [extras],
   )
 
+  function reduceMotion() {
+    return window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  }
+
+  function bindPane(id: number) {
+    return (el: HTMLDivElement | null) => {
+      if (el) paneRefs.current.set(id, el)
+      else paneRefs.current.delete(id)
+    }
+  }
+
   function go(next: Phase) {
+    if (next === phase || transitioning || busy) return
     setError(null)
-    setPhase(next)
+    if (reduceMotion()) {
+      setStageHeight(undefined)
+      setLayers([{ id: ++idRef.current, phase: next, mode: 'in' }])
+      return
+    }
+    const fromEl = paneRefs.current.get(live.id)
+    setStageHeight(fromEl?.offsetHeight)
+    const outgoing = live
+    setLayers([
+      { ...outgoing, mode: 'out' },
+      { id: ++idRef.current, phase: next, mode: 'enter' },
+    ])
   }
 
   function back() {
-    setError(null)
+    if (transitioning || busy) return
     if (phase === 'user-name') {
       setDraft({ key: '', name: '', email: '', password: '' })
-      setPhase('people')
+      go('people')
       return
     }
     if (phase === 'user-email') {
-      setPhase('user-name')
+      go('user-name')
       return
     }
     if (phase === 'user-password') {
-      setPhase('user-email')
+      go('user-email')
       return
     }
     const i = order.indexOf(phase)
-    if (i > 0) setPhase(order[i - 1])
+    if (i > 0) go(order[i - 1])
   }
 
   function advance() {
+    if (transitioning || busy) return
     if (phase === 'name') {
       if (!name.trim()) return setError('Name is required')
       return go('email')
@@ -141,11 +186,13 @@ export function Onboarding({
   }
 
   function startUser() {
+    if (transitioning || busy) return
     setDraft({ key: crypto.randomUUID(), name: '', email: '', password: '' })
     go('user-name')
   }
 
   async function finish() {
+    if (transitioning) return
     setBusy(true)
     setError(null)
     try {
@@ -167,30 +214,55 @@ export function Onboarding({
   }
 
   function onEnter(e: KeyboardEvent) {
-    if (e.key !== 'Enter' || busy) return
+    if (e.key !== 'Enter' || busy || transitioning) return
     if (phase === 'people') return
     e.preventDefault()
     advance()
   }
 
-  const showBack = phase !== 'name'
+  useLayoutEffect(() => {
+    if (!layers.some((layer) => layer.mode === 'enter')) return
+    const frame = requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        setLayers((current) =>
+          current.map((layer) => (layer.mode === 'enter' ? { ...layer, mode: 'in' } : layer)),
+        )
+      })
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [layers])
 
-  return (
-    <div className="flex min-h-full flex-col bg-[#1a1a1a] text-white">
-      <header className="flex h-16 items-center gap-2.5 px-5">
-        <StorebaseLogo className="size-8" />
-        <span className="text-[20px] font-medium tracking-tight">Storebase</span>
-      </header>
+  useLayoutEffect(() => {
+    if (!leaving) return
+    const incoming = paneRefs.current.get(live.id)
+    if (!incoming) return
+    const to = incoming.offsetHeight
+    const frame = requestAnimationFrame(() => setStageHeight(to))
+    return () => cancelAnimationFrame(frame)
+  }, [leaving, live.id])
 
-      <main
-        className={`mx-auto flex w-full flex-1 flex-col justify-center px-5 pb-16 ${
-          phase === 'storage' ? 'max-w-xl' : 'max-w-lg'
-        }`}
-      >
-        {phase === 'name' ? (
+  useEffect(() => {
+    if (!leaving) return
+    const timer = window.setTimeout(() => {
+      setLayers((current) => current.filter((layer) => layer.mode !== 'out'))
+      setStageHeight(undefined)
+    }, FADE_MS)
+    return () => window.clearTimeout(timer)
+  }, [leaving, live.id])
+
+  useEffect(() => {
+    const root = paneRefs.current.get(live.id)
+    const input = root?.querySelector<HTMLInputElement>('input:not([type="range"])')
+    input?.focus()
+  }, [live.id])
+
+  function renderStep(step: Phase, active: boolean) {
+    const locked = !active || busy || transitioning
+    return (
+      <>
+        {step === 'name' ? (
           <Question title="Admin name" hint="This account owns the node.">
             <Input
-              autoFocus
               className={fieldClass}
               value={name}
               onChange={(e) => setName(e.target.value)}
@@ -200,10 +272,9 @@ export function Onboarding({
           </Question>
         ) : null}
 
-        {phase === 'email' ? (
+        {step === 'email' ? (
           <Question title="Admin email" hint="Used to sign in as the node owner.">
             <Input
-              autoFocus
               className={fieldClass}
               type="email"
               value={email}
@@ -214,10 +285,9 @@ export function Onboarding({
           </Question>
         ) : null}
 
-        {phase === 'password' ? (
+        {step === 'password' ? (
           <Question title="Admin password" hint="At least 8 characters.">
             <Input
-              autoFocus
               className={fieldClass}
               type="password"
               value={password}
@@ -228,10 +298,9 @@ export function Onboarding({
           </Question>
         ) : null}
 
-        {phase === 'confirm' ? (
+        {step === 'confirm' ? (
           <Question title="Confirm password">
             <Input
-              autoFocus
               className={fieldClass}
               type="password"
               value={confirm}
@@ -242,7 +311,7 @@ export function Onboarding({
           </Question>
         ) : null}
 
-        {phase === 'storage' ? (
+        {step === 'storage' ? (
           <Question
             title="How much storage?"
             hint="Hard cap for this node. The rest of the disk stays for the OS and everything else."
@@ -257,7 +326,7 @@ export function Onboarding({
           </Question>
         ) : null}
 
-        {phase === 'people' ? (
+        {step === 'people' ? (
           <Question
             title="Add other user accounts?"
             hint={
@@ -269,17 +338,18 @@ export function Onboarding({
             {extras.length ? (
               <ul className="mb-4 space-y-1 text-sm text-[#c4c7c5]">
                 {extras.map((user) => (
-                  <li key={user.key}>{user.name} · {user.email}</li>
+                  <li key={user.key}>
+                    {user.name} · {user.email}
+                  </li>
                 ))}
               </ul>
             ) : null}
           </Question>
         ) : null}
 
-        {phase === 'user-name' ? (
+        {step === 'user-name' ? (
           <Question title="User name">
             <Input
-              autoFocus
               className={fieldClass}
               value={draft.name}
               onChange={(e) => setDraft((current) => ({ ...current, name: e.target.value }))}
@@ -288,10 +358,9 @@ export function Onboarding({
           </Question>
         ) : null}
 
-        {phase === 'user-email' ? (
+        {step === 'user-email' ? (
           <Question title="User email">
             <Input
-              autoFocus
               className={fieldClass}
               type="email"
               value={draft.email}
@@ -301,10 +370,9 @@ export function Onboarding({
           </Question>
         ) : null}
 
-        {phase === 'user-password' ? (
+        {step === 'user-password' ? (
           <Question title="User password" hint="At least 8 characters.">
             <Input
-              autoFocus
               className={fieldClass}
               type="password"
               value={draft.password}
@@ -314,21 +382,22 @@ export function Onboarding({
           </Question>
         ) : null}
 
-        {error ? <p className="mt-4 text-sm text-[#f28b82]">{error}</p> : null}
+        {active && error ? <p className="mt-4 text-sm text-[#f28b82]">{error}</p> : null}
 
         <div className="mt-8 flex flex-wrap gap-2">
-          {showBack ? (
-            <Button type="button" variant="ghost" className="h-11 rounded-full" onClick={back}>
+          {step !== 'name' ? (
+            <Button type="button" variant="ghost" className="h-11 rounded-full" disabled={locked} onClick={back}>
               Back
             </Button>
           ) : null}
 
-          {phase === 'people' ? (
+          {step === 'people' ? (
             <>
               <Button
                 type="button"
                 variant="secondary"
                 className="h-11 rounded-full bg-[#242424] text-white hover:bg-[#2e2e2e]"
+                disabled={locked}
                 onClick={startUser}
               >
                 Add a user
@@ -336,7 +405,7 @@ export function Onboarding({
               <Button
                 type="button"
                 className="h-11 flex-1 rounded-full bg-white text-[#1a1a1a] hover:bg-[#f2f2f2]"
-                disabled={busy}
+                disabled={locked}
                 onClick={() => void finish()}
               >
                 {busy ? 'Setting up…' : 'Finish'}
@@ -346,12 +415,39 @@ export function Onboarding({
             <Button
               type="button"
               className="h-11 flex-1 rounded-full bg-white text-[#1a1a1a] hover:bg-[#f2f2f2]"
-              disabled={busy}
+              disabled={locked}
               onClick={advance}
             >
               Continue
             </Button>
           )}
+        </div>
+      </>
+    )
+  }
+
+  return (
+    <div className="flex min-h-full flex-col bg-[#1a1a1a] text-white">
+      <header className="flex h-16 items-center gap-2.5 px-5">
+        <StorebaseLogo className="size-8" />
+        <span className="text-[20px] font-medium tracking-tight">Storebase</span>
+      </header>
+
+      <main className="mx-auto flex w-full max-w-xl flex-1 flex-col justify-center px-5 pb-16">
+        <div
+          className={`onboard-stage${leaving ? ' is-animating' : ''}`}
+          style={stageHeight != null ? { height: stageHeight } : undefined}
+        >
+          {layers.map((layer) => (
+            <div
+              key={layer.id}
+              ref={bindPane(layer.id)}
+              className={`onboard-pane is-${layer.mode}`}
+              aria-hidden={layer.mode === 'out'}
+            >
+              {renderStep(layer.phase, layer.mode !== 'out')}
+            </div>
+          ))}
         </div>
       </main>
     </div>
