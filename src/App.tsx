@@ -22,8 +22,8 @@ const QUOTA = 100 * 1024 ** 3
 const ME = { owner: 'Noah Whiteson', ownerInitials: 'NW' }
 
 const titles: Record<SectionId, string> = {
-  home: 'Welcome to Drive',
-  'my-drive': 'My Drive',
+  home: 'Welcome to Storebase',
+  'my-drive': 'My files',
   computers: 'Computers',
   shared: 'Shared with me',
   recent: 'Recent',
@@ -297,7 +297,7 @@ export default function App() {
     search.trim() ? `Results for "${search.trim()}"` : folderId ? crumbs[crumbs.length - 1]?.name ?? titles[section] : titles[section]
 
   const location = crumbs.length
-    ? [section === 'computers' ? 'Computers' : 'My Drive', ...crumbs.map((c) => c.name)].join(' / ')
+    ? [section === 'computers' ? 'Computers' : 'My files', ...crumbs.map((c) => c.name)].join(' / ')
     : titles[section]
 
   return (
@@ -306,6 +306,7 @@ export default function App() {
         search={search}
         view={view}
         detailsOpen={detailsOpen}
+        files={items}
         onSearch={setSearch}
         onView={setView}
         onToggleDetails={() => setDetailsOpen((v) => !v)}
@@ -339,7 +340,7 @@ export default function App() {
                     className="hover:text-foreground"
                     onClick={() => goSection(section === 'computers' ? 'computers' : 'my-drive')}
                   >
-                    {section === 'computers' ? 'Computers' : 'My Drive'}
+                    {section === 'computers' ? 'Computers' : 'My files'}
                   </button>
                   {crumbs.map((crumb, i) => (
                     <span key={crumb.id} className="flex items-center gap-2">

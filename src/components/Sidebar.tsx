@@ -1,4 +1,4 @@
-import { DriveLogo } from '@/components/DriveLogo'
+import { StorebaseLogo } from '@/components/StorebaseLogo'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -33,7 +33,7 @@ import {
 
 const nav: { id: SectionId; label: string; icon: typeof Home }[] = [
   { id: 'home', label: 'Home', icon: Home },
-  { id: 'my-drive', label: 'My Drive', icon: HardDrive },
+  { id: 'my-drive', label: 'My files', icon: HardDrive },
   { id: 'computers', label: 'Computers', icon: Computer },
   { id: 'shared', label: 'Shared with me', icon: Users },
   { id: 'recent', label: 'Recent', icon: Clock },
@@ -71,8 +71,8 @@ export function Sidebar({
     <div className="flex h-full w-[272px] shrink-0 flex-col bg-background">
       <div className="flex items-center justify-between px-4 pt-3 pb-1 md:hidden">
         <div className="flex items-center gap-2.5">
-          <DriveLogo className="size-7" />
-          <span className="text-[22px] font-medium tracking-tight text-[#e3e3e3]">Drive</span>
+          <StorebaseLogo className="size-7" />
+          <span className="text-[20px] font-medium tracking-tight text-[#e3e3e3]">Storebase</span>
         </div>
         <Button variant="ghost" size="icon" onClick={onCloseMobile} aria-label="Close menu">
           <X />

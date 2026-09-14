@@ -1,6 +1,6 @@
-# Drive
+# Storebase
 
-Dark-mode Google Drive UI. Vite + React + TypeScript + Tailwind + shadcn/ui. Background is `#1a1a1a`, type is Inter.
+Dark file browser in the Google Drive shape. Vite + React + TypeScript + Tailwind + shadcn/ui. Background `#1a1a1a`, Inter, cube logo.
 
 ## Run
 
@@ -18,9 +18,9 @@ npm run preview
 
 ## What it does
 
-- Sidebar: Home, My Drive, Computers, Shared, Recent, Starred, Spam, Trash, storage meter
-- Search, grid/list toggle, details panel
+- Sidebar: Home, My files, Computers, Shared, Recent, Starred, Spam, Trash, storage meter
+- Search, Ask AI, grid/list toggle, details panel
 - Open folders, star, share, rename, trash/restore, new folder, local file upload (stays in memory)
 - Right-click context menus
 
-All files are mock data in `src/data/files.ts`. Nothing is persisted.
+All files are mock data in `src/data/files.ts`. Nothing is persisted. Ask AI answers from that in-memory list.
