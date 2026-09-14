@@ -66,7 +66,6 @@ export function Gate() {
     return (
       <Onboarding
         disk={setup.disk}
-        hostname={setup.hostname}
         onDone={(next) => {
           setAccount(next)
           setPhase('ready')
