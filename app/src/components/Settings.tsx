@@ -25,6 +25,7 @@ import {
   Server,
   Shield,
   SlidersHorizontal,
+  SquareTerminal,
   UserRound,
   Users,
 } from 'lucide-react'
@@ -33,7 +34,7 @@ import { useEffect, useMemo, useState } from 'react'
 const fieldClass =
   'h-11 rounded-xl border-0 bg-[#242424] text-white shadow-none placeholder:text-[#8d8d8d] outline-none focus:outline-none focus-visible:outline-none focus-visible:ring-0'
 
-export type SettingsSection = 'account' | 'general' | 'server' | 'storage' | 'users' | 'updates' | 'security'
+export type SettingsSection = 'account' | 'general' | 'server' | 'storage' | 'users' | 'updates' | 'security' | 'terminals'
 
 type Account = { id: string; name: string; email: string; role: 'admin' | 'user' }
 
@@ -87,6 +88,7 @@ export function Settings({
     { id: 'server', label: 'Server', icon: Server, admin: true },
     { id: 'storage', label: 'Storage', icon: HardDrive, admin: true },
     { id: 'users', label: 'Users', icon: Users, admin: true },
+    { id: 'terminals', label: 'Terminals', icon: SquareTerminal, admin: true },
     { id: 'updates', label: 'Updates', icon: RefreshCw, admin: true },
     { id: 'security', label: 'Security', icon: Shield, admin: true },
   ]
@@ -179,6 +181,9 @@ export function Settings({
         ) : null}
         {data && admin && section === 'users' ? (
           <UsersPanel meId={account.id} users={data.users ?? []} onSaved={reload} onToast={onToast} />
+        ) : null}
+        {data && admin && section === 'terminals' ? (
+          <TerminalsPanel data={data} onSaved={reload} onToast={onToast} />
         ) : null}
         {data && admin && section === 'updates' ? (
           <UpdatesPanel data={data} onSaved={reload} onToast={onToast} />
@@ -642,6 +647,62 @@ function UsersPanel({
           </div>
         ))}
       </div>
+    </div>
+  )
+}
+
+function TerminalsPanel({
+  data,
+  onSaved,
+  onToast,
+}: {
+  data: SettingsPayload
+  onSaved: () => Promise<void>
+  onToast: (message: string) => void
+}) {
+  const [max, setMax] = useState(String(data.platform.terminalMax ?? 4))
+  const [idle, setIdle] = useState(String(data.platform.terminalIdleMinutes ?? 30))
+  const [allowUsers, setAllowUsers] = useState(data.platform.terminalUsers !== false)
+  const [busy, setBusy] = useState(false)
+
+  async function save() {
+    setBusy(true)
+    try {
+      await saveSettings({
+        platform: {
+          terminalMax: Number(max),
+          terminalIdleMinutes: Number(idle),
+          terminalUsers: allowUsers,
+        },
+      })
+      await onSaved()
+      onToast('Terminal limits saved')
+    } catch (err) {
+      onToast(err instanceof Error ? err.message : 'Could not save')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="max-w-lg">
+      <Heading title="Terminals" hint="Live shells on this machine. Idle is measured from last keystroke." />
+      <label className="mb-4 block text-sm text-[#8d8d8d]">
+        Max live terminals per user
+        <Input className={`${fieldClass} mt-1.5`} value={max} onChange={(e) => setMax(e.target.value)} />
+      </label>
+      <label className="mb-4 block text-sm text-[#8d8d8d]">
+        Idle expiry (minutes, 0 = never)
+        <Input className={`${fieldClass} mt-1.5`} value={idle} onChange={(e) => setIdle(e.target.value)} />
+      </label>
+      <Toggle on={allowUsers} onChange={setAllowUsers} label="Allow non-admin users to open terminals" />
+      <Button
+        className="mt-6 h-11 rounded-full bg-white text-[#1a1a1a] hover:bg-[#f2f2f2]"
+        disabled={busy}
+        onClick={() => void save()}
+      >
+        {busy ? 'Saving…' : 'Save'}
+      </Button>
     </div>
   )
 }

@@ -45,7 +45,7 @@ async function init(): Promise<void> {
 async function start(): Promise<void> {
   const config = nodeConfig()
   const app = createApp(config)
-  serve({ fetch: app.fetch, hostname: config.host, port: config.port }, async (info) => {
+  const server = serve({ fetch: app.fetch, hostname: config.host, port: config.port }, async (info) => {
     console.log(`Storebase node on http://${info.address}:${info.port}`)
     if (await isConfigured(config)) {
       const manifest = await readManifest(config)
@@ -56,6 +56,7 @@ async function start(): Promise<void> {
     }
     startUpdateLoop(config, async () => (await loadPlatform(config)).autoUpdate)
   })
+  app.attach(server)
 }
 
 async function update(): Promise<void> {

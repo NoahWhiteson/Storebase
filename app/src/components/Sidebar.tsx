@@ -21,6 +21,7 @@ import {
   Home,
   Plus,
   Settings,
+  SquareTerminal,
   Star,
   Trash2,
   Upload,
@@ -44,6 +45,7 @@ const nav: { id: SectionId; label: string; icon: typeof Home }[] = [
 
 type SidebarProps = {
   section: SectionId
+  terminalsOpen: boolean
   usedBytes: number
   quotaBytes: number
   mobileOpen: boolean
@@ -53,10 +55,12 @@ type SidebarProps = {
   onUpload: () => void
   onCreateFile: (kind: FileKind) => void
   onOpenSettings: () => void
+  onOpenTerminals: () => void
 }
 
 export function Sidebar({
   section,
+  terminalsOpen,
   usedBytes,
   quotaBytes,
   mobileOpen,
@@ -66,6 +70,7 @@ export function Sidebar({
   onUpload,
   onCreateFile,
   onOpenSettings,
+  onOpenTerminals,
 }: SidebarProps) {
   const usedPct = Math.min(100, Math.round((usedBytes / quotaBytes) * 100))
 
@@ -120,7 +125,7 @@ export function Sidebar({
         <nav className="flex flex-col gap-0.5 py-1">
           {nav.map((item) => {
             const Icon = item.icon
-            const active = section === item.id
+            const active = !terminalsOpen && section === item.id
             return (
               <button
                 key={item.id}
@@ -138,6 +143,19 @@ export function Sidebar({
               </button>
             )
           })}
+          <button
+            type="button"
+            onClick={onOpenTerminals}
+            className={cn(
+              'flex h-10 items-center gap-3 rounded-full px-4 text-sm font-medium transition-colors',
+              terminalsOpen
+                ? 'bg-white/10 text-white'
+                : 'text-[#b3b3b3] hover:bg-white/5 hover:text-white',
+            )}
+          >
+            <SquareTerminal className="size-[18px]" strokeWidth={terminalsOpen ? 2 : 1.75} />
+            Terminal
+          </button>
           <button
             type="button"
             onClick={onOpenSettings}

@@ -2,6 +2,7 @@ import { FileGlyph } from '@/components/FileGlyph'
 import { FileView } from '@/components/FileView'
 import { Settings, type SettingsSection } from '@/components/Settings'
 import { Sidebar } from '@/components/Sidebar'
+import { Terminals } from '@/components/Terminals'
 import { TopBar } from '@/components/TopBar'
 import { Button } from '@/components/ui/button'
 import {
@@ -67,6 +68,7 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
   const me = { owner: profile.name, ownerInitials: initials(profile.name) }
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('account')
+  const [terminalsOpen, setTerminalsOpen] = useState(false)
   const [section, setSection] = useState<SectionId>('home')
   const [folderPath, setFolderPath] = useState('')
   const [search, setSearch] = useState('')
@@ -153,6 +155,13 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
     const next = account.role === 'admin' || section === 'account' ? section : 'account'
     setSettingsSection(next)
     setSettingsOpen(true)
+    setTerminalsOpen(false)
+    setSidebarOpen(false)
+  }
+
+  function openTerminals() {
+    setTerminalsOpen(true)
+    setSettingsOpen(false)
     setSidebarOpen(false)
   }
 
@@ -161,6 +170,8 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
     setFolderPath('')
     setSelectedIds([])
     setSearch('')
+    setSettingsOpen(false)
+    setTerminalsOpen(false)
     setSidebarOpen(false)
   }
 
@@ -349,10 +360,12 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
         account={profile}
         initials={me.ownerInitials}
         settingsOpen={settingsOpen}
+        terminalsOpen={terminalsOpen}
         onSearch={setSearch}
         onView={setView}
         onOpenSidebar={() => setSidebarOpen(true)}
         onOpenSettings={openSettings}
+        onOpenTerminals={openTerminals}
         onSignOut={() => void signOut()}
       />
       {settingsOpen ? (
@@ -370,6 +383,7 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
       <div className="flex min-h-0 flex-1 bg-[#1a1a1a]">
         <Sidebar
           section={section}
+          terminalsOpen={terminalsOpen}
           usedBytes={usedBytes}
           quotaBytes={quota}
           mobileOpen={sidebarOpen}
@@ -382,7 +396,11 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
           onCreateFile={(kind) => void createUntitled(kind)}
           onUpload={() => uploadRef.current?.click()}
           onOpenSettings={() => openSettings(account.role === 'admin' ? 'storage' : 'account')}
+          onOpenTerminals={openTerminals}
         />
+        {terminalsOpen ? (
+          <Terminals onToast={notify} />
+        ) : (
         <main className="flex min-w-0 flex-1 flex-col overflow-hidden bg-[#1a1a1a]">
           <div
             className="flex flex-col gap-6 overflow-y-auto px-4 py-4 md:px-6 md:py-5"
@@ -463,6 +481,7 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
             )}
           </div>
         </main>
+        )}
       </div>
       )}
 

@@ -12,6 +12,9 @@ export type PlatformSettings = {
   autoUpdate: boolean
   bindHost: string
   bindPort: number
+  terminalMax: number
+  terminalIdleMinutes: number
+  terminalUsers: boolean
 }
 
 export function defaultPlatform(config: ServerConfig): PlatformSettings {
@@ -22,7 +25,16 @@ export function defaultPlatform(config: ServerConfig): PlatformSettings {
     autoUpdate: config.autoUpdate,
     bindHost: config.host,
     bindPort: config.port,
+    terminalMax: 4,
+    terminalIdleMinutes: 30,
+    terminalUsers: true,
   }
+}
+
+function clampInt(value: unknown, fallback: number, min: number, max: number): number {
+  const n = Number(value)
+  if (!Number.isFinite(n)) return fallback
+  return Math.min(max, Math.max(min, Math.round(n)))
 }
 
 export async function loadPlatform(config: ServerConfig): Promise<PlatformSettings> {
@@ -39,6 +51,9 @@ export async function loadPlatform(config: ServerConfig): Promise<PlatformSettin
       autoUpdate: typeof parsed.autoUpdate === 'boolean' ? parsed.autoUpdate : fallback.autoUpdate,
       bindHost: parsed.bindHost?.trim() || fallback.bindHost,
       bindPort: Number.isFinite(port) && port > 0 ? port : fallback.bindPort,
+      terminalMax: clampInt(parsed.terminalMax, fallback.terminalMax, 1, 32),
+      terminalIdleMinutes: clampInt(parsed.terminalIdleMinutes, fallback.terminalIdleMinutes, 0, 10080),
+      terminalUsers: typeof parsed.terminalUsers === 'boolean' ? parsed.terminalUsers : fallback.terminalUsers,
     }
   } catch {
     return fallback

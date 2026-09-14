@@ -25,6 +25,9 @@ import {
   walkVisible,
 } from './storage.ts'
 import { applyUpdate, checkGithub, updateStatus } from './update.ts'
+import { mountTerminals } from './terminal-api.ts'
+import { attachTerminalWs } from './terminal-ws.ts'
+import { createTerminalHub } from './terminals.ts'
 import {
   ensureUserDrive,
   findByEmail,
@@ -37,6 +40,8 @@ import {
 } from './users.ts'
 import { mountApp } from './web.ts'
 
+import type { ServerType } from '@hono/node-server'
+
 type Vars = { user: UserRecord; root: string }
 
 function publicPath(path: string): boolean {
@@ -45,6 +50,7 @@ function publicPath(path: string): boolean {
 
 export function createApp(config: ServerConfig) {
   const app = new Hono<{ Variables: Vars }>()
+  const terminals = createTerminalHub(config)
   app.use('/api/*', cors({ origin: (origin) => origin || '*', credentials: true }))
 
   app.get('/api/health', (c) => c.json({ ok: true, service: 'storebase' }))
@@ -317,6 +323,10 @@ export function createApp(config: ServerConfig) {
   })
 
   mountAdmin(app, config)
+  mountTerminals(app, terminals)
   mountApp(app, config.appDist)
-  return app
+  return {
+    fetch: app.fetch.bind(app),
+    attach: (server: ServerType) => attachTerminalWs(server, config, terminals),
+  }
 }

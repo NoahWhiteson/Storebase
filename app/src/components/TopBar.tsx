@@ -16,9 +16,10 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
+import { cn } from 'cn'
 import type { SettingsSection } from '@/components/Settings'
 import type { DriveItem } from '@/types'
-import { Grid2x2, List, Menu, Search, Settings, Sparkles } from 'lucide-react'
+import { Grid2x2, List, Menu, Search, Settings, Sparkles, SquareTerminal } from 'lucide-react'
 import { useState } from 'react'
 
 type TopBarProps = {
@@ -28,10 +29,12 @@ type TopBarProps = {
   account: { name: string; email: string }
   initials: string
   settingsOpen: boolean
+  terminalsOpen: boolean
   onSearch: (value: string) => void
   onView: (view: 'grid' | 'list') => void
   onOpenSidebar: () => void
   onOpenSettings: (section?: SettingsSection) => void
+  onOpenTerminals: () => void
   onSignOut: () => void
 }
 
@@ -42,10 +45,12 @@ export function TopBar({
   account,
   initials,
   settingsOpen,
+  terminalsOpen,
   onSearch,
   onView,
   onOpenSidebar,
   onOpenSettings,
+  onOpenTerminals,
   onSignOut,
 }: TopBarProps) {
   const [askOpen, setAskOpen] = useState(false)
@@ -69,6 +74,8 @@ export function TopBar({
       <div className="flex h-full min-w-0 flex-1 items-center gap-2 px-3 md:gap-3 md:pr-4 md:pl-2">
         {settingsOpen ? (
           <div className="min-w-0 flex-1 text-[15px] font-medium text-white">Settings</div>
+        ) : terminalsOpen ? (
+          <div className="min-w-0 flex-1 text-[15px] font-medium text-white">Terminal</div>
         ) : (
           <div className="relative flex h-12 min-w-0 flex-1 items-center">
             <Search className="pointer-events-none absolute left-4 size-[18px] text-[#9a9a9a]" />
@@ -81,7 +88,7 @@ export function TopBar({
           </div>
         )}
 
-        {settingsOpen ? null : (
+        {settingsOpen || terminalsOpen ? null : (
         <Button
           type="button"
           variant="secondary"
@@ -108,6 +115,20 @@ export function TopBar({
               </Button>
             </TooltipTrigger>
             <TooltipContent>{view === 'grid' ? 'List view' : 'Grid view'}</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className={cn('size-10', terminalsOpen ? 'bg-white/10' : '')}
+                aria-label="Terminal"
+                onClick={onOpenTerminals}
+              >
+                <SquareTerminal />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Terminal</TooltipContent>
           </Tooltip>
           <Tooltip>
             <TooltipTrigger asChild>

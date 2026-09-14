@@ -46,8 +46,19 @@ export async function issueSession(c: Context, config: ServerConfig, userId: str
   })
 }
 
-export async function readSessionUserId(c: Context, config: ServerConfig): Promise<string | null> {
-  const token = getCookie(c, COOKIE)
+export function tokenFromCookieHeader(header: string | undefined): string | null {
+  if (!header) return null
+  for (const part of header.split(';')) {
+    const [key, ...rest] = part.trim().split('=')
+    if (key === COOKIE) return decodeURIComponent(rest.join('='))
+  }
+  return null
+}
+
+export async function readSessionUserIdFromToken(
+  token: string | null | undefined,
+  config: ServerConfig,
+): Promise<string | null> {
   if (!token) return null
   const parts = token.split('.')
   if (parts.length !== 3) return null
@@ -57,6 +68,10 @@ export async function readSessionUserId(c: Context, config: ServerConfig): Promi
   const secret = await loadSecret(config)
   if (!safeEqual(sig, sign(secret, `${userId}.${exp}`))) return null
   return userId
+}
+
+export async function readSessionUserId(c: Context, config: ServerConfig): Promise<string | null> {
+  return readSessionUserIdFromToken(getCookie(c, COOKIE) ?? null, config)
 }
 
 export function clearSession(c: Context): void {

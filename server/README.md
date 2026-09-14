@@ -39,6 +39,9 @@ Open the app. If this node has no admin yet, onboarding sets the owner account, 
 - `POST /api/files/restore` — `{ path }`
 - `GET /api/files/download?path=`
 - `DELETE /api/files?path=`
+- `GET/POST /api/terminals` — list / spawn a node shell (cookie session)
+- `DELETE /api/terminals/:id`
+- `WS /api/terminals/:id/stream` — stdin/stdout + resize
 - `GET/POST /api/update` — admin; check or apply GitHub `main` (`POST /api/update?force=1` rebuilds even if current)
 
 From the clone (opt-in, Settings not required):

@@ -107,6 +107,16 @@ export function mountAdmin(app: Hono<{ Variables: Vars }>, config: ServerConfig)
         typeof body.platform?.autoUpdate === 'boolean' ? body.platform.autoUpdate : current.autoUpdate,
       bindHost: body.platform?.bindHost?.trim() || current.bindHost,
       bindPort: Number(body.platform?.bindPort) > 0 ? Number(body.platform?.bindPort) : current.bindPort,
+      terminalMax:
+        body.platform?.terminalMax != null
+          ? Math.min(32, Math.max(1, Math.round(Number(body.platform.terminalMax))))
+          : current.terminalMax,
+      terminalIdleMinutes:
+        body.platform?.terminalIdleMinutes != null
+          ? Math.min(10080, Math.max(0, Math.round(Number(body.platform.terminalIdleMinutes))))
+          : current.terminalIdleMinutes,
+      terminalUsers:
+        typeof body.platform?.terminalUsers === 'boolean' ? body.platform.terminalUsers : current.terminalUsers,
     }
     await savePlatform(config, next)
 

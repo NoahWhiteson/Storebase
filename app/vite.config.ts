@@ -15,7 +15,10 @@ export default defineConfig({
     port: 43123,
     strictPort: true,
     proxy: {
-      '/api': 'http://127.0.0.1:4780',
+      '/api': {
+        target: 'http://127.0.0.1:4780',
+        ws: true,
+      },
     },
   },
 })

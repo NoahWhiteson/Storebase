@@ -15,6 +15,9 @@ export type SettingsPayload = {
     autoUpdate?: boolean
     bindHost?: string
     bindPort?: number
+    terminalMax?: number
+    terminalIdleMinutes?: number
+    terminalUsers?: boolean
   }
   server?: {
     liveHost: string
