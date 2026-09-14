@@ -66,7 +66,7 @@ export function TopBar({
             value={search}
             onChange={(e) => onSearch(e.target.value)}
             placeholder="Search in Storebase"
-            className="h-12 rounded-full border-0 bg-[#242424] pl-12 text-[15px] shadow-none placeholder:text-[#8d8d8d] focus-visible:bg-[#2a2a2a] focus-visible:ring-1 focus-visible:ring-white/15"
+            className="h-12 rounded-full border-0 bg-[#242424] pl-12 text-[15px] shadow-none placeholder:text-[#8d8d8d] outline-none focus-visible:bg-[#2a2a2a] focus-visible:ring-0"
           />
         </div>
 

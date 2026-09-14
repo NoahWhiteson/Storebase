@@ -13,7 +13,7 @@ type ExtraUser = {
 }
 
 const fieldClass =
-  'h-12 rounded-xl border-0 bg-[#242424] text-white shadow-none placeholder:text-[#8d8d8d] focus-visible:ring-1 focus-visible:ring-white/15'
+  'h-12 rounded-xl border-0 bg-[#242424] text-white shadow-none placeholder:text-[#8d8d8d] outline-none focus:outline-none focus-visible:outline-none focus-visible:ring-0'
 
 function bytesToGb(bytes: number): number {
   return bytes / 1024 ** 3
@@ -242,7 +242,7 @@ export function Onboarding({
                   value={Number(reserveGb.toFixed(1))}
                   onChange={(e) => setReserveGb(Number(e.target.value))}
                   onKeyDown={onEnter}
-                  className="h-10 w-28 rounded-xl border-0 bg-[#242424] text-right"
+                  className="h-10 w-28 rounded-xl border-0 bg-[#242424] text-right outline-none focus-visible:ring-0"
                 />
                 <span className="text-sm text-[#8d8d8d]">GB</span>
               </div>
