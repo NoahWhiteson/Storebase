@@ -68,6 +68,18 @@ export async function localSha(home: string): Promise<string | null> {
   }
 }
 
+async function remoteMainSha(): Promise<string | null> {
+  try {
+    const { stdout } = await exec('git', ['ls-remote', GITHUB_GIT, 'refs/heads/main'], {
+      encoding: 'utf8',
+    })
+    const sha = stdout.trim().split(/\s+/)[0]
+    return sha || null
+  } catch {
+    return null
+  }
+}
+
 export async function checkGithub(config: ServerConfig): Promise<UpdateState> {
   state.currentSha = await localSha(config.homeDir)
   const headers: Record<string, string> = {
@@ -76,11 +88,25 @@ export async function checkGithub(config: ServerConfig): Promise<UpdateState> {
   }
   if (process.env.GITHUB_TOKEN) headers.Authorization = `Bearer ${process.env.GITHUB_TOKEN}`
   try {
-    const res = await fetch(`https://api.github.com/repos/${REPO}/commits/main`, { headers })
-    if (!res.ok) throw new Error(`GitHub ${res.status}`)
-    const body = (await res.json()) as { sha?: string; commit?: { message?: string } }
-    state.latestSha = body.sha ?? null
-    state.latestMessage = body.commit?.message?.split('\n')[0] ?? null
+    const remoteSha = await remoteMainSha()
+    state.latestSha = remoteSha
+    if (!remoteSha) {
+      const res = await fetch(`https://api.github.com/repos/${REPO}/commits/main`, { headers })
+      if (!res.ok) throw new Error(`GitHub ${res.status}`)
+      const body = (await res.json()) as { sha?: string; commit?: { message?: string } }
+      state.latestSha = body.sha ?? null
+      state.latestMessage = body.commit?.message?.split('\n')[0] ?? null
+    } else {
+      try {
+        const res = await fetch(`https://api.github.com/repos/${REPO}/commits/${remoteSha}`, { headers })
+        if (res.ok) {
+          const body = (await res.json()) as { commit?: { message?: string } }
+          state.latestMessage = body.commit?.message?.split('\n')[0] ?? state.latestMessage
+        }
+      } catch {
+        // message is optional
+      }
+    }
     state.available = Boolean(state.latestSha && state.currentSha && state.latestSha !== state.currentSha)
     state.lastError = null
   } catch (err) {
