@@ -14,7 +14,11 @@ private final class Gate: @unchecked Sendable {
 enum CloudStub {
   static let xattrName = "app.storebase.placeholder"
   static let legacyExt = "storebase"
+  static let tagLabel = "Storebase"
   private static let openWithKey = "com.apple.LaunchServices.OpenWith"
+  private static let userTagsKey = "com.apple.metadata:_kMDItemUserTags"
+  private static let commentKey = "com.apple.metadata:kMDItemFinderComment"
+  private static let whereFromKey = "com.apple.metadata:kMDItemWhereFroms"
 
   struct Meta: Codable {
     var path: String
@@ -103,14 +107,19 @@ enum CloudStub {
           evict(url: url, remotePath: info.path, size: info.size)
           continue
         }
-        guard let info = meta(at: url), !info.path.isEmpty else { continue }
-        let bytes = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
-        if bytes > 4096 {
-          evict(url: url, remotePath: info.path, size: info.size)
+        if let info = meta(at: url), !info.path.isEmpty {
+          let bytes = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+          if bytes > 4096 {
+            evict(url: url, remotePath: info.path, size: info.size)
+            continue
+          }
+          if hasStorebaseTag(url), hasOpenWith(url), extensionVisible(url) { continue }
+          stampCloud(url, remotePath: info.path, size: info.size, display: info.name ?? url.lastPathComponent)
           continue
         }
-        if hasOpenWith(url), extensionVisible(url) { continue }
-        finishStub(url, remotePath: info.path, size: info.size, display: info.name ?? url.lastPathComponent)
+        if hasStorebaseTag(url) {
+          bindOpener(url)
+        }
       }
     }
   }
@@ -154,18 +163,21 @@ enum CloudStub {
       Notifier.send(title: "Storebase isn’t paired", body: "Connect the Mac app, then open the file again.")
       return
     }
-    guard let info = meta(at: url), !info.path.isEmpty else {
+    let info = meta(at: url)
+    let remote = info?.path ?? TrackedClouds.remote(forLocal: url.path) ?? ""
+    guard !remote.isEmpty else {
       Notifier.send(title: "Not a Storebase cloud copy", body: url.lastPathComponent)
       return
     }
-    let remote = info.path
-    let size = info.size
+    let size = info?.size ?? 0
     let client = APIClient(baseURL: base, token: model.settings.token)
     do {
       try FileManager.default.createDirectory(at: cacheRoot(), withIntermediateDirectories: true)
       let dir = cacheRoot().appendingPathComponent(UUID().uuidString, isDirectory: true)
       try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-      let cache = dir.appendingPathComponent(cacheName(url, info: info, remote: remote))
+      let cache = dir.appendingPathComponent(
+        cacheName(url, info: info ?? Meta(path: remote, size: size, state: "evicted", name: url.lastPathComponent), remote: remote)
+      )
       try await client.download(path: remote, to: cache)
       let values = try? cache.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
       openInDefaultApp(cache)
@@ -303,12 +315,54 @@ enum CloudStub {
   }
 
   private static func finishStub(_ url: URL, remotePath: String, size: Int64, display: String) {
+    stampCloud(url, remotePath: remotePath, size: size, display: display)
+  }
+
+  private static func stampCloud(_ url: URL, remotePath: String, size: Int64, display: String) {
     let payload = Meta(path: remotePath, size: size, state: "evicted", name: display)
     writeMeta(url, payload)
     bindOpener(url)
+    applyFinderTag(url)
+    applyComment(url)
+    applyWhereFrom(url, remote: remotePath)
     showExt(url)
     clearIcon(url)
     TrackedClouds.remember(local: url.path, remote: remotePath)
+  }
+
+  static func hasStorebaseTag(_ url: URL) -> Bool {
+    let tags = ((try? url.resourceValues(forKeys: [.tagNamesKey]).tagNames) ?? []) + (readStringListXattr(url, userTagsKey) ?? [])
+    if tags.contains(where: { tagBase($0).caseInsensitiveCompare(tagLabel) == .orderedSame }) {
+      return true
+    }
+    if let comment = readPlistString(url, commentKey), comment.localizedCaseInsensitiveContains(tagLabel) {
+      return true
+    }
+    return false
+  }
+
+  private static func tagBase(_ raw: String) -> String {
+    raw.split(separator: "\n").first.map(String.init) ?? raw
+  }
+
+  private static func applyFinderTag(_ url: URL) {
+    var file = url
+    let existing = (try? url.resourceValues(forKeys: [.tagNamesKey]).tagNames) ?? []
+    if !existing.contains(where: { tagBase($0).caseInsensitiveCompare(tagLabel) == .orderedSame }) {
+      var values = URLResourceValues()
+      values.tagNames = existing + [tagLabel]
+      try? file.setResourceValues(values)
+    }
+    if hasStorebaseTag(url) { return }
+    writePlist(url, userTagsKey, existing + [tagLabel])
+  }
+
+  private static func applyComment(_ url: URL) {
+    writePlist(url, commentKey, tagLabel)
+  }
+
+  private static func applyWhereFrom(_ url: URL, remote: String) {
+    writePlist(url, whereFromKey, ["storebase://\(remote)", tagLabel])
   }
 
   private static func showExt(_ url: URL) {
@@ -331,13 +385,18 @@ enum CloudStub {
     return needed > 0
   }
 
+  private static func appURL() -> URL {
+    let installed = URL(fileURLWithPath: "/Applications/Storebase.app")
+    if FileManager.default.fileExists(atPath: installed.path) { return installed }
+    return Bundle.main.bundleURL
+  }
+
   private static func bindOpener(_ url: URL) {
-    let bundle = Bundle.main
     let dict: [String: Any] = [
-      "bundleid": bundle.bundleIdentifier ?? "app.storebase.mac",
-      "path": bundle.bundleURL.path,
+      "bundleid": Bundle.main.bundleIdentifier ?? "app.storebase.mac",
+      "path": appURL().path,
       "skipcheck": true,
-      "version": Int(bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "0") ?? 0,
+      "version": 0,
     ]
     guard let data = try? PropertyListSerialization.data(fromPropertyList: dict, format: .binary, options: 0) else { return }
     _ = url.path.withCString { pth in
@@ -352,6 +411,44 @@ enum CloudStub {
         removexattr(pth, key, 0)
       }
     }
+  }
+
+  private static func writePlist(_ url: URL, _ key: String, _ value: Any) {
+    guard let data = try? PropertyListSerialization.data(fromPropertyList: value, format: .binary, options: 0) else { return }
+    _ = url.path.withCString { pth in
+      key.withCString { xkey in
+        data.withUnsafeBytes { buf in
+          setxattr(pth, xkey, buf.baseAddress, buf.count, 0, 0)
+        }
+      }
+    }
+  }
+
+  private static func readStringListXattr(_ url: URL, _ key: String) -> [String]? {
+    readPlist(url, key) as? [String]
+  }
+
+  private static func readPlistString(_ url: URL, _ key: String) -> String? {
+    readPlist(url, key) as? String
+  }
+
+  private static func readPlist(_ url: URL, _ key: String) -> Any? {
+    let needed = url.path.withCString { pth in
+      key.withCString { xkey in
+        getxattr(pth, xkey, nil, 0, 0, 0)
+      }
+    }
+    guard needed > 0 else { return nil }
+    var data = Data(count: Int(needed))
+    let read = data.withUnsafeMutableBytes { raw in
+      url.path.withCString { pth in
+        key.withCString { xkey in
+          getxattr(pth, xkey, raw.baseAddress, raw.count, 0, 0)
+        }
+      }
+    }
+    guard read > 0 else { return nil }
+    return try? PropertyListSerialization.propertyList(from: Data(data.prefix(Int(read))), options: [], format: nil)
   }
 
   private static func clearIcon(_ url: URL) {
@@ -445,6 +542,10 @@ enum TrackedClouds {
       items.append(Item(local: local, remote: remote))
       saveLocked(items)
     }
+  }
+
+  static func remote(forLocal path: String) -> String? {
+    gate.sync { loadLocked().first { $0.local == path }?.remote }
   }
 
   static func reconcile(base: URL, token: String, folders: [URL], mirrorLocal: Bool) async {

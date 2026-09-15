@@ -17,9 +17,9 @@
   <key>CFBundleIconName</key>
   <string>AppIcon</string>
   <key>CFBundleShortVersionString</key>
-  <string>1.8</string>
+  <string>1.9</string>
   <key>CFBundleVersion</key>
-  <string>13</string>
+  <string>14</string>
   <key>LSApplicationCategoryType</key>
   <string>public.app-category.utilities</string>
   <key>LSMinimumSystemVersion</key>
@@ -53,7 +53,7 @@
       <key>CFBundleTypeName</key>
       <string>All files</string>
       <key>CFBundleTypeRole</key>
-      <string>Viewer</string>
+      <string>Editor</string>
       <key>LSHandlerRank</key>
       <string>Alternate</string>
       <key>LSItemContentTypes</key>

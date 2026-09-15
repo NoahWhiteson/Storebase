@@ -258,7 +258,7 @@ struct StoragePane: View {
       }
       Section("After upload") {
         Toggle("Keep files in the folder as cloud copies", isOn: placeholdersBind)
-        Text("Keeps the real name and icon (photo.jpg stays a JPEG in Finder). Double-click downloads from Storebase and opens Preview or whatever owns that type. Close it and the local bytes disappear.")
+        Text("Keeps the real name and icon. Each cloud copy is tagged Storebase in Finder (and Get Info). Double-click always opens Storebase, which downloads then hands off to Preview or whatever owns that type. Close it and the local bytes disappear.")
           .font(.caption)
           .foregroundStyle(.secondary)
         Toggle("Keep deletes in sync", isOn: mirrorDeletesBind)
