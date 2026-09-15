@@ -1,5 +1,6 @@
 xcuserdata/
 DerivedData/
 *.xcuserstate
-macos/.derived/
-macos/dist/
+.build/
+.derived/
+dist/
