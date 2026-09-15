@@ -1,7 +1,7 @@
 import Foundation
 import ServiceManagement
 
-final class SettingsStore: ObservableObject {
+final class SettingsStore: ObservableObject, @unchecked Sendable {
   @Published var settings: AppSettings {
     didSet { persist() }
   }
@@ -26,14 +26,17 @@ final class SettingsStore: ObservableObject {
   }
 
   private func syncLoginItem() {
-    do {
-      if settings.launchAtLogin {
-        try SMAppService.mainApp.register()
-      } else {
-        try SMAppService.mainApp.unregister()
+    let launch = settings.launchAtLogin
+    Task { @MainActor in
+      do {
+        if launch {
+          try SMAppService.mainApp.register()
+        } else {
+          try SMAppService.mainApp.unregister()
+        }
+      } catch {
+        // login item is best-effort
       }
-    } catch {
-      // login item is best-effort
     }
   }
 }

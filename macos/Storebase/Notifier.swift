@@ -2,16 +2,20 @@ import UserNotifications
 
 enum Notifier {
   static func request() {
-    UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
+    Task { @MainActor in
+      UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
+    }
   }
 
   static func send(id: String = UUID().uuidString, title: String, body: String) {
-    let content = UNMutableNotificationContent()
-    content.title = title
-    content.body = body
-    content.sound = .default
-    let req = UNNotificationRequest(identifier: id, content: content, trigger: nil)
-    UNUserNotificationCenter.current().add(req)
+    Task { @MainActor in
+      let content = UNMutableNotificationContent()
+      content.title = title
+      content.body = body
+      content.sound = .default
+      let req = UNNotificationRequest(identifier: id, content: content, trigger: nil)
+      UNUserNotificationCenter.current().add(req)
+    }
   }
 
   static func quotaFull(file: String) {

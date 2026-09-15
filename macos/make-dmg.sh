@@ -30,12 +30,15 @@ elif [[ "${UNSIGNED:-}" == "1" ]]; then
   SIGN_ARGS=(CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO)
 fi
 
+ARCH="$(uname -m)"
 xcodebuild \
   -project "$ROOT/Storebase.xcodeproj" \
   -scheme Storebase \
   -configuration Release \
   -derivedDataPath "$DERIVED" \
-  -destination 'generic/platform=macOS' \
+  -destination "platform=macOS,arch=${ARCH}" \
+  ARCHS="${ARCH}" \
+  ONLY_ACTIVE_ARCH=YES \
   "${SIGN_ARGS[@]}" \
   build
 

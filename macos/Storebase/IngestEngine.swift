@@ -1,7 +1,7 @@
 import Foundation
 import AppKit
 
-final class IngestEngine {
+final class IngestEngine: @unchecked Sendable {
   private let store: SettingsStore
   private var timer: Timer?
   private var seen: Set<String>
@@ -172,7 +172,10 @@ final class IngestEngine {
   private func removeLocal(_ url: URL, settings: AppSettings) {
     guard settings.removeLocalAfterUpload else { return }
     if settings.trashInsteadOfDelete {
-      NSWorkspace.shared.recycle([url], completionHandler: nil)
+      let target = url
+      Task { @MainActor in
+        NSWorkspace.shared.recycle([target], completionHandler: nil)
+      }
     } else {
       try? FileManager.default.removeItem(at: url)
     }

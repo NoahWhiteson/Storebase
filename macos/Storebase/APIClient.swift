@@ -33,7 +33,7 @@ struct APIError: LocalizedError {
   var isQuota: Bool { status == 507 || code == "QUOTA" }
 }
 
-final class APIClient {
+final class APIClient: @unchecked Sendable {
   var baseURL: URL
   var token: String
 

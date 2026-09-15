@@ -13,7 +13,7 @@ enum CloudStub {
     var name: String?
   }
 
-  private struct Session {
+  private struct Session: Sendable {
     var stub: URL
     var cache: URL
     var remote: String
@@ -24,9 +24,9 @@ enum CloudStub {
   }
 
   private static let lock = NSLock()
-  private static var sessions: [Session] = []
-  private static var sweeping = false
-  private static var pending: [URL] = []
+  nonisolated(unsafe) private static var sessions: [Session] = []
+  nonisolated(unsafe) private static var sweeping = false
+  nonisolated(unsafe) private static var pending: [URL] = []
 
   static func meta(at url: URL) -> Meta? {
     if let fromXattr = readXattr(url) { return fromXattr }
@@ -70,7 +70,7 @@ enum CloudStub {
     if dest.standardizedFileURL != url.standardizedFileURL {
       try? FileManager.default.removeItem(at: url)
     }
-    DispatchQueue.main.async {
+    Task { @MainActor in
       if let icon = NSImage(named: "AppIcon") ?? NSApp.applicationIconImage {
         NSWorkspace.shared.setIcon(icon, forFile: dest.path, options: [])
       }
@@ -299,22 +299,12 @@ enum CloudStub {
   }
 
   private static func openInDefaultApp(_ url: URL) {
-    let ours = Bundle.main.bundleURL.standardizedFileURL
-    let apps = NSWorkspace.shared.urlsForApplications(toOpen: url).filter {
-      $0.standardizedFileURL != ours && $0.pathExtension == "app"
-    }
-    let fallbacks = [
-      URL(fileURLWithPath: "/System/Applications/Preview.app"),
-      URL(fileURLWithPath: "/System/Applications/QuickTime Player.app"),
-      URL(fileURLWithPath: "/System/Applications/TextEdit.app"),
-    ]
-    let target =
-      apps.first { FileManager.default.fileExists(atPath: $0.path) }
-      ?? fallbacks.first { FileManager.default.fileExists(atPath: $0.path) }
-    guard let target else { return }
-    let config = NSWorkspace.OpenConfiguration()
-    config.activates = true
-    NSWorkspace.shared.open([url], withApplicationAt: target, configuration: config) { _, _ in }
+    let proc = Process()
+    proc.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+    proc.arguments = [url.path]
+    proc.standardOutput = FileHandle.nullDevice
+    proc.standardError = FileHandle.nullDevice
+    try? proc.run()
   }
 
   private static func readXattr(_ url: URL) -> Meta? {
@@ -351,7 +341,7 @@ enum CloudStub {
 
 enum TrackedClouds {
   private static let lock = NSLock()
-  private static var reconciling = false
+  nonisolated(unsafe) private static var reconciling = false
 
   struct Item: Codable, Equatable {
     var local: String
