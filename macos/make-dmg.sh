@@ -14,6 +14,12 @@ if [[ "$(uname -s)" != "Darwin" ]]; then
   exit 1
 fi
 
+if ! xcodebuild -checkFirstLaunchStatus >/dev/null 2>&1; then
+  echo "Xcode’s license isn’t accepted on this Mac. Run this once, type agree, then rerun ./make-dmg.sh:" >&2
+  echo "  sudo xcodebuild -license" >&2
+  exit 1
+fi
+
 # Same bundle id as the first agent build — if that process is still alive,
 # launching Storebase.app just foregrounds the old faceless copy.
 osascript -e 'tell application "Storebase" to quit' >/dev/null 2>&1 || true
@@ -81,8 +87,8 @@ if [[ "$INSTALL" == "1" ]]; then
 fi
 
 echo
-echo "Storebase 1.9 → $DMG"
-echo "You should see a cube icon, a Dock icon, and a window that says 1.9."
+echo "Storebase 1.10 → $DMG"
+echo "You should see a cube icon, a Dock icon, and a window that says 1.10."
 echo "If you still see a hard-drive glyph, Spotlight is opening the old copy — quit Storebase and open /Applications/Storebase.app"
 if [[ "${UNSIGNED:-}" == "1" ]]; then
   echo "Unsigned: right-click Storebase.app → Open the first time, or xattr -cr /Applications/Storebase.app"
