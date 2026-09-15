@@ -204,11 +204,11 @@ export function FileView(props: FileViewProps) {
     <div className="relative min-h-[320px]">
       <ContextMenu>
         <ContextMenuTrigger asChild>
-          <div className="absolute inset-0" />
+          <div className="absolute inset-0 z-0" />
         </ContextMenuTrigger>
         {blankMenu}
       </ContextMenu>
-      <div className="relative z-10 pointer-events-none [&_[data-drive-item]]:pointer-events-auto">
+      <div className="relative z-10">
         {props.view === 'list' ? (
           <ListView {...props} items={ordered} drag={drag} />
         ) : (
@@ -474,7 +474,11 @@ function ItemMenu({
 
   return (
     <ContextMenu>
-      <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
+      <ContextMenuTrigger asChild>
+        <div data-drive-item className="min-w-0">
+          {children}
+        </div>
+      </ContextMenuTrigger>
       <ContextMenuContent className="w-56">
         <ContextMenuItem onSelect={() => onOpen(item)}>
           <FolderOpen />
