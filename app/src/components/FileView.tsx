@@ -66,19 +66,19 @@ type FileViewProps = {
   onUpload: () => void
   onSelect: (id: string, mods: SelectMods) => void
   onOpen: (item: DriveItem) => void
-  onStar: (id: string) => void
+  onStar: (ids: string[]) => void
   onShare: (id: string) => void
   onRename: (id: string) => void
-  onTrash: (id: string) => void
-  onRestore: (id: string) => void
-  onDeleteForever: (id: string) => void
+  onTrash: (ids: string[]) => void
+  onRestore: (ids: string[]) => void
+  onDeleteForever: (ids: string[]) => void
   onRemoveShare: (id: string) => void
-  onDownload: (item: DriveItem) => void
-  onUnzip: (id: string) => void
+  onDownload: (items: DriveItem[]) => void
+  onUnzip: (ids: string[]) => void
   onMove: (paths: string[], dest: string) => void
   onDropFiles?: (files: FileList, dest: string) => void
-  onMoveToTemp: (id: string) => void
-  onKeep: (id: string) => void
+  onMoveToTemp: (ids: string[]) => void
+  onKeep: (ids: string[]) => void
 }
 
 export function FileView(props: FileViewProps) {
@@ -246,7 +246,7 @@ function ListView(props: FileViewProps & { items: DriveItem[]; drag: DragApi }) 
         <span className="text-right">File size</span>
       </div>
       {props.items.map((item) => (
-        <ItemMenu key={item.id} item={item} {...handlers(props)}>
+        <ItemMenu key={item.id} item={item} items={props.items} selectedIds={props.selectedIds} {...handlers(props)}>
           <Tile
             item={item}
             selected={props.selectedIds.includes(item.id)}
@@ -286,7 +286,7 @@ function GridView({
           {showSplit ? <h2 className="mb-3 text-sm font-medium text-[#8d8d8d]">Folders</h2> : null}
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
             {folders.map((item) => (
-              <ItemMenu key={item.id} item={item} {...handlers(props)}>
+              <ItemMenu key={item.id} item={item} items={props.items} selectedIds={props.selectedIds} {...handlers(props)}>
                 <Tile
                   item={item}
                   selected={props.selectedIds.includes(item.id)}
@@ -314,7 +314,7 @@ function GridView({
           {showSplit ? <h2 className="mb-3 text-sm font-medium text-[#8d8d8d]">Files</h2> : null}
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
             {files.map((item) => (
-              <ItemMenu key={item.id} item={item} {...handlers(props)}>
+              <ItemMenu key={item.id} item={item} items={props.items} selectedIds={props.selectedIds} {...handlers(props)}>
                 <Tile
                   item={item}
                   selected={props.selectedIds.includes(item.id)}
@@ -447,6 +447,7 @@ function handlers(props: FileViewProps) {
     onUnzip: props.onUnzip,
     onMoveToTemp: props.onMoveToTemp,
     onKeep: props.onKeep,
+    onSelect: props.onSelect,
   }
 }
 
@@ -470,6 +471,8 @@ function Marks({ item, className }: { item: DriveItem; className?: string }) {
 
 function ItemMenu({
   item,
+  items,
+  selectedIds,
   children,
   onOpen,
   onStar,
@@ -483,88 +486,112 @@ function ItemMenu({
   onUnzip,
   onMoveToTemp,
   onKeep,
+  onSelect,
 }: {
   item: DriveItem
+  items: DriveItem[]
+  selectedIds: string[]
   children: ReactNode
   onOpen: (item: DriveItem) => void
-  onStar: (id: string) => void
+  onStar: (ids: string[]) => void
   onShare: (id: string) => void
   onRename: (id: string) => void
-  onTrash: (id: string) => void
-  onRestore: (id: string) => void
-  onDeleteForever: (id: string) => void
+  onTrash: (ids: string[]) => void
+  onRestore: (ids: string[]) => void
+  onDeleteForever: (ids: string[]) => void
   onRemoveShare: (id: string) => void
-  onDownload: (item: DriveItem) => void
-  onUnzip: (id: string) => void
-  onMoveToTemp: (id: string) => void
-  onKeep: (id: string) => void
+  onDownload: (items: DriveItem[]) => void
+  onUnzip: (ids: string[]) => void
+  onMoveToTemp: (ids: string[]) => void
+  onKeep: (ids: string[]) => void
+  onSelect: (id: string, mods: SelectMods) => void
 }) {
-  const inbound = item.owned === false
-  const shareRoot = inbound && Boolean(item.shareId) && item.id === `share:${item.shareId}`
-  const zip = !inbound && !item.trashed && isZipName(item.name)
-  const inTemp = isTempId(item.id)
+  const batch =
+    selectedIds.includes(item.id) && selectedIds.length > 1
+      ? items.filter((entry) => selectedIds.includes(entry.id))
+      : [item]
+  const n = batch.length
+  const ids = batch.map((entry) => entry.id)
+  const inbound = batch.every((entry) => entry.owned === false)
+  const anyInbound = batch.some((entry) => entry.owned === false)
+  const anyTrashed = batch.some((entry) => entry.trashed)
+  const allTrashed = batch.every((entry) => entry.trashed)
+  const shareRoot = n === 1 && item.owned === false && Boolean(item.shareId) && item.id === `share:${item.shareId}`
+  const zips = batch.filter((entry) => !entry.trashed && entry.owned !== false && isZipName(entry.name))
+  const inTemp = batch.every((entry) => isTempId(entry.id))
+  const canTemp = batch.every((entry) => !isTempId(entry.id) && entry.owned !== false && !entry.trashed && !entry.computer)
+  const allStarred = batch.every((entry) => entry.starred)
+  const huge = batch.some((entry) => entry.size != null && entry.size > 20 * 1024 ** 3)
 
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
-        <div data-drive-item className="min-w-0">
+        <div
+          data-drive-item
+          className="min-w-0"
+          onContextMenu={() => {
+            if (!selectedIds.includes(item.id)) onSelect(item.id, { toggle: false, range: false })
+          }}
+        >
           {children}
         </div>
       </ContextMenuTrigger>
       <ContextMenuContent className="w-56">
-        <ContextMenuItem onSelect={() => onOpen(item)}>
-          <FolderOpen />
-          Open
-        </ContextMenuItem>
-        {inbound ? null : (
+        {n === 1 ? (
+          <ContextMenuItem onSelect={() => onOpen(item)}>
+            <FolderOpen />
+            Open
+          </ContextMenuItem>
+        ) : null}
+        {n === 1 && !inbound ? (
           <ContextMenuItem onSelect={() => onShare(item.id)}>
             <Share2 />
             Share
           </ContextMenuItem>
-        )}
-        {inbound || item.trashed ? null : (
-          <ContextMenuItem onSelect={() => onStar(item.id)}>
+        ) : null}
+        {anyInbound || anyTrashed ? null : (
+          <ContextMenuItem onSelect={() => onStar(ids)}>
             <Star />
-            {item.starred ? 'Remove star' : 'Add to starred'}
+            {allStarred ? (n > 1 ? `Remove star from ${n} items` : 'Remove star') : n > 1 ? `Star ${n} items` : 'Add to starred'}
           </ContextMenuItem>
         )}
-        {inbound || item.trashed ? null : (
+        {n === 1 && !inbound && !item.trashed ? (
           <ContextMenuItem onSelect={() => onRename(item.id)}>
             <Pencil />
             Rename
           </ContextMenuItem>
-        )}
-        {zip ? (
-          <ContextMenuItem onSelect={() => onUnzip(item.id)}>
+        ) : null}
+        {zips.length ? (
+          <ContextMenuItem onSelect={() => onUnzip(zips.map((entry) => entry.id))}>
             <ArchiveRestore />
-            Unzip
+            {zips.length > 1 ? `Unzip ${zips.length} items` : 'Unzip'}
           </ContextMenuItem>
         ) : null}
-        <ContextMenuItem onSelect={() => onDownload(item)}>
+        <ContextMenuItem onSelect={() => onDownload(batch)}>
           <Download />
-          Download
+          {n > 1 ? `Download ${n} items` : 'Download'}
         </ContextMenuItem>
-        {inbound || item.trashed || item.computer ? null : inTemp ? (
-          <ContextMenuItem onSelect={() => onKeep(item.id)}>
+        {anyInbound || anyTrashed || batch.some((entry) => entry.computer) ? null : inTemp ? (
+          <ContextMenuItem onSelect={() => onKeep(ids)}>
             <HardDrive />
-            Keep in My files
+            {n > 1 ? `Keep ${n} in My files` : 'Keep in My files'}
           </ContextMenuItem>
-        ) : (
-          <ContextMenuItem onSelect={() => onMoveToTemp(item.id)}>
+        ) : canTemp ? (
+          <ContextMenuItem onSelect={() => onMoveToTemp(ids)}>
             <Timer />
-            Move to Temp
+            {n > 1 ? `Move ${n} to Temp` : 'Move to Temp'}
           </ContextMenuItem>
-        )}
-        {item.trashed || !inbound || shareRoot ? <ContextMenuSeparator /> : null}
-        {item.trashed ? (
+        ) : null}
+        {allTrashed || shareRoot || (!anyInbound && !anyTrashed) ? <ContextMenuSeparator /> : null}
+        {allTrashed ? (
           <>
-            <ContextMenuItem onSelect={() => onRestore(item.id)}>
+            <ContextMenuItem onSelect={() => onRestore(ids)}>
               <Undo2 />
-              Restore
+              {n > 1 ? `Restore ${n} items` : 'Restore'}
             </ContextMenuItem>
-            <ContextMenuItem variant="destructive" onSelect={() => onDeleteForever(item.id)}>
+            <ContextMenuItem variant="destructive" onSelect={() => onDeleteForever(ids)}>
               <Trash2 />
-              Delete forever
+              {n > 1 ? `Delete ${n} forever` : 'Delete forever'}
             </ContextMenuItem>
           </>
         ) : inbound ? (
@@ -574,10 +601,16 @@ function ItemMenu({
               Remove
             </ContextMenuItem>
           ) : null
-        ) : (
-          <ContextMenuItem variant="destructive" onSelect={() => onTrash(item.id)}>
+        ) : anyInbound ? null : (
+          <ContextMenuItem variant="destructive" onSelect={() => onTrash(ids)}>
             <Trash2 />
-            {item.size != null && item.size > 20 * 1024 ** 3 ? 'Delete permanently' : 'Move to trash'}
+            {n > 1
+              ? huge
+                ? `Delete ${n} items`
+                : `Move ${n} to trash`
+              : huge
+                ? 'Delete permanently'
+                : 'Move to trash'}
           </ContextMenuItem>
         )}
       </ContextMenuContent>

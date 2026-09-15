@@ -44,7 +44,7 @@ import {
   uploadFile,
   type FileEntry,
 } from '@/lib/api'
-import { formatBytes, formatTtl } from '@/lib/format'
+import { formatTtl } from '@/lib/format'
 import type { DriveItem, FileKind, SectionId } from '@/types'
 import { ChevronRight } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
@@ -116,7 +116,10 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
   const [shareLabel, setShareLabel] = useState('Shared')
   const [shareTarget, setShareTarget] = useState<DriveItem | null>(null)
   const [confirm, setConfirm] = useState<
-    null | { mode: 'permanent'; id: string; name: string; size: number } | { mode: 'empty-trash' } | { mode: 'delete-forever'; id: string; name: string }
+    | null
+    | { mode: 'permanent'; ids: string[]; name: string; size: number }
+    | { mode: 'empty-trash' }
+    | { mode: 'delete-forever'; ids: string[]; name: string }
   >(null)
   const [ttlHours, setTtlHours] = useState(24)
   const [customDays, setCustomDays] = useState('')
@@ -276,46 +279,84 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
     setPreview(item)
   }
 
-  async function star(id: string) {
-    const item = items.find((entry) => entry.id === id)
-    if (!item) return
+  async function star(ids: string[]) {
+    const batch = ids.map((id) => items.find((entry) => entry.id === id)).filter((entry): entry is DriveItem => Boolean(entry))
+    if (!batch.length) return
+    const starred = !batch.every((entry) => entry.starred)
     try {
-      await starFile(id, !item.starred)
-      notify(item.starred ? `Removed star from ${item.name}` : `Starred ${item.name}`)
+      for (const item of batch) {
+        await starFile(item.id, starred)
+      }
+      notify(
+        batch.length === 1
+          ? starred
+            ? `Starred ${batch[0].name}`
+            : `Removed star from ${batch[0].name}`
+          : starred
+            ? `Starred ${batch.length} items`
+            : `Removed star from ${batch.length} items`,
+      )
       await refresh()
     } catch (err) {
       notify(err instanceof Error ? err.message : 'Could not star')
     }
   }
 
-  async function trash(id: string, confirmed = false) {
-    const item = items.find((entry) => entry.id === id)
-    if (!item) return
-    if (!confirmed && item.size != null && item.size > HARD_DELETE_BYTES) {
-      setConfirm({ mode: 'permanent', id, name: item.name, size: item.size })
+  async function trash(ids: string[], confirmed = false) {
+    const batch = ids
+      .map((id) => items.find((entry) => entry.id === id))
+      .filter((entry): entry is DriveItem => entry != null && entry.owned !== false)
+    if (!batch.length) return
+    if (!confirmed && batch.some((item) => item.size != null && item.size > HARD_DELETE_BYTES)) {
+      const huge = batch.find((item) => item.size != null && item.size > HARD_DELETE_BYTES)!
+      setConfirm({
+        mode: 'permanent',
+        ids: batch.map((item) => item.id),
+        name: batch.length === 1 ? huge.name : `${batch.length} items`,
+        size: huge.size ?? 0,
+      })
       return
     }
     try {
-      const result = await trashFile(id, confirmed)
-      setSelectedIds((current) => current.filter((x) => x !== id))
-      notify(result.permanent ? `Deleted ${item.name} permanently` : `Moved ${item.name} to trash`)
+      let permanent = 0
+      let trashed = 0
+      for (const item of batch) {
+        const result = await trashFile(item.id, confirmed)
+        if (result.permanent) permanent += 1
+        else trashed += 1
+      }
+      setSelectedIds([])
+      notify(
+        batch.length === 1
+          ? permanent
+            ? `Deleted ${batch[0].name} permanently`
+            : `Moved ${batch[0].name} to trash`
+          : `Moved ${trashed + permanent} items`,
+      )
       await refresh()
     } catch (err) {
       if (err instanceof ApiError && err.code === 'PERMANENT_DELETE') {
-        setConfirm({ mode: 'permanent', id, name: item.name, size: err.size ?? item.size ?? 0 })
+        setConfirm({
+          mode: 'permanent',
+          ids: batch.map((item) => item.id),
+          name: batch.length === 1 ? batch[0].name : `${batch.length} items`,
+          size: err.size ?? batch[0].size ?? 0,
+        })
         return
       }
       notify(err instanceof Error ? err.message : 'Could not trash')
     }
   }
 
-  async function removeForever(id: string) {
-    const item = items.find((entry) => entry.id === id)
-    if (!item) return
+  async function removeForever(ids: string[]) {
+    const batch = ids.map((id) => items.find((entry) => entry.id === id)).filter((entry): entry is DriveItem => Boolean(entry))
+    if (!batch.length) return
     try {
-      await deleteFile(id)
-      setSelectedIds((current) => current.filter((x) => x !== id))
-      notify(`Deleted ${item.name}`)
+      for (const item of batch) {
+        await deleteFile(item.id)
+      }
+      setSelectedIds([])
+      notify(batch.length === 1 ? `Deleted ${batch[0].name}` : `Deleted ${batch.length} items`)
       await refresh()
     } catch (err) {
       notify(err instanceof Error ? err.message : 'Could not delete')
@@ -345,22 +386,27 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
     }
   }
 
-  async function restore(id: string) {
-    const item = items.find((entry) => entry.id === id)
-    if (!item) return
+  async function restore(ids: string[]) {
+    const batch = ids.map((id) => items.find((entry) => entry.id === id)).filter((entry): entry is DriveItem => Boolean(entry))
+    if (!batch.length) return
     try {
-      await restoreFile(id)
-      notify(`Restored ${item.name}`)
+      for (const item of batch) {
+        await restoreFile(item.id)
+      }
+      notify(batch.length === 1 ? `Restored ${batch[0].name}` : `Restored ${batch.length} items`)
+      setSelectedIds([])
       await refresh()
     } catch (err) {
       notify(err instanceof Error ? err.message : 'Could not restore')
     }
   }
 
-  async function unzip(id: string) {
+  async function unzip(ids: string[]) {
     try {
-      await unzipFile(id)
-      notify('Unzipped')
+      for (const id of ids) {
+        await unzipFile(id)
+      }
+      notify(ids.length === 1 ? 'Unzipped' : `Unzipped ${ids.length} items`)
       await refresh()
     } catch (err) {
       notify(err instanceof Error ? err.message : 'Could not unzip')
@@ -456,8 +502,7 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
     }
   }
 
-  async function sendToTemp(id: string) {
-    const ids = selectedIds.includes(id) && selectedIds.length > 1 ? selectedIds : [id]
+  async function sendToTemp(ids: string[]) {
     const valid = ids.filter((path) => !isTempId(path) && !path.startsWith('share:') && path !== '__node__')
     if (!valid.length) return
     try {
@@ -470,13 +515,15 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
     }
   }
 
-  async function keepItem(id: string) {
-    const item = items.find((entry) => entry.id === id)
-    if (!item) return
+  async function keepItem(ids: string[]) {
+    const batch = ids.map((id) => items.find((entry) => entry.id === id)).filter((entry): entry is DriveItem => Boolean(entry))
+    if (!batch.length) return
     try {
-      await keepFromTemp(id)
-      notify(`Kept ${item.name} in My files`)
-      setSelectedIds((current) => current.filter((x) => x !== id))
+      for (const item of batch) {
+        await keepFromTemp(item.id)
+      }
+      notify(batch.length === 1 ? `Kept ${batch[0].name} in My files` : `Kept ${batch.length} items in My files`)
+      setSelectedIds([])
       await refresh()
     } catch (err) {
       notify(err instanceof Error ? err.message : 'Could not keep')
@@ -525,15 +572,41 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== 'a') return
       const t = e.target as HTMLElement | null
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return
-      e.preventDefault()
-      setSelectedIds(orderedIds)
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'a') {
+        e.preventDefault()
+        setSelectedIds(orderedIds)
+        return
+      }
+      if (e.key === 'Escape') {
+        setSelectedIds([])
+        return
+      }
+      if (!selectedIds.length) return
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        e.preventDefault()
+        if (section === 'trash') {
+          const first = items.find((item) => item.id === selectedIds[0])
+          if (!first) return
+          setConfirm({
+            mode: 'delete-forever',
+            ids: selectedIds,
+            name: selectedIds.length === 1 ? first.name : `${selectedIds.length} items`,
+          })
+          return
+        }
+        void trash(selectedIds)
+        return
+      }
+      if (e.key === 'F2' && selectedIds.length === 1) {
+        e.preventDefault()
+        openRename(selectedIds[0])
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [orderedIds])
+  }, [orderedIds, selectedIds, section, items])
 
   const heading = search.trim()
     ? `Results for "${search.trim()}"`
@@ -731,25 +804,37 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
                 onUpload={() => uploadRef.current?.click()}
                 onSelect={select}
                 onOpen={openItem}
-                onStar={(id) => void star(id)}
+                onStar={(ids) => void star(ids)}
                 onShare={share}
                 onRename={openRename}
-                onTrash={(id) => void trash(id)}
-                onRestore={(id) => void restore(id)}
-                onDeleteForever={(id) => {
-                  const item = items.find((entry) => entry.id === id)
-                  if (!item) return
-                  setConfirm({ mode: 'delete-forever', id, name: item.name })
+                onTrash={(ids) => void trash(ids)}
+                onRestore={(ids) => void restore(ids)}
+                onDeleteForever={(ids) => {
+                  const first = items.find((entry) => entry.id === ids[0])
+                  if (!first) return
+                  setConfirm({
+                    mode: 'delete-forever',
+                    ids,
+                    name: ids.length === 1 ? first.name : `${ids.length} items`,
+                  })
                 }}
                 onRemoveShare={(id) => void removeShare(id)}
-                onDownload={(item) => {
-                  window.open(downloadUrl(item.id), '_blank')
+                onDownload={(batch) => {
+                  for (const item of batch) {
+                    const link = document.createElement('a')
+                    link.href = downloadUrl(item.id)
+                    link.download = item.name
+                    link.rel = 'noreferrer'
+                    document.body.appendChild(link)
+                    link.click()
+                    link.remove()
+                  }
                 }}
-                onUnzip={(id) => void unzip(id)}
+                onUnzip={(ids) => void unzip(ids)}
                 onMove={(paths, dest) => void moveTo(paths, dest)}
                 onDropFiles={(files, dest) => void onUpload(files, dest)}
-                onMoveToTemp={(id) => void sendToTemp(id)}
-                onKeep={(id) => void keepItem(id)}
+                onMoveToTemp={(ids) => void sendToTemp(ids)}
+                onKeep={(ids) => void keepItem(ids)}
               />
             )}
           </div>
@@ -850,7 +935,7 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
                 : confirm?.mode === 'delete-forever'
                   ? `${confirm.name} leaves trash and is gone.`
                   : confirm?.mode === 'permanent'
-                    ? `${confirm.name} is ${formatBytes(confirm.size)}. Files over 20 GB skip the 30-day trash and are deleted immediately.`
+                    ? `${confirm.name} is over 20 GB (or includes a file that is). Delete is permanent — no 30-day trash.`
                     : ''}
             </DialogDescription>
           </DialogHeader>
@@ -865,8 +950,8 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
                 const next = confirm
                 setConfirm(null)
                 if (next?.mode === 'empty-trash') void wipeTrash()
-                if (next?.mode === 'delete-forever') void removeForever(next.id)
-                if (next?.mode === 'permanent') void trash(next.id, true)
+                if (next?.mode === 'delete-forever') void removeForever(next.ids)
+                if (next?.mode === 'permanent') void trash(next.ids, true)
               }}
             >
               Delete

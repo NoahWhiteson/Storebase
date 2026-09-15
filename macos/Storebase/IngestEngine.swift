@@ -32,10 +32,15 @@ final class IngestEngine {
 
   func tick() {
     let settings = store.settings
-    guard settings.captureEnabled, !settings.token.isEmpty, let base = URL(string: settings.nodeURL) else { return }
+    guard !settings.token.isEmpty, let base = URL(string: settings.nodeURL) else { return }
+    let folders = watchFolders(settings)
+    if settings.usesPlaceholders {
+      CloudStub.reclaimHydrated(in: folders)
+      Task { await CloudStub.sweep(base: base, token: settings.token) }
+    }
+    guard settings.captureEnabled else { return }
     refreshStatus(base: base, token: settings.token, settings: settings)
     guard inflight < max(1, settings.maxConcurrent) else { return }
-    let folders = watchFolders(settings)
     for folder in folders {
       ingestFolder(folder, settings: settings, base: base)
     }

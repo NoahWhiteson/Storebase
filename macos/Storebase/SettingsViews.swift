@@ -258,7 +258,7 @@ struct StoragePane: View {
       }
       Section("After upload") {
         Toggle("Keep files in the folder as cloud copies", isOn: placeholdersBind)
-        Text("Same names in Downloads. Bytes live on the node, so they don’t count against this Mac’s disk. Opening a file downloads it, then it stays local.")
+        Text("Same names in Downloads. Bytes stay on the node. Opening a file uses a temporary copy, then it goes back to the cloud when you close it.")
           .font(.caption)
           .foregroundStyle(.secondary)
         Toggle("Remove the local file after it’s on Storebase", isOn: bind(\.removeLocalAfterUpload))

@@ -11,6 +11,20 @@ enum CloudStub {
     var state: String
   }
 
+  private struct Session {
+    var stub: URL
+    var cache: URL
+    var remote: String
+    var size: Int64
+    var snapshotSize: Int64
+    var snapshotMtime: Date?
+    var quietTicks: Int
+  }
+
+  private static let lock = NSLock()
+  private static var sessions: [Session] = []
+  private static var sweeping = false
+
   static func meta(at url: URL) -> Meta? {
     let path = url.path
     let needed = path.withCString { pth in
@@ -48,23 +62,137 @@ enum CloudStub {
     guard let model = AppRuntime.model, model.paired, let base = URL(string: model.settings.nodeURL) else { return }
     let client = APIClient(baseURL: base, token: model.settings.token)
     for url in urls {
-      guard meta(at: url)?.state == "evicted" else { continue }
-      do {
-        try await hydrate(url, client: client)
+      let info = meta(at: url)
+      let remote = info?.path
+      let size = info?.size ?? Int64((try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
+      guard let remote, !remote.isEmpty else { continue }
+      if info?.state == "hydrated" {
         NSWorkspace.shared.open(url)
+        continue
+      }
+      do {
+        try FileManager.default.createDirectory(at: cacheRoot(), withIntermediateDirectories: true)
+        let cache = cacheRoot().appendingPathComponent("\(UUID().uuidString)-\(url.lastPathComponent)")
+        try await client.download(path: remote, to: cache)
+        let values = try? cache.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
+        NSWorkspace.shared.open(cache)
+        lock.lock()
+        sessions.append(
+          Session(
+            stub: url,
+            cache: cache,
+            remote: remote,
+            size: size,
+            snapshotSize: Int64(values?.fileSize ?? 0),
+            snapshotMtime: values?.contentModificationDate,
+            quietTicks: 0
+          )
+        )
+        lock.unlock()
       } catch {
-        Notifier.send(title: "Couldn’t download from Storebase", body: "\(url.lastPathComponent): \(error.localizedDescription)")
+        Notifier.send(title: "Couldn’t open from Storebase", body: "\(url.lastPathComponent): \(error.localizedDescription)")
       }
     }
   }
 
-  private static func hydrate(_ url: URL, client: APIClient) async throws {
-    guard let info = meta(at: url) else { return }
-    let tmp = url.deletingLastPathComponent().appendingPathComponent(".\(url.lastPathComponent).storebase-tmp")
-    try await client.download(path: info.path, to: tmp)
-    _ = try FileManager.default.replaceItemAt(url, withItemAt: tmp)
-    writeMeta(url, Meta(path: info.path, size: info.size, state: "hydrated"))
-    removexattr(url.path, "com.apple.LaunchServices.OpenWith", 0)
+  static func sweep(base: URL, token: String) async {
+    lock.lock()
+    if sweeping {
+      lock.unlock()
+      return
+    }
+    sweeping = true
+    let current = sessions
+    lock.unlock()
+    guard !current.isEmpty else {
+      lock.lock()
+      sweeping = false
+      lock.unlock()
+      return
+    }
+    let client = APIClient(baseURL: base, token: token)
+    var keep: [Session] = []
+    for session in current {
+      if isOpen(session.cache) {
+        var next = session
+        next.quietTicks = 0
+        keep.append(next)
+        continue
+      }
+      var next = session
+      next.quietTicks += 1
+      if next.quietTicks < 2 {
+        keep.append(next)
+        continue
+      }
+      await close(session, client: client)
+    }
+    lock.lock()
+    let extra = sessions.filter { live in !current.contains(where: { $0.cache.path == live.cache.path }) }
+    sessions = keep + extra
+    sweeping = false
+    lock.unlock()
+  }
+
+  static func reclaimHydrated(in folders: [URL]) {
+    let fm = FileManager.default
+    for folder in folders {
+      guard let names = try? fm.contentsOfDirectory(atPath: folder.path) else { continue }
+      for name in names {
+        let url = folder.appendingPathComponent(name)
+        guard let info = meta(at: url), info.state == "hydrated" else { continue }
+        if isOpen(url) { continue }
+        evict(url: url, remotePath: info.path, size: info.size)
+      }
+    }
+  }
+
+  private static func close(_ session: Session, client: APIClient) async {
+    let values = try? session.cache.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
+    let size = Int64(values?.fileSize ?? 0)
+    let mtime = values?.contentModificationDate
+    let dirty =
+      size != session.snapshotSize ||
+      (mtime != nil && session.snapshotMtime != nil && mtime! > session.snapshotMtime!.addingTimeInterval(1))
+    if dirty {
+      let dest = parentPath(session.remote)
+      do {
+        _ = try await client.upload(fileURL: session.cache, destDir: dest)
+      } catch {
+        Notifier.send(title: "Couldn’t save back to Storebase", body: session.stub.lastPathComponent)
+        return
+      }
+    }
+    try? FileManager.default.removeItem(at: session.cache)
+    if FileManager.default.fileExists(atPath: session.stub.path) {
+      evict(url: session.stub, remotePath: session.remote, size: dirty ? size : session.size)
+    }
+  }
+
+  private static func parentPath(_ remote: String) -> String {
+    guard let slash = remote.lastIndex(of: "/") else { return "" }
+    return String(remote[..<slash])
+  }
+
+  private static func cacheRoot() -> URL {
+    FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+      .appendingPathComponent("app.storebase.mac/open", isDirectory: true)
+  }
+
+  private static func isOpen(_ url: URL) -> Bool {
+    let proc = Process()
+    proc.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
+    proc.arguments = ["-t", "--", url.path]
+    let out = Pipe()
+    proc.standardOutput = out
+    proc.standardError = Pipe()
+    do {
+      try proc.run()
+      proc.waitUntilExit()
+      return !(out.fileHandleForReading.readDataToEndOfFile().isEmpty)
+    } catch {
+      return true
+    }
   }
 
   private static func writeMeta(_ url: URL, _ meta: Meta) {

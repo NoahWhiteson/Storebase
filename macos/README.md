@@ -16,7 +16,7 @@ chmod +x make-dmg.sh
 
 The script quits any old Storebase process (same bundle id as the first agent build), rebuilds, writes `macos/dist/Storebase.dmg`, and replaces `/Applications/Storebase.app`.
 
-You should see **1.4** under the title and the cube icon. A hard-drive glyph means the old copy is still running — `killall Storebase` then open `/Applications/Storebase.app`. HTTP to a public IP (no domain) is supposed to work — if ATS still complains, you are on an old binary.
+You should see **1.5** under the title and the cube icon. A hard-drive glyph means the old copy is still running — `killall Storebase` then open `/Applications/Storebase.app`. HTTP to a public IP (no domain) is supposed to work — if ATS still complains, you are on an old binary.
 
 - First time in Xcode: open `Storebase.xcodeproj`, pick your Team under Signing, then re-run the script.
 - No Apple Developer team: `UNSIGNED=1 ./make-dmg.sh` then right-click → Open the first launch (Gatekeeper).
