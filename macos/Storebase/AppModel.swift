@@ -29,6 +29,7 @@ final class AppModel: ObservableObject {
   @Published var nodeURLDraft = ""
   @Published var onWifi = true
   @Published var transfers: [TransferItem] = []
+  private var lastTransferPaint = Date.distantPast
 
   private var engine: IngestEngine?
   private var cancellable: AnyCancellable?
@@ -81,6 +82,10 @@ final class AppModel: ObservableObject {
 
   func updateTransfer(id: UUID, done: Int64, total: Int64) {
     guard let index = transfers.firstIndex(where: { $0.id == id }) else { return }
+    let finished = total > 0 && done >= total
+    let now = Date()
+    if !finished, now.timeIntervalSince(lastTransferPaint) < 0.12 { return }
+    lastTransferPaint = now
     transfers[index].done = done
     if total > 0 { transfers[index].total = total }
   }
@@ -110,7 +115,7 @@ final class AppModel: ObservableObject {
         self?.onWifi = wifi && !wired
       }
     }
-    pathMonitor.start(queue: DispatchQueue.main)
+    pathMonitor.start(queue: DispatchQueue(label: "app.storebase.path"))
     restartEngine()
     Task { await CloudStub.flushPending() }
   }

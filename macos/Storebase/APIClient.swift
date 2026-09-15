@@ -72,7 +72,7 @@ final class APIClient: @unchecked Sendable {
   }
 
   @discardableResult
-  func upload(fileURL: URL, destDir: String, onProgress: ((Int64, Int64) -> Void)? = nil) async throws -> String {
+  func upload(fileURL: URL, destDir: String, onProgress: (@Sendable (Int64, Int64) -> Void)? = nil) async throws -> String {
     var comps = URLComponents(url: baseURL.appendingPathComponent("api/files/upload"), resolvingAgainstBaseURL: false)!
     comps.queryItems = [URLQueryItem(name: "path", value: destDir)]
     var request = URLRequest(url: comps.url!)
@@ -108,7 +108,7 @@ final class APIClient: @unchecked Sendable {
     return Set(try JSONDecoder().decode(Body.self, from: data).paths)
   }
 
-  func download(path: String, to dest: URL, onProgress: ((Int64, Int64) -> Void)? = nil) async throws {
+  func download(path: String, to dest: URL, onProgress: (@Sendable (Int64, Int64) -> Void)? = nil) async throws {
     var comps = URLComponents(url: baseURL.appendingPathComponent("api/files/download"), resolvingAgainstBaseURL: false)!
     comps.queryItems = [URLQueryItem(name: "path", value: path)]
     var request = URLRequest(url: comps.url!)
@@ -184,37 +184,41 @@ enum NodeHTTP {
     fileURL: URL,
     boundary: String,
     limitBps: Int,
-    onProgress: ((Int64, Int64) -> Void)?
+    onProgress: (@Sendable (Int64, Int64) -> Void)?
   ) async throws -> (Data, URLResponse) {
     guard let url = request.url, let host = url.host, !host.isEmpty else {
       throw APIError(status: 0, message: "Bad node URL", code: nil)
     }
     let timeout = request.timeoutInterval > 0 ? request.timeoutInterval : 60 * 60
-    return try await NodeCall(request: request, url: url, host: host).uploadFile(
-      fileURL,
-      boundary: boundary,
-      limitBps: limitBps,
-      timeout: timeout,
-      onProgress: onProgress
-    )
+    return try await Task.detached {
+      try await NodeCall(request: request, url: url, host: host).uploadFile(
+        fileURL,
+        boundary: boundary,
+        limitBps: limitBps,
+        timeout: timeout,
+        onProgress: onProgress
+      )
+    }.value
   }
 
   static func download(
     request: URLRequest,
     to dest: URL,
     limitBps: Int,
-    onProgress: ((Int64, Int64) -> Void)?
+    onProgress: (@Sendable (Int64, Int64) -> Void)?
   ) async throws -> (Data, URLResponse) {
     guard let url = request.url, let host = url.host, !host.isEmpty else {
       throw APIError(status: 0, message: "Bad node URL", code: nil)
     }
     let timeout = request.timeoutInterval > 0 ? request.timeoutInterval : 60 * 60
-    return try await NodeCall(request: request, url: url, host: host).downloadFile(
-      to: dest,
-      limitBps: limitBps,
-      timeout: timeout,
-      onProgress: onProgress
-    )
+    return try await Task.detached {
+      try await NodeCall(request: request, url: url, host: host).downloadFile(
+        to: dest,
+        limitBps: limitBps,
+        timeout: timeout,
+        onProgress: onProgress
+      )
+    }.value
   }
 }
 
@@ -283,7 +287,7 @@ private final class NodeCall: @unchecked Sendable {
     boundary: String,
     limitBps: Int,
     timeout: TimeInterval,
-    onProgress: ((Int64, Int64) -> Void)?
+    onProgress: (@Sendable (Int64, Int64) -> Void)?
   ) async throws -> (Data, URLResponse) {
     try await open(timeout: timeout)
     defer { closeStream() }
@@ -303,7 +307,7 @@ private final class NodeCall: @unchecked Sendable {
     while true {
       let chunk = handle.readData(ofLength: 32 * 1024)
       if chunk.isEmpty { break }
-      pacer.add(chunk.count)
+      await pacer.add(chunk.count)
       try await sendChunk(chunk, complete: false)
       sent += Int64(chunk.count)
       onProgress?(sent, total)
@@ -317,7 +321,7 @@ private final class NodeCall: @unchecked Sendable {
     to dest: URL,
     limitBps: Int,
     timeout: TimeInterval,
-    onProgress: ((Int64, Int64) -> Void)?
+    onProgress: (@Sendable (Int64, Int64) -> Void)?
   ) async throws -> (Data, URLResponse) {
     try await open(timeout: timeout)
     defer { closeStream() }
@@ -349,26 +353,26 @@ private final class NodeCall: @unchecked Sendable {
     FileManager.default.createFile(atPath: tmp.path, contents: nil)
     let out = try FileHandle(forWritingTo: tmp)
     defer { try? out.close() }
-    var written = firstBody
+    var writtenCount = Int64(firstBody.count)
     let pacer = Pacer(bps: limitBps)
     if !firstBody.isEmpty {
-      pacer.add(firstBody.count)
+      await pacer.add(firstBody.count)
       try out.write(contentsOf: firstBody)
     }
-    onProgress?(Int64(written.count), expected > 0 ? expected : Int64(written.count))
-    while expected < 0 || written.count < expected {
+    onProgress?(writtenCount, expected > 0 ? expected : writtenCount)
+    while expected < 0 || writtenCount < expected {
       let (chunk, eof) = try await receiveOnce()
       if !chunk.isEmpty {
-        pacer.add(chunk.count)
+        await pacer.add(chunk.count)
         try out.write(contentsOf: chunk)
-        written.append(chunk)
-        let total = expected > 0 ? expected : Int64(written.count)
-        onProgress?(Int64(written.count), total)
+        writtenCount += Int64(chunk.count)
+        let total = expected > 0 ? expected : writtenCount
+        onProgress?(writtenCount, total)
       }
       if eof { break }
-      if expected >= 0, written.count >= expected { break }
+      if expected >= 0, writtenCount >= expected { break }
     }
-    if expected >= 0, written.count > expected {
+    if expected >= 0, writtenCount > expected {
       try out.truncate(atOffset: UInt64(expected))
     }
     try? out.close()
@@ -688,7 +692,7 @@ private final class Pacer {
     self.bps = bps
   }
 
-  func add(_ n: Int) {
+  func add(_ n: Int) async {
     guard bps > 0, n > 0 else { return }
     bytes += n
     let elapsed = Double(DispatchTime.now().uptimeNanoseconds - start.uptimeNanoseconds) / 1_000_000_000
@@ -696,7 +700,8 @@ private final class Pacer {
     if Double(bytes) > allowed {
       let wait = (Double(bytes) / Double(bps)) - elapsed
       if wait > 0.004 {
-        Thread.sleep(forTimeInterval: min(wait, 2))
+        let ns = UInt64(min(wait, 2) * 1_000_000_000)
+        try? await Task.sleep(nanoseconds: ns)
       }
     }
     if elapsed > 2 {

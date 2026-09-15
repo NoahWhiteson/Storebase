@@ -44,7 +44,7 @@ struct StorebaseApp: App {
       MenuBarView()
         .environmentObject(model)
     } label: {
-      Text(model.transferLabel)
+      Text(model.transferLabel.isEmpty ? "—" : model.transferLabel)
         .monospacedDigit()
     }
     .menuBarExtraStyle(.menu)
@@ -59,7 +59,7 @@ struct StorebaseApp: App {
 
   private var transferChip: Binding<Bool> {
     Binding(
-      get: { model.paired && model.settings.showsMenuBarTransfers && !model.transfers.isEmpty },
+      get: { model.paired && model.settings.showsMenuBarTransfers },
       set: { model.settings.showsMenuBarTransfers = $0 }
     )
   }

@@ -115,7 +115,7 @@ final class IngestEngine: @unchecked Sendable {
     persistSeen()
     inflight += 1
     let dest = destination(for: url, size: size, settings: settings)
-    Task {
+    Task.detached { [self] in
       defer { Task { @MainActor in self.inflight -= 1 } }
       let transferId = await MainActor.run {
         AppRuntime.model?.beginTransfer(name: name, total: size, uploading: true)
