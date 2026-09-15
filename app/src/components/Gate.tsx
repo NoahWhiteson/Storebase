@@ -1,6 +1,7 @@
 import App from '@/App'
 import { Login } from '@/components/Login'
 import { Onboarding } from '@/components/Onboarding'
+import { PublicViewer } from '@/components/PublicViewer'
 import { StorebaseLogo } from '@/components/StorebaseLogo'
 import { Button } from '@/components/ui/button'
 import { fetchMe, type Me } from '@/lib/api'
@@ -8,6 +9,12 @@ import { fetchSetup, type SetupState } from '@/lib/setup'
 import { useEffect, useState, type ReactNode } from 'react'
 
 export function Gate() {
+  const token = window.location.pathname.match(/^\/s\/([^/]+)/)?.[1]
+  if (token) return <PublicViewer token={decodeURIComponent(token)} />
+  return <AppGate />
+}
+
+function AppGate() {
   const [phase, setPhase] = useState<'loading' | 'offline' | 'setup' | 'login' | 'ready'>('loading')
   const [setup, setSetup] = useState<SetupState | null>(null)
   const [me, setMe] = useState<Me | null>(null)

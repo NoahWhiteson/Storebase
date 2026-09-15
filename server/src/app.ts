@@ -4,6 +4,18 @@ import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { mountAdmin } from './admin.ts'
 import { bytesToGb, type ServerConfig } from './config.ts'
+import {
+  deleteLink,
+  dropLinksForPath,
+  ensureLink,
+  LinkError,
+  listLinks,
+  listPublicFolder,
+  openPublicFile,
+  resolveLink,
+  rewriteLinks,
+} from './links.ts'
+import { mimeFor } from './mime.ts'
 import { dropPath, loadMeta, rewritePath, setStarred, touchRecent } from './meta.ts'
 import { loadPlatform, terminalsAllowed } from './platform.ts'
 import { requirePool } from './pool.ts'
@@ -35,6 +47,7 @@ import {
   removePath,
   renameEntry,
   saveFile,
+  unzipArchive,
   walkVisible,
 } from './storage.ts'
 import {
@@ -66,7 +79,25 @@ import type { ServerType } from '@hono/node-server'
 type Vars = { user: UserRecord; root: string }
 
 function publicPath(path: string): boolean {
-  return path === '/api/health' || path === '/api/setup' || path === '/api/login'
+  return (
+    path === '/api/health' ||
+    path === '/api/setup' ||
+    path === '/api/login' ||
+    path.startsWith('/api/public/')
+  )
+}
+
+function sendFile(
+  file: { name: string; size: number; stream: import('node:fs').ReadStream },
+  inline: boolean,
+) {
+  return new Response(Readable.toWeb(file.stream) as unknown as ReadableStream, {
+    headers: {
+      'content-type': mimeFor(file.name),
+      'content-disposition': `${inline ? 'inline' : 'attachment'}; filename="${file.name.replaceAll('"', '')}"`,
+      'content-length': String(file.size),
+    },
+  })
 }
 
 export function createApp(config: ServerConfig) {
@@ -127,6 +158,53 @@ export function createApp(config: ServerConfig) {
   app.post('/api/logout', async (c) => {
     clearSession(c)
     return c.json({ ok: true })
+  })
+
+  app.get('/api/public/:token', async (c) => {
+    try {
+      const { owner, item, link } = await resolveLink(config, c.req.param('token'))
+      return c.json({
+        token: link.token,
+        name: item.name,
+        type: item.type,
+        size: item.size,
+        modifiedAt: item.modifiedAt,
+        ownerName: owner.name,
+      })
+    } catch (err) {
+      if (err instanceof LinkError) return c.json({ error: err.message }, err.status)
+      throw err
+    }
+  })
+
+  app.get('/api/public/:token/items', async (c) => {
+    try {
+      const listed = await listPublicFolder(config, c.req.param('token'), c.req.query('path') ?? '')
+      return c.json(listed)
+    } catch (err) {
+      if (err instanceof LinkError) return c.json({ error: err.message }, err.status)
+      throw err
+    }
+  })
+
+  app.get('/api/public/:token/raw', async (c) => {
+    try {
+      const file = await openPublicFile(config, c.req.param('token'), c.req.query('path') ?? '')
+      return sendFile(file, true)
+    } catch (err) {
+      if (err instanceof LinkError) return c.json({ error: err.message }, err.status)
+      throw err
+    }
+  })
+
+  app.get('/api/public/:token/download', async (c) => {
+    try {
+      const file = await openPublicFile(config, c.req.param('token'), c.req.query('path') ?? '')
+      return sendFile(file, false)
+    } catch (err) {
+      if (err instanceof LinkError) return c.json({ error: err.message }, err.status)
+      throw err
+    }
   })
 
   app.use('/api/*', async (c, next) => {
@@ -218,7 +296,10 @@ export function createApp(config: ServerConfig) {
     const user = c.get('user')
     const path = c.req.query('path') ?? ''
     if (!path) return c.json({ error: 'path required' }, 400)
-    return c.json({ shares: await listSharesForPath(config, user, path) })
+    return c.json({
+      shares: await listSharesForPath(config, user, path),
+      link: (await listLinks(config, user.id, path))[0] ?? null,
+    })
   })
 
   app.post('/api/shares', async (c) => {
@@ -246,6 +327,30 @@ export function createApp(config: ServerConfig) {
     }
   })
 
+  app.post('/api/links', async (c) => {
+    const user = c.get('user')
+    const body = await c.req.json<{ path?: string }>()
+    if (!body.path) return c.json({ error: 'path required' }, 400)
+    try {
+      const link = await ensureLink(config, user, body.path)
+      return c.json({ link }, 201)
+    } catch (err) {
+      if (err instanceof LinkError) return c.json({ error: err.message }, err.status)
+      throw err
+    }
+  })
+
+  app.delete('/api/links/:id', async (c) => {
+    const user = c.get('user')
+    try {
+      await deleteLink(config, user, c.req.param('id'))
+      return c.json({ ok: true })
+    } catch (err) {
+      if (err instanceof LinkError) return c.json({ error: err.message }, err.status)
+      throw err
+    }
+  })
+
   app.get('/api/files', async (c) => {
     const user = c.get('user')
     const root = c.get('root')
@@ -256,8 +361,10 @@ export function createApp(config: ServerConfig) {
     const meta = await loadMeta(root)
     const starred = new Set(meta.starred)
     const outgoing = await listOutgoing(config, user.id)
+    const links = await listLinks(config, user.id)
     const sharedFlag = (rel: string) =>
-      outgoing.some((share) => share.path === rel || rel.startsWith(`${share.path}/`))
+      outgoing.some((share) => share.path === rel || rel.startsWith(`${share.path}/`)) ||
+      links.some((link) => link.path === rel || rel.startsWith(`${link.path}/`))
 
     function decorate(items: Awaited<ReturnType<typeof listPath>>, trashed = false) {
       return items.map((item) => ({
@@ -333,6 +440,20 @@ export function createApp(config: ServerConfig) {
     return c.json({ item: { ...item, starred: false, trashed: false } }, 201)
   })
 
+  app.post('/api/files/unzip', async (c) => {
+    const root = c.get('root')
+    const body = await c.req.json<{ path?: string }>()
+    if (!body.path) return c.json({ error: 'path required' }, 400)
+    const manifest = await requirePool(config)
+    try {
+      const item = await unzipArchive(root, config.driveDir, body.path, manifest.reservedBytes)
+      return c.json({ item: { ...item, starred: false, trashed: false } }, 201)
+    } catch (err) {
+      if (err instanceof QuotaError) return c.json({ error: err.message, code: err.code }, 507)
+      throw err
+    }
+  })
+
   app.post('/api/files/upload', async (c) => {
     const root = c.get('root')
     const manifest = await requirePool(config)
@@ -358,6 +479,7 @@ export function createApp(config: ServerConfig) {
     const item = await renameEntry(root, body.path, body.name)
     await rewritePath(root, body.path, item.path)
     await rewriteShares(config, c.get('user').id, body.path, item.path)
+    await rewriteLinks(config, c.get('user').id, body.path, item.path)
     return c.json({
       item: {
         ...item,
@@ -397,6 +519,7 @@ export function createApp(config: ServerConfig) {
       await removePath(root, body.path)
       await dropPath(root, body.path)
       await dropSharesForPath(config, user.id, body.path)
+      await dropLinksForPath(config, user.id, body.path)
       return c.json({ ok: true, permanent: true, size })
     }
     const { item, record } = await trashEntry(root, body.path)
@@ -422,6 +545,7 @@ export function createApp(config: ServerConfig) {
     for (const path of originals) {
       await dropPath(root, path)
       await dropSharesForPath(config, user.id, path)
+      await dropLinksForPath(config, user.id, path)
     }
     return c.json({ ok: true })
   })
@@ -431,47 +555,41 @@ export function createApp(config: ServerConfig) {
     const root = c.get('root')
     const shareId = c.req.query('share')
     const path = c.req.query('path') ?? ''
-    if (shareId) {
-      try {
-        const file = await openSharedDownload(config, user, shareId, path)
-        return new Response(Readable.toWeb(file.stream) as unknown as ReadableStream, {
-          headers: {
-            'content-type': 'application/octet-stream',
-            'content-disposition': `attachment; filename="${file.name}"`,
-            'content-length': String(file.size),
-          },
-        })
-      } catch (err) {
-        if (err instanceof ShareError) return c.json({ error: err.message }, err.status)
-        throw err
-      }
+    const inline = c.req.query('inline') === '1' || c.req.path.endsWith('/raw')
+    async function openOwned() {
+      if (shareId) return openSharedDownload(config, user, shareId, path)
+      if (!path) throw new Error('path required')
+      const parsed = parseSharePath(path)
+      if (parsed) return openSharedDownload(config, user, parsed.shareId, parsed.sub)
+      const file = await openDownload(root, path)
+      await touchRecent(root, path)
+      return file
     }
-    if (!path) return c.json({ error: 'path required' }, 400)
-    const parsed = parseSharePath(path)
-    if (parsed) {
-      try {
-        const file = await openSharedDownload(config, user, parsed.shareId, parsed.sub)
-        return new Response(Readable.toWeb(file.stream) as unknown as ReadableStream, {
-          headers: {
-            'content-type': 'application/octet-stream',
-            'content-disposition': `attachment; filename="${file.name}"`,
-            'content-length': String(file.size),
-          },
-        })
-      } catch (err) {
-        if (err instanceof ShareError) return c.json({ error: err.message }, err.status)
-        throw err
-      }
+    try {
+      return sendFile(await openOwned(), inline)
+    } catch (err) {
+      if (err instanceof ShareError) return c.json({ error: err.message }, err.status)
+      throw err
     }
-    const file = await openDownload(root, path)
-    await touchRecent(root, path)
-    return new Response(Readable.toWeb(file.stream) as unknown as ReadableStream, {
-      headers: {
-        'content-type': 'application/octet-stream',
-        'content-disposition': `attachment; filename="${file.name}"`,
-        'content-length': String(file.size),
-      },
-    })
+  })
+
+  app.get('/api/files/raw', async (c) => {
+    const user = c.get('user')
+    const root = c.get('root')
+    const shareId = c.req.query('share')
+    const path = c.req.query('path') ?? ''
+    try {
+      if (shareId) {
+        return sendFile(await openSharedDownload(config, user, shareId, path), true)
+      }
+      if (!path) return c.json({ error: 'path required' }, 400)
+      const parsed = parseSharePath(path)
+      if (parsed) return sendFile(await openSharedDownload(config, user, parsed.shareId, parsed.sub), true)
+      return sendFile(await openDownload(root, path), true)
+    } catch (err) {
+      if (err instanceof ShareError) return c.json({ error: err.message }, err.status)
+      throw err
+    }
   })
 
   app.delete('/api/files', async (c) => {
@@ -485,7 +603,10 @@ export function createApp(config: ServerConfig) {
     const original = await forgetTrashPath(root, path)
     await removePath(root, path)
     await dropPath(root, path)
-    if (original) await dropSharesForPath(config, user.id, original)
+    if (original) {
+      await dropSharesForPath(config, user.id, original)
+      await dropLinksForPath(config, user.id, original)
+    }
     return c.json({ ok: true })
   })
 
@@ -494,7 +615,7 @@ export function createApp(config: ServerConfig) {
     if (message.includes('escapes') || message.includes('Refusing') || message.includes('Invalid')) {
       return c.json({ error: message }, 400)
     }
-    if (message.includes('already has that name')) return c.json({ error: message }, 409)
+    if (message.includes('zip') || message.includes('empty')) return c.json({ error: message }, 400)
     if (message.includes('ENOENT') || message.includes('no such file') || message.includes('Not in trash')) {
       return c.json({ error: 'Not found' }, 404)
     }

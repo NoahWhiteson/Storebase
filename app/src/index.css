@@ -179,3 +179,12 @@
   cursor: grab;
 }
 
+.md-body h1 { font-size: 1.6rem; font-weight: 600; margin: 1.2em 0 0.4em; }
+.md-body h2 { font-size: 1.25rem; font-weight: 600; margin: 1.1em 0 0.35em; }
+.md-body h3 { font-size: 1.05rem; font-weight: 600; margin: 1em 0 0.3em; }
+.md-body p { margin: 0.4em 0; }
+.md-body li { margin-left: 1.2em; list-style: disc; }
+.md-body code { background: #242424; border-radius: 4px; padding: 0.1em 0.35em; font-size: 0.9em; }
+.md-body .md-code { background: #242424; border-radius: 12px; padding: 12px 16px; overflow-x: auto; font-size: 13px; }
+.md-body a { text-decoration: underline; color: #e8e8e8; }
+

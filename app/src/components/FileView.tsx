@@ -3,14 +3,39 @@ import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
+  ContextMenuRadioGroup,
+  ContextMenuRadioItem,
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu'
 import { formatBytes, formatDate } from '@/lib/format'
+import { isZipName, previewKind } from '@/lib/preview'
+import { rawUrl } from '@/lib/api'
 import type { DriveItem, SectionId } from '@/types'
 import { cn } from 'cn'
 import type { ReactNode } from 'react'
-import { Download, FolderOpen, Pencil, Share2, Star, Trash2, Undo2, UserMinus, Users } from 'lucide-react'
+import {
+  ArchiveRestore,
+  ArrowDownAz,
+  Calendar,
+  Download,
+  FilePlus,
+  FolderOpen,
+  FolderPlus,
+  HardDrive,
+  LayoutGrid,
+  List,
+  Pencil,
+  Share2,
+  Star,
+  Trash2,
+  Undo2,
+  Upload,
+  UserMinus,
+  Users,
+} from 'lucide-react'
+
+export type SortKey = 'name' | 'modified' | 'size'
 
 type FileViewProps = {
   items: DriveItem[]
@@ -18,6 +43,13 @@ type FileViewProps = {
   section: SectionId
   selectedIds: string[]
   search: string
+  sort: SortKey
+  onSort: (key: SortKey) => void
+  onView: (view: 'grid' | 'list') => void
+  canCreate: boolean
+  onNewFolder: () => void
+  onNewFile: () => void
+  onUpload: () => void
   onSelect: (id: string, additive: boolean) => void
   onOpen: (item: DriveItem) => void
   onStar: (id: string) => void
@@ -28,85 +60,134 @@ type FileViewProps = {
   onDeleteForever: (id: string) => void
   onRemoveShare: (id: string) => void
   onDownload: (item: DriveItem) => void
+  onUnzip: (id: string) => void
 }
 
-export function FileView({
-  items,
-  view,
-  section,
-  selectedIds,
-  search,
-  onSelect,
-  onOpen,
-  onStar,
-  onShare,
-  onRename,
-  onTrash,
-  onRestore,
-  onDeleteForever,
-  onRemoveShare,
-  onDownload,
-}: FileViewProps) {
-  if (items.length === 0) {
-    return <EmptyState section={section} search={search} />
-  }
+export function FileView(props: FileViewProps) {
+  const ordered = sortItems(props.items, props.sort)
+  const folders = ordered.filter((item) => item.kind === 'folder')
+  const files = ordered.filter((item) => item.kind !== 'folder')
+  const showSplit = props.view === 'grid' && folders.length > 0 && files.length > 0
+  const empty = props.items.length === 0
 
-  const folders = items.filter((item) => item.kind === 'folder')
-  const files = items.filter((item) => item.kind !== 'folder')
-  const showSplit = view === 'grid' && folders.length > 0 && files.length > 0
-
-  const menu = {
-    onOpen,
-    onStar,
-    onShare,
-    onRename,
-    onTrash,
-    onRestore,
-    onDeleteForever,
-    onRemoveShare,
-    onDownload,
-  }
-
-  if (view === 'list') {
-    return (
-      <div>
-        <div className="hidden grid-cols-[minmax(0,2fr)_140px_160px_100px] gap-3 px-3 py-2 text-xs font-medium text-[#8d8d8d] md:grid">
-          <span>Name</span>
-          <span>Owner</span>
-          <span>{section === 'trash' ? 'Retention' : 'Date modified'}</span>
-          <span className="text-right">File size</span>
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <div className="min-h-[320px]">
+          {empty ? (
+            <EmptyState section={props.section} search={props.search} />
+          ) : props.view === 'list' ? (
+            <ListView {...props} items={ordered} />
+          ) : (
+            <GridView {...props} folders={folders} files={files} showSplit={showSplit} />
+          )}
         </div>
-        {items.map((item) => (
-          <ItemMenu key={item.id} item={item} {...menu}>
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation()
-                onSelect(item.id, e.metaKey || e.ctrlKey)
-              }}
-              onDoubleClick={() => onOpen(item)}
-              className={cn(
-                'grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-full px-3 py-2.5 text-left hover:bg-white/5 md:grid-cols-[minmax(0,2fr)_140px_160px_100px]',
-                selectedIds.includes(item.id) && 'bg-white/10 hover:bg-white/10',
-              )}
-            >
-              <span className="flex min-w-0 items-center gap-3">
-                <FileGlyph kind={item.kind} size="sm" />
-                <span className="truncate text-sm">{item.name}</span>
-                <Marks item={item} />
-              </span>
-              <span className="hidden truncate text-sm text-[#8d8d8d] md:block">{item.owner}</span>
-              <span className="hidden text-sm text-[#8d8d8d] md:block">{when(item)}</span>
-              <span className="text-right text-sm text-[#8d8d8d]">
-                {item.kind === 'folder' ? '—' : formatBytes(item.size)}
-              </span>
-            </button>
-          </ItemMenu>
-        ))}
-      </div>
-    )
-  }
+      </ContextMenuTrigger>
+      <ContextMenuContent className="w-56">
+        {props.canCreate ? (
+          <>
+            <ContextMenuItem onSelect={props.onNewFolder}>
+              <FolderPlus />
+              New folder
+            </ContextMenuItem>
+            <ContextMenuItem onSelect={props.onNewFile}>
+              <FilePlus />
+              New file
+            </ContextMenuItem>
+            <ContextMenuItem onSelect={props.onUpload}>
+              <Upload />
+              Upload
+            </ContextMenuItem>
+            <ContextMenuSeparator />
+          </>
+        ) : null}
+        <ContextMenuRadioGroup value={props.sort} onValueChange={(value) => props.onSort(value as SortKey)}>
+          <ContextMenuRadioItem value="name">
+            <ArrowDownAz />
+            Sort by name
+          </ContextMenuRadioItem>
+          <ContextMenuRadioItem value="modified">
+            <Calendar />
+            Sort by date
+          </ContextMenuRadioItem>
+          <ContextMenuRadioItem value="size">
+            <HardDrive />
+            Sort by size
+          </ContextMenuRadioItem>
+        </ContextMenuRadioGroup>
+        <ContextMenuSeparator />
+        <ContextMenuRadioGroup
+          value={props.view}
+          onValueChange={(value) => props.onView(value as 'grid' | 'list')}
+        >
+          <ContextMenuRadioItem value="grid">
+            <LayoutGrid />
+            Grid
+          </ContextMenuRadioItem>
+          <ContextMenuRadioItem value="list">
+            <List />
+            List
+          </ContextMenuRadioItem>
+        </ContextMenuRadioGroup>
+      </ContextMenuContent>
+    </ContextMenu>
+  )
+}
 
+function sortItems(items: DriveItem[], sort: SortKey): DriveItem[] {
+  return [...items].sort((a, b) => {
+    if (sort === 'size') return (b.size ?? 0) - (a.size ?? 0)
+    if (sort === 'modified') return b.modifiedAt.localeCompare(a.modifiedAt)
+    return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })
+  })
+}
+
+function ListView(props: FileViewProps & { items: DriveItem[] }) {
+  return (
+    <div>
+      <div className="hidden grid-cols-[minmax(0,2fr)_140px_160px_100px] gap-3 px-3 py-2 text-xs font-medium text-[#8d8d8d] md:grid">
+        <span>Name</span>
+        <span>Owner</span>
+        <span>{props.section === 'trash' ? 'Retention' : 'Date modified'}</span>
+        <span className="text-right">File size</span>
+      </div>
+      {props.items.map((item) => (
+        <ItemMenu key={item.id} item={item} {...handlers(props)}>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation()
+              props.onSelect(item.id, e.metaKey || e.ctrlKey)
+            }}
+            onDoubleClick={() => props.onOpen(item)}
+            className={cn(
+              'grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-full px-3 py-2.5 text-left hover:bg-white/5 md:grid-cols-[minmax(0,2fr)_140px_160px_100px]',
+              props.selectedIds.includes(item.id) && 'bg-white/10 hover:bg-white/10',
+            )}
+          >
+            <span className="flex min-w-0 items-center gap-3">
+              <FileGlyph kind={item.kind} size="sm" />
+              <span className="truncate text-sm">{item.name}</span>
+              <Marks item={item} />
+            </span>
+            <span className="hidden truncate text-sm text-[#8d8d8d] md:block">{item.owner}</span>
+            <span className="hidden text-sm text-[#8d8d8d] md:block">{when(item)}</span>
+            <span className="text-right text-sm text-[#8d8d8d]">
+              {item.kind === 'folder' ? '—' : formatBytes(item.size)}
+            </span>
+          </button>
+        </ItemMenu>
+      ))}
+    </div>
+  )
+}
+
+function GridView({
+  folders,
+  files,
+  showSplit,
+  ...props
+}: FileViewProps & { folders: DriveItem[]; files: DriveItem[]; showSplit: boolean }) {
   return (
     <div className="flex flex-col gap-8">
       {folders.length > 0 ? (
@@ -114,17 +195,17 @@ export function FileView({
           {showSplit ? <h2 className="mb-3 text-sm font-medium text-[#8d8d8d]">Folders</h2> : null}
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
             {folders.map((item) => (
-              <ItemMenu key={item.id} item={item} {...menu}>
+              <ItemMenu key={item.id} item={item} {...handlers(props)}>
                 <button
                   type="button"
                   onClick={(e) => {
                     e.stopPropagation()
-                    onSelect(item.id, e.metaKey || e.ctrlKey)
+                    props.onSelect(item.id, e.metaKey || e.ctrlKey)
                   }}
-                  onDoubleClick={() => onOpen(item)}
+                  onDoubleClick={() => props.onOpen(item)}
                   className={cn(
                     'flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left hover:bg-white/5',
-                    selectedIds.includes(item.id) && 'bg-white/10 hover:bg-white/10',
+                    props.selectedIds.includes(item.id) && 'bg-white/10 hover:bg-white/10',
                   )}
                 >
                   <FileGlyph kind="folder" size="sm" />
@@ -136,27 +217,30 @@ export function FileView({
           </div>
         </section>
       ) : null}
-
       {files.length > 0 ? (
         <section>
           {showSplit ? <h2 className="mb-3 text-sm font-medium text-[#8d8d8d]">Files</h2> : null}
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
             {files.map((item) => (
-              <ItemMenu key={item.id} item={item} {...menu}>
+              <ItemMenu key={item.id} item={item} {...handlers(props)}>
                 <button
                   type="button"
                   onClick={(e) => {
                     e.stopPropagation()
-                    onSelect(item.id, e.metaKey || e.ctrlKey)
+                    props.onSelect(item.id, e.metaKey || e.ctrlKey)
                   }}
-                  onDoubleClick={() => onOpen(item)}
+                  onDoubleClick={() => props.onOpen(item)}
                   className={cn(
                     'flex w-full flex-col items-stretch rounded-xl p-2 text-left hover:bg-white/5',
-                    selectedIds.includes(item.id) && 'bg-white/10 hover:bg-white/10',
+                    props.selectedIds.includes(item.id) && 'bg-white/10 hover:bg-white/10',
                   )}
                 >
-                  <div className="flex h-28 items-center justify-center rounded-lg bg-white/[0.04]">
-                    <FileGlyph kind={item.kind} size="lg" />
+                  <div className="flex h-28 items-center justify-center overflow-hidden rounded-lg bg-white/[0.04]">
+                    {previewKind(item.name) === 'image' && item.owned !== false ? (
+                      <img src={rawUrl(item.id)} alt="" className="h-full w-full object-cover" />
+                    ) : (
+                      <FileGlyph kind={item.kind} size="lg" />
+                    )}
                   </div>
                   <div className="mt-3 flex items-start gap-2 px-1 pb-1">
                     <FileGlyph kind={item.kind} size="sm" />
@@ -174,6 +258,21 @@ export function FileView({
       ) : null}
     </div>
   )
+}
+
+function handlers(props: FileViewProps) {
+  return {
+    onOpen: props.onOpen,
+    onStar: props.onStar,
+    onShare: props.onShare,
+    onRename: props.onRename,
+    onTrash: props.onTrash,
+    onRestore: props.onRestore,
+    onDeleteForever: props.onDeleteForever,
+    onRemoveShare: props.onRemoveShare,
+    onDownload: props.onDownload,
+    onUnzip: props.onUnzip,
+  }
 }
 
 function when(item: DriveItem): string {
@@ -205,6 +304,7 @@ function ItemMenu({
   onDeleteForever,
   onRemoveShare,
   onDownload,
+  onUnzip,
 }: {
   item: DriveItem
   children: ReactNode
@@ -217,9 +317,11 @@ function ItemMenu({
   onDeleteForever: (id: string) => void
   onRemoveShare: (id: string) => void
   onDownload: (item: DriveItem) => void
+  onUnzip: (id: string) => void
 }) {
   const inbound = item.owned === false
   const shareRoot = inbound && Boolean(item.shareId) && item.id === `share:${item.shareId}`
+  const zip = !inbound && !item.trashed && isZipName(item.name)
 
   return (
     <ContextMenu>
@@ -247,6 +349,12 @@ function ItemMenu({
             Rename
           </ContextMenuItem>
         )}
+        {zip ? (
+          <ContextMenuItem onSelect={() => onUnzip(item.id)}>
+            <ArchiveRestore />
+            Unzip
+          </ContextMenuItem>
+        ) : null}
         <ContextMenuItem onSelect={() => onDownload(item)}>
           <Download />
           Download
@@ -283,7 +391,7 @@ function ItemMenu({
 
 function EmptyState({ section, search }: { section: SectionId; search: string }) {
   let title = 'This folder is empty'
-  let body = 'Drop files here or use New to add a folder.'
+  let body = 'Right-click for new file, folder, or upload.'
 
   if (search.trim()) {
     title = `No results for "${search.trim()}"`

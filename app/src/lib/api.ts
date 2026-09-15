@@ -32,6 +32,13 @@ export type ShareInfo = {
   createdAt: string
 }
 
+export type LinkInfo = {
+  id: string
+  token: string
+  path: string
+  createdAt: string
+}
+
 export class ApiError extends Error {
   status: number
   code?: string
@@ -226,9 +233,8 @@ export async function listPeople(): Promise<Person[]> {
   return body.people
 }
 
-export async function listShares(path: string): Promise<ShareInfo[]> {
-  const body = await api<{ shares: ShareInfo[] }>(`/api/shares?path=${encodeURIComponent(path)}`)
-  return body.shares
+export async function listShares(path: string): Promise<{ shares: ShareInfo[]; link: LinkInfo | null }> {
+  return api(`/api/shares?path=${encodeURIComponent(path)}`)
 }
 
 export async function createShare(path: string, email: string): Promise<ShareInfo[]> {
@@ -243,6 +249,26 @@ export async function deleteShare(id: string): Promise<void> {
   await api(`/api/shares/${id}`, { method: 'DELETE' })
 }
 
+export async function createLink(path: string): Promise<LinkInfo> {
+  const body = await api<{ link: LinkInfo }>('/api/links', {
+    method: 'POST',
+    body: JSON.stringify({ path }),
+  })
+  return body.link
+}
+
+export async function deleteLink(id: string): Promise<void> {
+  await api(`/api/links/${id}`, { method: 'DELETE' })
+}
+
+export async function unzipFile(path: string): Promise<void> {
+  await api('/api/files/unzip', { method: 'POST', body: JSON.stringify({ path }) })
+}
+
+export function publicLinkUrl(token: string): string {
+  return `${window.location.origin}/s/${token}`
+}
+
 export function downloadUrl(path: string): string {
   const parsed = parseSharePath(path)
   if (parsed) {
@@ -251,4 +277,14 @@ export function downloadUrl(path: string): string {
     return `/api/files/download?${qs}`
   }
   return `/api/files/download?path=${encodeURIComponent(path)}`
+}
+
+export function rawUrl(path: string): string {
+  const parsed = parseSharePath(path)
+  if (parsed) {
+    const qs = new URLSearchParams({ share: parsed.shareId })
+    if (parsed.sub) qs.set('path', parsed.sub)
+    return `/api/files/raw?${qs}`
+  }
+  return `/api/files/raw?path=${encodeURIComponent(path)}`
 }

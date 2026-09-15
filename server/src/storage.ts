@@ -1,5 +1,5 @@
 import { createReadStream } from 'node:fs'
-import { mkdir, readdir, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname, join, relative, resolve, sep } from 'node:path'
 import { assertFits, folderSize } from './quota.ts'
 
@@ -234,4 +234,46 @@ export async function openDownload(root: string, relPath: string) {
     size: info.size,
     stream: createReadStream(full),
   }
+}
+
+export async function unzipArchive(
+  root: string,
+  poolRoot: string,
+  relPath: string,
+  reservedBytes: number,
+): Promise<DriveEntry> {
+  const full = resolveSafe(root, relPath)
+  const info = await stat(full)
+  if (info.isDirectory()) throw new Error('Not a zip file')
+  if (!full.toLowerCase().endsWith('.zip')) throw new Error('Only .zip files can be unzipped')
+  const { unzipSync } = await import('fflate')
+  const packed = unzipSync(new Uint8Array(await readFile(full)))
+  let incoming = 0
+  const files: { rel: string; data: Uint8Array }[] = []
+  for (const [name, data] of Object.entries(packed)) {
+    const clean = name.replaceAll('\\', '/').replace(/^\/+/, '')
+    if (!clean || clean.endsWith('/') || clean.split('/').some((part) => part === '..' || part === '.')) continue
+    if (clean.startsWith('__MACOSX/') || clean.startsWith('.')) continue
+    incoming += data.byteLength
+    files.push({ rel: clean, data })
+  }
+  if (!files.length) throw new Error('That zip is empty')
+  const used = await folderSize(poolRoot)
+  assertFits(used, incoming, reservedBytes)
+  const parent = dirname(full)
+  const folderName = await uniqueIn(parent, basename(full).replace(/\.zip$/i, ''))
+  const destRoot = join(parent, folderName)
+  await mkdir(destRoot, { recursive: true })
+  try {
+    for (const file of files) {
+      const dest = resolveSafe(destRoot, file.rel)
+      await mkdir(dirname(dest), { recursive: true })
+      await writeFile(dest, file.data)
+    }
+  } catch (err) {
+    await rm(destRoot, { recursive: true, force: true })
+    throw err
+  }
+  const destInfo = await stat(destRoot)
+  return toEntry(root, destRoot, destInfo)
 }

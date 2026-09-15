@@ -1,5 +1,6 @@
 import { FileGlyph } from '@/components/FileGlyph'
-import { FileView } from '@/components/FileView'
+import { FilePreview } from '@/components/FilePreview'
+import { FileView, type SortKey } from '@/components/FileView'
 import { Settings, type SettingsSection } from '@/components/Settings'
 import { ShareDialog } from '@/components/ShareDialog'
 import { Sidebar } from '@/components/Sidebar'
@@ -27,11 +28,13 @@ import {
   logout,
   mkdir,
   parseSharePath,
+  rawUrl,
   renameFile,
   restoreFile,
   starFile,
   toDriveItem,
   trashFile,
+  unzipFile,
   uploadFile,
   type FileEntry,
 } from '@/lib/api'
@@ -83,12 +86,14 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
   const [folderPath, setFolderPath] = useState('')
   const [search, setSearch] = useState('')
   const [view, setView] = useState<'grid' | 'list'>(account.defaultView === 'list' ? 'list' : 'grid')
+  const [sort, setSort] = useState<SortKey>('name')
+  const [preview, setPreview] = useState<DriveItem | null>(null)
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
-  const [dialog, setDialog] = useState<null | { mode: 'create' | 'rename'; id?: string }>(null)
+  const [dialog, setDialog] = useState<null | { mode: 'create' | 'create-file' | 'rename'; id?: string }>(null)
   const [nameDraft, setNameDraft] = useState('')
   const [shareLabel, setShareLabel] = useState('Shared')
   const [shareTarget, setShareTarget] = useState<DriveItem | null>(null)
@@ -245,7 +250,7 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
       setSearch('')
       return
     }
-    window.open(downloadUrl(item.id), '_blank')
+    setPreview(item)
   }
 
   async function star(id: string) {
@@ -329,6 +334,16 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
     }
   }
 
+  async function unzip(id: string) {
+    try {
+      await unzipFile(id)
+      notify('Unzipped')
+      await refresh()
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Could not unzip')
+    }
+  }
+
   function share(id: string) {
     const item = items.find((entry) => entry.id === id)
     if (!item || item.owned === false) return
@@ -349,6 +364,11 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
       if (dialog?.mode === 'create') {
         const path = joinPath(section === 'my-drive' ? folderPath : '', name)
         await mkdir(path)
+        notify(`Created ${name}`)
+      }
+      if (dialog?.mode === 'create-file') {
+        const dir = section === 'my-drive' || section === 'home' ? (section === 'my-drive' ? folderPath : '') : ''
+        await uploadFile(dir, new File([''], name))
         notify(`Created ${name}`)
       }
       if (dialog?.mode === 'rename' && dialog.id) {
@@ -441,7 +461,6 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
       <TopBar
         search={search}
         view={view}
-        files={items}
         account={profile}
         initials={me.ownerInitials}
         settingsOpen={settingsOpen}
@@ -572,6 +591,19 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
                 section={section}
                 selectedIds={selectedIds}
                 search={search}
+                sort={sort}
+                onSort={setSort}
+                onView={setView}
+                canCreate={!search.trim() && (section === 'my-drive' || section === 'home') && !folderPath.startsWith('share:')}
+                onNewFolder={() => {
+                  setNameDraft('')
+                  setDialog({ mode: 'create' })
+                }}
+                onNewFile={() => {
+                  setNameDraft('untitled.txt')
+                  setDialog({ mode: 'create-file' })
+                }}
+                onUpload={() => uploadRef.current?.click()}
                 onSelect={select}
                 onOpen={openItem}
                 onStar={(id) => void star(id)}
@@ -588,6 +620,7 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
                 onDownload={(item) => {
                   window.open(downloadUrl(item.id), '_blank')
                 }}
+                onUnzip={(id) => void unzip(id)}
               />
             )}
           </div>
@@ -610,17 +643,21 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
       <Dialog open={dialog !== null} onOpenChange={(open) => !open && setDialog(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>{dialog?.mode === 'rename' ? 'Rename' : 'New folder'}</DialogTitle>
+            <DialogTitle>
+              {dialog?.mode === 'rename' ? 'Rename' : dialog?.mode === 'create-file' ? 'New file' : 'New folder'}
+            </DialogTitle>
             <DialogDescription>
               {dialog?.mode === 'rename'
                 ? 'Update the file name. Extension stays yours to keep or drop.'
-                : 'Folders live in the current location.'}
+                : dialog?.mode === 'create-file'
+                  ? 'Created in this folder. Use an extension like .txt or .py.'
+                  : 'Folders live in the current location.'}
             </DialogDescription>
           </DialogHeader>
           <Input
             autoFocus
             value={nameDraft}
-            placeholder="Untitled folder"
+            placeholder={dialog?.mode === 'create-file' ? 'notes.txt' : 'Untitled folder'}
             onChange={(e) => setNameDraft(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === 'Enter') void submitDialog()
@@ -636,6 +673,15 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {preview ? (
+        <FilePreview
+          name={preview.name}
+          url={rawUrl(preview.id)}
+          downloadUrl={downloadUrl(preview.id)}
+          onClose={() => setPreview(null)}
+        />
+      ) : null}
 
       {shareTarget ? (
         <ShareDialog

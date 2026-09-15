@@ -8,7 +8,18 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
-import { createShare, deleteShare, listPeople, listShares, type Person, type ShareInfo } from '@/lib/api'
+import {
+  createLink,
+  createShare,
+  deleteLink,
+  deleteShare,
+  listPeople,
+  listShares,
+  publicLinkUrl,
+  type LinkInfo,
+  type Person,
+  type ShareInfo,
+} from '@/lib/api'
 import { useEffect, useState } from 'react'
 
 export function ShareDialog({
@@ -24,15 +35,17 @@ export function ShareDialog({
 }) {
   const [people, setPeople] = useState<Person[]>([])
   const [shares, setShares] = useState<ShareInfo[]>([])
+  const [link, setLink] = useState<LinkInfo | null>(null)
   const [email, setEmail] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
   async function reload() {
     try {
-      const [nextPeople, nextShares] = await Promise.all([listPeople(), listShares(path)])
+      const [nextPeople, payload] = await Promise.all([listPeople(), listShares(path)])
       setPeople(nextPeople)
-      setShares(nextShares)
+      setShares(payload.shares)
+      setLink(payload.link)
       setError(null)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not load shares')
@@ -75,8 +88,30 @@ export function ShareDialog({
     }
   }
 
+  async function toggleLink(on: boolean) {
+    setBusy(true)
+    try {
+      if (on) {
+        const next = await createLink(path)
+        setLink(next)
+        const url = publicLinkUrl(next.token)
+        await navigator.clipboard?.writeText(url)
+        onToast('Link copied. Anyone with it can view, not the rest of the app.')
+      } else if (link) {
+        await deleteLink(link.id)
+        setLink(null)
+        onToast('Link turned off')
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not update link')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const taken = new Set(shares.map((share) => share.toUserId))
   const available = people.filter((person) => !taken.has(person.id))
+  const url = link ? publicLinkUrl(link.token) : ''
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
@@ -84,11 +119,49 @@ export function ShareDialog({
         <DialogHeader>
           <DialogTitle>Share {name}</DialogTitle>
           <DialogDescription className="text-[#8d8d8d]">
-            People on this node see it under Shared with me. No public link.
+            People on this node, or anyone with a view-only link.
           </DialogDescription>
         </DialogHeader>
 
         {error ? <p className="text-sm text-[#f28b82]">{error}</p> : null}
+
+        <div className="rounded-2xl bg-white/[0.04] px-4 py-3">
+          <button
+            type="button"
+            role="switch"
+            aria-checked={Boolean(link)}
+            disabled={busy}
+            onClick={() => void toggleLink(!link)}
+            className="flex w-full items-center justify-between gap-4 text-left"
+          >
+            <span className="text-sm text-[#e8e8e8]">Anyone with the link</span>
+            <span className={link ? 'relative h-6 w-11 rounded-full bg-white' : 'relative h-6 w-11 rounded-full bg-white/20'}>
+              <span
+                className={
+                  link
+                    ? 'absolute top-0.5 left-5 size-5 rounded-full bg-[#1a1a1a]'
+                    : 'absolute top-0.5 left-0.5 size-5 rounded-full bg-white'
+                }
+              />
+            </span>
+          </button>
+          {link ? (
+            <div className="mt-3 flex gap-2">
+              <Input readOnly className="h-10 rounded-xl border-0 bg-[#242424] text-xs text-white" value={url} />
+              <Button
+                className="h-10 shrink-0 rounded-full bg-white px-3 text-[#1a1a1a] hover:bg-[#f2f2f2]"
+                onClick={() => {
+                  void navigator.clipboard?.writeText(url)
+                  onToast('Link copied')
+                }}
+              >
+                Copy
+              </Button>
+            </div>
+          ) : (
+            <p className="mt-2 text-xs text-[#8d8d8d]">Off. They only see this file, not Storebase.</p>
+          )}
+        </div>
 
         {shares.length > 0 ? (
           <div className="space-y-2">
@@ -105,7 +178,7 @@ export function ShareDialog({
             ))}
           </div>
         ) : (
-          <p className="text-sm text-[#8d8d8d]">Nobody else has this yet.</p>
+          <p className="text-sm text-[#8d8d8d]">Nobody on this node has it yet.</p>
         )}
 
         {available.length > 0 ? (
@@ -128,7 +201,7 @@ export function ShareDialog({
             ))}
           </div>
         ) : people.length === 0 ? (
-          <p className="text-sm text-[#8d8d8d]">Add another account in Settings if you want to share.</p>
+          <p className="text-sm text-[#8d8d8d]">Add another account in Settings if you want to share internally.</p>
         ) : null}
 
         <Input

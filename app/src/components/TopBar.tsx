@@ -1,4 +1,3 @@
-import { AskAI } from '@/components/AskAI'
 import { StorebaseLogo } from '@/components/StorebaseLogo'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
@@ -18,14 +17,11 @@ import {
 } from '@/components/ui/tooltip'
 import { cn } from 'cn'
 import type { SettingsSection } from '@/components/Settings'
-import type { DriveItem } from '@/types'
-import { Grid2x2, List, Menu, Search, Settings, Sparkles, SquareTerminal } from 'lucide-react'
-import { useState } from 'react'
+import { Grid2x2, List, Menu, Search, Settings, SquareTerminal } from 'lucide-react'
 
 type TopBarProps = {
   search: string
   view: 'grid' | 'list'
-  files: DriveItem[]
   account: { name: string; email: string }
   initials: string
   settingsOpen: boolean
@@ -42,7 +38,6 @@ type TopBarProps = {
 export function TopBar({
   search,
   view,
-  files,
   account,
   initials,
   settingsOpen,
@@ -55,8 +50,6 @@ export function TopBar({
   onOpenTerminals,
   onSignOut,
 }: TopBarProps) {
-  const [askOpen, setAskOpen] = useState(false)
-
   return (
     <header className="flex h-16 shrink-0 items-center bg-[#1a1a1a]">
       <div className="flex h-full w-auto shrink-0 items-center gap-2 px-3 md:w-[256px] md:gap-2.5 md:px-4">
@@ -88,19 +81,6 @@ export function TopBar({
               className="h-12 rounded-full border-0 bg-[#242424] pl-12 text-[15px] shadow-none placeholder:text-[#8d8d8d] outline-none focus-visible:bg-[#2a2a2a] focus-visible:ring-0"
             />
           </div>
-        )}
-
-        {settingsOpen || terminalsOpen ? null : (
-        <Button
-          type="button"
-          variant="secondary"
-          aria-label="Ask AI"
-          onClick={() => setAskOpen(true)}
-          className="h-10 shrink-0 rounded-full bg-[#242424] px-3 text-sm font-medium text-white hover:bg-[#2e2e2e] md:px-4"
-        >
-          <Sparkles className="size-4" />
-          <span className="hidden sm:inline">Ask AI</span>
-        </Button>
         )}
 
         <div className="flex shrink-0 items-center gap-0.5">
@@ -166,8 +146,6 @@ export function TopBar({
           </DropdownMenu>
         </div>
       </div>
-
-      <AskAI open={askOpen} files={files} onOpenChange={setAskOpen} />
     </header>
   )
 }
