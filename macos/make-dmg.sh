@@ -15,8 +15,9 @@ if [[ "$(uname -s)" != "Darwin" ]]; then
 fi
 
 if ! xcodebuild -checkFirstLaunchStatus >/dev/null 2>&1; then
-  echo "Xcode’s license isn’t accepted on this Mac. Run this once, type agree, then rerun ./make-dmg.sh:" >&2
+  echo "Xcode isn’t finished setting up on this Mac. Run these once, then rerun ./make-dmg.sh:" >&2
   echo "  sudo xcodebuild -license" >&2
+  echo "  sudo xcodebuild -runFirstLaunch" >&2
   exit 1
 fi
 
