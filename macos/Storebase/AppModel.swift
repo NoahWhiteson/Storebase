@@ -68,6 +68,17 @@ final class AppModel: ObservableObject {
     return "\(transfers.count) files"
   }
 
+  var menuBarText: String {
+    var parts: [String] = []
+    if paired, settings.showsMenuBarStorage {
+      parts.append(remainingLabel)
+    }
+    if paired, settings.showsMenuBarTransfers, !transferLabel.isEmpty {
+      parts.append(transferLabel)
+    }
+    return parts.joined(separator: "  ")
+  }
+
   func byteText(_ value: Int64) -> String {
     let f = ByteCountFormatter()
     f.countStyle = .file

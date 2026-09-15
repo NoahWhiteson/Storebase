@@ -44,15 +44,9 @@ enum CloudStub {
 
   static func meta(at url: URL) -> Meta? {
     if let fromXattr = readXattr(url) { return fromXattr }
-    if url.pathExtension.lowercased() == legacyExt {
-      guard let data = try? Data(contentsOf: url) else { return nil }
-      return try? JSONDecoder().decode(Meta.self, from: data)
-    }
-    let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
-    guard size > 0, size < 4096, let data = try? Data(contentsOf: url) else { return nil }
-    guard let parsed = try? JSONDecoder().decode(Meta.self, from: data) else { return nil }
-    guard !parsed.path.isEmpty, parsed.state == "evicted" || parsed.state == "hydrated" else { return nil }
-    return parsed
+    guard url.pathExtension.lowercased() == legacyExt else { return nil }
+    guard let data = try? Data(contentsOf: url) else { return nil }
+    return try? JSONDecoder().decode(Meta.self, from: data)
   }
 
   static func isCloudFile(_ url: URL) -> Bool {

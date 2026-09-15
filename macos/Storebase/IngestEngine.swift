@@ -1,12 +1,15 @@
-import Foundation
 import AppKit
+import Foundation
 
 final class IngestEngine: @unchecked Sendable {
   private let store: SettingsStore
-  private var timer: Timer?
+  private let queue = DispatchQueue(label: "app.storebase.ingest")
+  private var timer: DispatchSourceTimer?
   private var seen: Set<String>
   private var inflight = 0
   private var lastQuotaWarnBucket = 0
+  private var ticking = false
+  private var lastMigrate = Date.distantPast
   var onStatus: ((String) -> Void)?
   var onStorage: ((StatusResponse) -> Void)?
   var onQuotaFull: (() -> Void)?
@@ -18,25 +21,34 @@ final class IngestEngine: @unchecked Sendable {
 
   func start() {
     stop()
-    timer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] _ in
+    let timer = DispatchSource.makeTimerSource(queue: queue)
+    timer.schedule(deadline: .now() + 2.5, repeating: 2.5, leeway: .milliseconds(500))
+    timer.setEventHandler { [weak self] in
       self?.tick()
     }
-    timer?.tolerance = 0.4
-    if let timer { RunLoop.main.add(timer, forMode: .common) }
+    timer.resume()
+    self.timer = timer
   }
 
   func stop() {
-    timer?.invalidate()
+    timer?.setEventHandler {}
+    timer?.cancel()
     timer = nil
   }
 
-  func tick() {
+  private func tick() {
+    if ticking { return }
+    ticking = true
+    defer { ticking = false }
     let settings = store.settings
     guard !settings.token.isEmpty, let base = URL(string: settings.nodeURL) else { return }
     let folders = watchFolders(settings)
-    if settings.usesPlaceholders {
+    if settings.usesPlaceholders, Date().timeIntervalSince(lastMigrate) > 30 {
+      lastMigrate = Date()
       CloudStub.migrate(in: folders)
       CloudStub.reclaimHydrated(in: folders)
+    }
+    if settings.usesPlaceholders {
       Task { await CloudStub.sweep(base: base, token: settings.token) }
     }
     Task {
@@ -101,7 +113,7 @@ final class IngestEngine: @unchecked Sendable {
     if settings.skipIncomplete, Self.incomplete(name) { return }
     var isDir: ObjCBool = false
     guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir), !isDir.boolValue else { return }
-    guard let info = try? url.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey, .fileResourceIdentifierKey, .totalFileAllocatedSizeKey]) else { return }
+    guard let info = try? url.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey, .totalFileAllocatedSizeKey]) else { return }
     let size = Int64(info.fileSize ?? 0)
     let allocated = info.totalFileAllocatedSize
     if CloudStub.isCloudFile(url) { return }
@@ -116,7 +128,7 @@ final class IngestEngine: @unchecked Sendable {
     inflight += 1
     let dest = destination(for: url, size: size, settings: settings)
     Task.detached { [self] in
-      defer { Task { @MainActor in self.inflight -= 1 } }
+      defer { self.queue.async { self.inflight -= 1 } }
       let transferId = await MainActor.run {
         AppRuntime.model?.beginTransfer(name: name, total: size, uploading: true)
       }
@@ -145,20 +157,24 @@ final class IngestEngine: @unchecked Sendable {
         }
         self.afterUpload(url, remotePath: remote, size: size, settings: settings)
       } catch let err as APIError where err.isQuota {
+        self.queue.async {
+          self.seen.remove(fingerprint)
+          self.persistSeen()
+        }
         await MainActor.run {
           if settings.notifyQuota { Notifier.quotaFull(file: name) }
           if settings.pauseWhenFull { self.store.settings.captureEnabled = false }
           self.onQuotaFull?()
+        }
+      } catch {
+        self.queue.async {
           self.seen.remove(fingerprint)
           self.persistSeen()
         }
-      } catch {
         await MainActor.run {
           if settings.notifyErrors {
             Notifier.send(title: "Storebase couldn’t capture a file", body: "\(name): \(error.localizedDescription)")
           }
-          self.seen.remove(fingerprint)
-          self.persistSeen()
         }
       }
     }
@@ -213,7 +229,10 @@ final class IngestEngine: @unchecked Sendable {
   private func persistSeen() {
     let trimmed = Array(seen.suffix(4000))
     seen = Set(trimmed)
-    store.settings.lastFingerprint = trimmed
+    let fingerprints = trimmed
+    DispatchQueue.main.async {
+      self.store.settings.lastFingerprint = fingerprints
+    }
   }
 
   private static func incomplete(_ name: String) -> Bool {
