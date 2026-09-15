@@ -19,7 +19,7 @@
   <key>CFBundleShortVersionString</key>
   <string>1.6</string>
   <key>CFBundleVersion</key>
-  <string>7</string>
+  <string>8</string>
   <key>LSApplicationCategoryType</key>
   <string>public.app-category.utilities</string>
   <key>LSMinimumSystemVersion</key>
@@ -36,14 +36,14 @@
   <key>NSAppleEventsUsageDescription</key>
   <string>Storebase tells Finder to open cloud copies with this app, then hands the real file to Preview or the default app.</string>
   <key>LSSupportsOpeningDocumentsInPlace</key>
-  <false/>
+  <true/>
   <key>CFBundleDocumentTypes</key>
   <array>
     <dict>
       <key>CFBundleTypeName</key>
       <string>Storebase cloud copy</string>
       <key>CFBundleTypeRole</key>
-      <string>Viewer</string>
+      <string>Editor</string>
       <key>LSHandlerRank</key>
       <string>Alternate</string>
       <key>LSItemContentTypes</key>
