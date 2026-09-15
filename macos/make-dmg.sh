@@ -38,6 +38,12 @@ if [[ ! -d "$APP" ]]; then
   exit 1
 fi
 
+if ! codesign --verify "$APP" >/dev/null 2>&1; then
+  echo "No valid signature — ad-hoc signing so Finder treats it as an app."
+  codesign --force --deep --sign - --options runtime --timestamp=none \
+    --entitlements "$ROOT/Storebase/Storebase.entitlements" "$APP"
+fi
+
 mkdir -p "$STAGE"
 cp -R "$APP" "$STAGE/Storebase.app"
 ln -s /Applications "$STAGE/Applications"
@@ -51,7 +57,8 @@ hdiutil create \
 
 echo
 echo "DMG → $DMG"
-echo "Open it, drag Storebase onto Applications. Menu bar only — no Dock icon."
+echo "Open it, drag Storebase onto Applications, then launch it from there."
+echo "You should get a Dock icon, a window, and a menu bar cube."
 if [[ "${UNSIGNED:-}" == "1" ]]; then
-  echo "Unsigned: right-click → Open the first time, or xattr -cr /Applications/Storebase.app"
+  echo "Unsigned: right-click Storebase.app → Open the first time, or xattr -cr /Applications/Storebase.app"
 fi

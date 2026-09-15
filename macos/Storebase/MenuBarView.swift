@@ -89,7 +89,7 @@ struct MenuBarView: View {
   }
 }
 
-private struct MenuRowButton: ButtonStyle {
+struct MenuRowButton: ButtonStyle {
   func makeBody(configuration: Configuration) -> some View {
     configuration.label
       .font(.system(size: 13))

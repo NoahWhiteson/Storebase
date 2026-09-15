@@ -12,13 +12,17 @@
   <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
+  <key>CFBundleIconName</key>
+  <string>AppIcon</string>
   <key>CFBundleShortVersionString</key>
   <string>1.0</string>
   <key>CFBundleVersion</key>
   <string>1</string>
+  <key>LSApplicationCategoryType</key>
+  <string>public.app-category.utilities</string>
   <key>LSMinimumSystemVersion</key>
   <string>14.0</string>
-  <key>LSUIElement</key>
+  <key>NSHighResolutionCapable</key>
   <true/>
   <key>NSUserNotificationAlertStyle</key>
   <string>banner</string>

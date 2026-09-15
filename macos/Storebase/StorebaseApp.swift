@@ -1,16 +1,27 @@
+import AppKit
 import SwiftUI
 
 @main
 struct StorebaseApp: App {
+  @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
   @StateObject private var model = AppModel()
 
   var body: some Scene {
+    Window("Storebase", id: "main") {
+      MainWindow()
+        .environmentObject(model)
+    }
+    .windowResizability(.contentSize)
+    .defaultSize(width: 400, height: 540)
+    .commands {
+      CommandGroup(replacing: .newItem) {}
+    }
+
     MenuBarExtra {
       MenuBarView()
         .environmentObject(model)
     } label: {
-      Image(systemName: model.menuSymbol)
-        .symbolRenderingMode(.monochrome)
+      Image("MenuBarIcon")
     }
     .menuBarExtraStyle(.window)
 
@@ -19,5 +30,24 @@ struct StorebaseApp: App {
         .environmentObject(model)
         .frame(minWidth: 680, minHeight: 520)
     }
+  }
+}
+
+final class AppDelegate: NSObject, NSApplicationDelegate {
+  func applicationDidFinishLaunching(_ notification: Notification) {
+    NSApp.setActivationPolicy(.regular)
+    NSApp.activate(ignoringOtherApps: true)
+  }
+
+  func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+    if !flag {
+      NSApp.windows.first(where: { $0.title == "Storebase" })?.makeKeyAndOrderFront(nil)
+    }
+    sender.activate(ignoringOtherApps: true)
+    return true
+  }
+
+  func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+    false
   }
 }

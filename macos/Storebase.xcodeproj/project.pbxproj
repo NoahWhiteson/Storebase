@@ -15,6 +15,7 @@
 		E7B96D9449B2514ABB7D65C5 /* SettingsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB5F1930DD2B5794A08081EB /* SettingsStore.swift */; };
 		396DA1A3CF2654A091CCFA15 /* SettingsViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03F5371F1DBC518EA8FDAB56 /* SettingsViews.swift */; };
 		2BA54AF1795254D1AFC49714 /* StorebaseApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C12902FB6395B1B89F7C1D0 /* StorebaseApp.swift */; };
+		4C81A0E19B2F4C6DA11E03B7 /* MainWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D27B6F04A8C4E21B3C90D14 /* MainWindow.swift */; };
 		E06ED8AC7DEF592DBEC41BCD /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = C937ACB7E67F5DCEBA552CED /* Assets.xcassets */; };
 /* End PBXBuildFile section */
 
@@ -27,6 +28,7 @@
 		FB5F1930DD2B5794A08081EB /* SettingsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsStore.swift; sourceTree = "<group>"; };
 		03F5371F1DBC518EA8FDAB56 /* SettingsViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsViews.swift; sourceTree = "<group>"; };
 		2C12902FB6395B1B89F7C1D0 /* StorebaseApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StorebaseApp.swift; sourceTree = "<group>"; };
+		9D27B6F04A8C4E21B3C90D14 /* MainWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainWindow.swift; sourceTree = "<group>"; };
 		C937ACB7E67F5DCEBA552CED /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		28C811E339CF5D5FB13C018C /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		B7C9C4BB2798514B8BC6AC0E /* Storebase.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Storebase.entitlements; sourceTree = "<group>"; };
@@ -71,6 +73,7 @@
 				FB5F1930DD2B5794A08081EB /* SettingsStore.swift */,
 				03F5371F1DBC518EA8FDAB56 /* SettingsViews.swift */,
 				2C12902FB6395B1B89F7C1D0 /* StorebaseApp.swift */,
+				9D27B6F04A8C4E21B3C90D14 /* MainWindow.swift */,
 				C937ACB7E67F5DCEBA552CED /* Assets.xcassets */,
 				28C811E339CF5D5FB13C018C /* Info.plist */,
 				B7C9C4BB2798514B8BC6AC0E /* Storebase.entitlements */,
@@ -150,6 +153,7 @@
 				E7B96D9449B2514ABB7D65C5 /* SettingsStore.swift in Sources */,
 				396DA1A3CF2654A091CCFA15 /* SettingsViews.swift in Sources */,
 				2BA54AF1795254D1AFC49714 /* StorebaseApp.swift in Sources */,
+				4C81A0E19B2F4C6DA11E03B7 /* MainWindow.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -197,7 +201,6 @@
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Storebase/Info.plist;
-				INFOPLIST_KEY_LSUIElement = YES;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MARKETING_VERSION = 1.0;
@@ -219,7 +222,6 @@
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Storebase/Info.plist;
-				INFOPLIST_KEY_LSUIElement = YES;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MARKETING_VERSION = 1.0;

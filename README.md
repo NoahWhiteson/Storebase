@@ -46,7 +46,7 @@ cd app && npm install && npm run dev
 
 App `43123`, API `4780`. Vite proxies `/api`. Production installs serve the built app from the node port directly.
 
-Mac client: open `macos/Storebase.xcodeproj` on a Mac (menu bar app). Pair from Settings → Mac app with the node link and pairing code. Details in `macos/README.md`.
+Mac client: on a Mac run `macos/make-dmg.sh`, then open Storebase.app (Dock + window + menu bar). Pair from Settings → Mac app. Details in `macos/README.md`.
 
 ## How files work
 
