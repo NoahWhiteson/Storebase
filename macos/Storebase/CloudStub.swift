@@ -2,6 +2,15 @@ import AppKit
 import Darwin
 import Foundation
 
+private final class Gate: @unchecked Sendable {
+  private let mutex = NSLock()
+  func sync<T>(_ body: () -> T) -> T {
+    mutex.lock()
+    defer { mutex.unlock() }
+    return body()
+  }
+}
+
 enum CloudStub {
   static let xattrName = "app.storebase.placeholder"
   static let ext = "storebase"
@@ -23,10 +32,10 @@ enum CloudStub {
     var quietTicks: Int
   }
 
-  private static let lock = NSLock()
-  nonisolated(unsafe) private static var sessions: [Session] = []
-  nonisolated(unsafe) private static var sweeping = false
-  nonisolated(unsafe) private static var pending: [URL] = []
+  private static let gate = Gate()
+  private static var sessions: [Session] = []
+  private static var sweeping = false
+  private static var pending: [URL] = []
 
   static func meta(at url: URL) -> Meta? {
     if let fromXattr = readXattr(url) { return fromXattr }
@@ -47,9 +56,7 @@ enum CloudStub {
   }
 
   static func isBusy(local path: String) -> Bool {
-    lock.lock()
-    defer { lock.unlock() }
-    return sessions.contains { $0.stub.path == path }
+    gate.sync { sessions.contains { $0.stub.path == path } }
   }
 
   static func evict(url: URL, remotePath: String, size: Int64) {
@@ -100,18 +107,17 @@ enum CloudStub {
         await open(urls: urls)
         return
       }
-      lock.lock()
-      pending.append(contentsOf: urls)
-      lock.unlock()
+      gate.sync { pending.append(contentsOf: urls) }
     }
   }
 
   @MainActor
   static func flushPending() async {
-    lock.lock()
-    let urls = pending
-    pending = []
-    lock.unlock()
+    let urls = gate.sync { () -> [URL] in
+      let copy = pending
+      pending = []
+      return copy
+    }
     guard !urls.isEmpty else { return }
     await open(urls: urls)
   }
@@ -130,9 +136,7 @@ enum CloudStub {
   @MainActor
   private static func openOne(_ url: URL) async {
     guard let model = AppRuntime.model, model.paired, let base = URL(string: model.settings.nodeURL) else {
-      lock.lock()
-      pending.append(url)
-      lock.unlock()
+      gate.sync { pending.append(url) }
       Notifier.send(title: "Storebase isn’t paired", body: "Connect the Mac app, then open the file again.")
       return
     }
@@ -156,39 +160,35 @@ enum CloudStub {
       try await client.download(path: remote, to: cache)
       let values = try? cache.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
       openInDefaultApp(cache)
-      lock.lock()
-      sessions.append(
-        Session(
-          stub: url,
-          cache: cache,
-          remote: remote,
-          size: size,
-          snapshotSize: Int64(values?.fileSize ?? 0),
-          snapshotMtime: values?.contentModificationDate,
-          quietTicks: 0
+      gate.sync {
+        sessions.append(
+          Session(
+            stub: url,
+            cache: cache,
+            remote: remote,
+            size: size,
+            snapshotSize: Int64(values?.fileSize ?? 0),
+            snapshotMtime: values?.contentModificationDate,
+            quietTicks: 0
+          )
         )
-      )
-      lock.unlock()
+      }
     } catch {
       Notifier.send(title: "Couldn’t open from Storebase", body: "\(displayName(url, remote: remote)): \(error.localizedDescription)")
     }
   }
 
   static func sweep(base: URL, token: String) async {
-    lock.lock()
-    if sweeping {
-      lock.unlock()
-      return
+    let current: [Session] = gate.sync {
+      if sweeping { return [] }
+      sweeping = true
+      if sessions.isEmpty {
+        sweeping = false
+        return []
+      }
+      return sessions
     }
-    sweeping = true
-    let current = sessions
-    lock.unlock()
-    guard !current.isEmpty else {
-      lock.lock()
-      sweeping = false
-      lock.unlock()
-      return
-    }
+    guard !current.isEmpty else { return }
     let client = APIClient(baseURL: base, token: token)
     var keep: [Session] = []
     for session in current {
@@ -206,11 +206,11 @@ enum CloudStub {
       }
       await close(session, client: client)
     }
-    lock.lock()
-    let extra = sessions.filter { live in !current.contains(where: { $0.cache.path == live.cache.path }) }
-    sessions = keep + extra
-    sweeping = false
-    lock.unlock()
+    gate.sync {
+      let extra = sessions.filter { live in !current.contains(where: { $0.cache.path == live.cache.path }) }
+      sessions = keep + extra
+      sweeping = false
+    }
   }
 
   static func reclaimHydrated(in folders: [URL]) {
@@ -277,9 +277,10 @@ enum CloudStub {
   }
 
   private static func hideExt(_ url: URL) {
+    var file = url
     var values = URLResourceValues()
     values.hasHiddenExtension = true
-    try? url.setResourceValues(values)
+    try? file.setResourceValues(values)
   }
 
   private static func isOpen(_ url: URL) -> Bool {
@@ -340,8 +341,8 @@ enum CloudStub {
 }
 
 enum TrackedClouds {
-  private static let lock = NSLock()
-  nonisolated(unsafe) private static var reconciling = false
+  private static let gate = Gate()
+  private static var reconciling = false
 
   struct Item: Codable, Equatable {
     var local: String
@@ -349,23 +350,21 @@ enum TrackedClouds {
   }
 
   static func remember(local: String, remote: String) {
-    lock.lock()
-    defer { lock.unlock() }
-    var items = loadLocked()
-    items.removeAll { $0.local == local }
-    items.append(Item(local: local, remote: remote))
-    saveLocked(items)
+    gate.sync {
+      var items = loadLocked()
+      items.removeAll { $0.local == local }
+      items.append(Item(local: local, remote: remote))
+      saveLocked(items)
+    }
   }
 
   static func reconcile(base: URL, token: String, folders: [URL]) async {
-    lock.lock()
-    if reconciling {
-      lock.unlock()
-      return
+    let snapshot: [Item]? = gate.sync {
+      if reconciling { return nil }
+      reconciling = true
+      return loadLocked()
     }
-    reconciling = true
-    let snapshot = loadLocked()
-    lock.unlock()
+    guard let snapshot else { return }
     let client = APIClient(baseURL: base, token: token)
     var keep: [Item] = []
     for item in snapshot {
@@ -394,11 +393,11 @@ enum TrackedClouds {
         keep.append(item)
       }
     }
-    lock.lock()
-    let extra = loadLocked().filter { live in !snapshot.contains(where: { $0.local == live.local }) }
-    saveLocked(keep + extra)
-    reconciling = false
-    lock.unlock()
+    gate.sync {
+      let extra = loadLocked().filter { live in !snapshot.contains(where: { $0.local == live.local }) }
+      saveLocked(keep + extra)
+      reconciling = false
+    }
   }
 
   private static func locate(remote: String, folders: [URL]) -> URL? {

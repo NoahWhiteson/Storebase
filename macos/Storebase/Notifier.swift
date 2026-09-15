@@ -3,7 +3,7 @@ import UserNotifications
 enum Notifier {
   static func request() {
     Task { @MainActor in
-      UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
+      _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound])
     }
   }
 
@@ -14,7 +14,7 @@ enum Notifier {
       content.body = body
       content.sound = .default
       let req = UNNotificationRequest(identifier: id, content: content, trigger: nil)
-      UNUserNotificationCenter.current().add(req)
+      try? await UNUserNotificationCenter.current().add(req)
     }
   }
 
