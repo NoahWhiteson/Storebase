@@ -78,8 +78,8 @@ if [[ "$INSTALL" == "1" ]]; then
 fi
 
 echo
-echo "Storebase 1.2 → $DMG"
-echo "You should see a cube icon, a Dock icon, and a window that says 1.2."
+echo "Storebase 1.3 → $DMG"
+echo "You should see a cube icon, a Dock icon, and a window that says 1.3."
 echo "If you still see a hard-drive glyph, Spotlight is opening the old copy — quit Storebase and open /Applications/Storebase.app"
 if [[ "${UNSIGNED:-}" == "1" ]]; then
   echo "Unsigned: right-click Storebase.app → Open the first time, or xattr -cr /Applications/Storebase.app"
