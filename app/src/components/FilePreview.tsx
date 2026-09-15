@@ -1,5 +1,6 @@
 import { StorebaseLogo } from '@/components/StorebaseLogo'
 import { Button } from '@/components/ui/button'
+import { VideoPlayer } from '@/components/VideoPlayer'
 import { delimiterFor, parseCsv, serializeCsv } from '@/lib/csv'
 import { previewKind, renderMarkdown } from '@/lib/preview'
 import { Download, Eye, Pencil, Plus, Save, X } from 'lucide-react'
@@ -129,24 +130,11 @@ export function FilePreview({
           Download
         </Button>
       </header>
-      <div className="min-h-0 flex-1 overflow-auto p-4 md:p-8">
+      <div className={kind === 'video' ? 'flex min-h-0 flex-1 overflow-hidden bg-black' : 'min-h-0 flex-1 overflow-auto p-4 md:p-8'}>
         {kind === 'image' ? (
           <img src={url} alt={name} className="mx-auto max-h-full max-w-full object-contain" />
         ) : null}
-        {kind === 'video' ? (
-          <div className="flex h-full min-h-0 items-center justify-center">
-            <video
-              key={url}
-              src={url}
-              controls
-              playsInline
-              preload="metadata"
-              className="max-h-full w-full max-w-5xl bg-black"
-            >
-              This browser can’t play this video. Download it instead.
-            </video>
-          </div>
-        ) : null}
+        {kind === 'video' ? <VideoPlayer src={url} title={name} /> : null}
         {kind === 'audio' ? (
           <div className="flex h-full items-center justify-center">
             <audio src={url} controls className="w-full max-w-xl" />

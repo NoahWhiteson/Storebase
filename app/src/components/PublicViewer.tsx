@@ -1,6 +1,7 @@
 import { FileGlyph } from '@/components/FileGlyph'
 import { FilePreview } from '@/components/FilePreview'
 import { StorebaseLogo } from '@/components/StorebaseLogo'
+import { VideoThumb } from '@/components/VideoThumb'
 import { formatBytes } from '@/lib/format'
 import { previewKind } from '@/lib/preview'
 import { ChevronRight } from 'lucide-react'
@@ -151,7 +152,7 @@ export function PublicViewer({ token }: { token: string }) {
                 setPreview({ ...item, path: rel })
               }}
             >
-              <FileGlyph kind={item.type === 'folder' ? 'folder' : previewKind(item.name) === 'image' ? 'image' : 'doc'} size="sm" />
+              <PublicMark token={token} item={item} folderPath={folderPath} />
               <span className="min-w-0 flex-1 truncate text-sm">{item.name}</span>
               <span className="text-xs text-[#8d8d8d]">{item.type === 'folder' ? '' : formatBytes(item.size)}</span>
             </button>
@@ -165,6 +166,26 @@ export function PublicViewer({ token }: { token: string }) {
 function relativeToShare(itemPath: string, folderPath: string): string {
   const name = itemPath.split('/').pop() ?? itemPath
   return folderPath ? `${folderPath}/${name}` : name
+}
+
+function PublicMark({
+  token,
+  item,
+  folderPath,
+}: {
+  token: string
+  item: PublicItem
+  folderPath: string
+}) {
+  const rel = relativeToShare(item.path, folderPath)
+  const kind = previewKind(item.name)
+  const qs = rel ? `?path=${encodeURIComponent(rel)}` : ''
+  if (item.type === 'folder') return <FileGlyph kind="folder" size="sm" />
+  if (kind === 'video') {
+    return <VideoThumb url={`/api/public/${token}/raw${qs}`} className="size-8 shrink-0 rounded-md" />
+  }
+  if (kind === 'image') return <FileGlyph kind="image" size="sm" />
+  return <FileGlyph kind="doc" size="sm" />
 }
 
 function Shell({ children }: { children: React.ReactNode }) {

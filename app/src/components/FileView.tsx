@@ -1,4 +1,5 @@
 import { FileGlyph } from '@/components/FileGlyph'
+import { VideoThumb } from '@/components/VideoThumb'
 import {
   ContextMenu,
   ContextMenuContent,
@@ -250,7 +251,7 @@ function ListView(props: FileViewProps & { items: DriveItem[]; drag: DragApi }) 
             className="grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-full px-3 py-2.5 text-left hover:bg-white/5 md:grid-cols-[minmax(0,2fr)_140px_160px_100px]"
           >
             <span className="flex min-w-0 items-center gap-3">
-              <FileGlyph kind={item.kind} size="sm" />
+              <ItemThumb item={item} size="sm" />
               <span className="truncate text-sm">{item.name}</span>
               <Marks item={item} />
             </span>
@@ -312,15 +313,11 @@ function GridView({
                   onOpen={props.onOpen}
                   className="flex w-full flex-col items-stretch rounded-xl p-2 text-left hover:bg-white/5"
                 >
-                  <div className="flex h-28 items-center justify-center overflow-hidden rounded-lg bg-white/[0.04]">
-                    {previewKind(item.name) === 'image' && item.owned !== false ? (
-                      <img src={rawUrl(item.id)} alt="" className="h-full w-full object-cover" />
-                    ) : (
-                      <FileGlyph kind={item.kind} size="lg" />
-                    )}
+                  <div className="flex h-28 items-center justify-center overflow-hidden rounded-lg bg-[#141414]">
+                    <ItemThumb item={item} size="lg" />
                   </div>
                   <div className="mt-3 flex items-start gap-2 px-1 pb-1">
-                    <FileGlyph kind={item.kind} size="sm" />
+                    <ItemThumb item={item} size="sm" />
                     <div className="min-w-0">
                       <div className="truncate text-sm font-medium">{item.name}</div>
                       <div className="truncate text-xs text-[#8d8d8d]">{when(item)}</div>
@@ -335,6 +332,23 @@ function GridView({
       ) : null}
     </div>
   )
+}
+
+function ItemThumb({ item, size }: { item: DriveItem; size: 'sm' | 'lg' }) {
+  const video = item.kind === 'video'
+  const image = previewKind(item.name) === 'image'
+  if (video) {
+    return (
+      <VideoThumb
+        url={rawUrl(item.id)}
+        className={size === 'lg' ? 'h-full w-full' : 'size-8 shrink-0 rounded-md'}
+      />
+    )
+  }
+  if (image && size === 'lg') {
+    return <img src={rawUrl(item.id)} alt="" className="h-full w-full object-cover" />
+  }
+  return <FileGlyph kind={item.kind} size={size} />
 }
 
 function movable(item: DriveItem): boolean {
