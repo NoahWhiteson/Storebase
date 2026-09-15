@@ -24,11 +24,24 @@ export type DomainState = {
   expiresAt: string | null
 }
 
+export type HttpMode = 'direct' | 'proxy'
+
+export type Port80Owner = 'nginx' | 'caddy' | 'apache' | 'unknown' | null
+
+export type ProxyConfigs = {
+  nginx: string
+  caddy: string
+  apache: string
+}
+
 export type DomainPublic = DomainState & {
   records: DnsRecord[]
   httpsUrl: string | null
   httpBound: boolean
   httpsBound: boolean
+  httpMode: HttpMode
+  port80Owner: Port80Owner
+  configs: ProxyConfigs
 }
 
 const EMPTY: DomainState = {
@@ -145,7 +158,15 @@ export function dnsPointsHere(state: DomainState, resolved: { ipv4: string[]; ip
   return false
 }
 
-export async function publicDomain(config: ServerConfig, extra?: { httpBound?: boolean; httpsBound?: boolean }): Promise<DomainPublic> {
+export async function publicDomain(
+  config: ServerConfig,
+  extra?: {
+    httpBound?: boolean
+    httpsBound?: boolean
+    httpMode?: HttpMode
+    port80Owner?: Port80Owner
+  },
+): Promise<DomainPublic> {
   const state = await loadDomain(config)
   return {
     ...state,
@@ -153,6 +174,79 @@ export async function publicDomain(config: ServerConfig, extra?: { httpBound?: b
     httpsUrl: state.hostname && state.status === 'active' ? `https://${state.hostname}` : null,
     httpBound: extra?.httpBound ?? false,
     httpsBound: extra?.httpsBound ?? false,
+    httpMode: extra?.httpMode ?? 'direct',
+    port80Owner: extra?.port80Owner ?? null,
+    configs: state.hostname ? proxyConfigs(config, state.hostname) : { nginx: '', caddy: '', apache: '' },
+  }
+}
+
+export function proxyConfigs(config: ServerConfig, hostname: string): ProxyConfigs {
+  const upstream = `127.0.0.1:${config.port}`
+  const cert = `${config.certsDir}/fullchain.pem`
+  const key = `${config.certsDir}/privkey.pem`
+  const proxyHeaders = `        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";`
+  return {
+    nginx: `# /etc/nginx/sites-available/storebase  then: ln -s .../storebase sites-enabled && nginx -t && nginx -s reload
+server {
+    listen 80;
+    listen [::]:80;
+    server_name ${hostname};
+
+    location /.well-known/acme-challenge/ {
+        proxy_pass http://${upstream};
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name ${hostname};
+
+    ssl_certificate ${cert};
+    ssl_certificate_key ${key};
+
+    client_max_body_size 0;
+
+    location / {
+        proxy_pass http://${upstream};
+${proxyHeaders}
+    }
+}`,
+    caddy: `${hostname} {
+    reverse_proxy ${upstream}
+}`,
+    apache: `# Storebase behind Apache. Enable: a2enmod proxy proxy_http ssl headers rewrite
+<VirtualHost *:80>
+    ServerName ${hostname}
+    ProxyPreserveHost On
+    ProxyPass /.well-known/acme-challenge/ http://${upstream}/.well-known/acme-challenge/
+    ProxyPassReverse /.well-known/acme-challenge/ http://${upstream}/.well-known/acme-challenge/
+    RewriteEngine On
+    RewriteCond %{REQUEST_URI} !^/.well-known/acme-challenge/
+    RewriteRule ^ https://%{SERVER_NAME}%{REQUEST_URI} [R=301,L]
+</VirtualHost>
+
+<VirtualHost *:443>
+    ServerName ${hostname}
+    SSLEngine on
+    SSLCertificateFile ${cert}
+    SSLCertificateKeyFile ${key}
+    ProxyPreserveHost On
+    AllowEncodedSlashes NoDecode
+    RequestHeader set X-Forwarded-Proto "https"
+    ProxyPass / http://${upstream}/
+    ProxyPassReverse / http://${upstream}/
+</VirtualHost>`,
   }
 }
 

@@ -31,6 +31,11 @@ import {
 
 type Vars = { user: UserRecord; root: string }
 
+function domainView(config: ServerConfig) {
+  const gateway = getDomainGateway()
+  return publicDomain(config, gateway?.listenExtra())
+}
+
 function adminOnly(user: UserRecord): string | null {
   if (user.role !== 'admin') return 'Admin only'
   return null
@@ -90,7 +95,6 @@ export function mountAdmin(app: Hono<{ Variables: Vars }>, config: ServerConfig,
         quotaBytes: personalQuota(person),
       })),
     )
-    const gateway = getDomainGateway()
     return c.json({
       admin: true,
       account,
@@ -106,10 +110,7 @@ export function mountAdmin(app: Hono<{ Variables: Vars }>, config: ServerConfig,
         bindPort: platform.bindPort,
         restartNeeded: platform.bindHost !== config.host || platform.bindPort !== config.port,
       },
-      domain: await publicDomain(config, {
-        httpBound: gateway?.httpBound,
-        httpsBound: gateway?.httpsBound,
-      }),
+      domain: await domainView(config),
       storage: {
         reservedBytes: manifest.reservedBytes,
         reservedGb: bytesToGb(manifest.reservedBytes),
@@ -186,7 +187,7 @@ export function mountAdmin(app: Hono<{ Variables: Vars }>, config: ServerConfig,
     const body = await c.req.json<{ hostname?: string }>()
     try {
       await gateway.setHostname(body.hostname ?? '')
-      return c.json(await publicDomain(config, { httpBound: gateway.httpBound, httpsBound: gateway.httpsBound }))
+      return c.json(await domainView(config))
     } catch (err) {
       if (err instanceof DomainError) return c.json({ error: err.message }, 400)
       throw err
@@ -199,7 +200,7 @@ export function mountAdmin(app: Hono<{ Variables: Vars }>, config: ServerConfig,
     const gateway = getDomainGateway()
     if (!gateway) return c.json({ error: 'Domain gateway is not running' }, 503)
     await gateway.refresh()
-    return c.json(await publicDomain(config, { httpBound: gateway.httpBound, httpsBound: gateway.httpsBound }))
+    return c.json(await domainView(config))
   })
 
   app.delete('/api/settings/domain', async (c) => {
@@ -208,7 +209,7 @@ export function mountAdmin(app: Hono<{ Variables: Vars }>, config: ServerConfig,
     const gateway = getDomainGateway()
     if (!gateway) return c.json({ error: 'Domain gateway is not running' }, 503)
     await gateway.clear()
-    return c.json(await publicDomain(config, { httpBound: gateway.httpBound, httpsBound: false }))
+    return c.json(await domainView(config))
   })
 
   app.post('/api/settings/rotate-secret', async (c) => {

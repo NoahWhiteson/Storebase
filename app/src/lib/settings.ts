@@ -70,6 +70,9 @@ export type DomainInfo = {
   httpsUrl: string | null
   httpBound: boolean
   httpsBound: boolean
+  httpMode?: 'direct' | 'proxy'
+  port80Owner?: 'nginx' | 'caddy' | 'apache' | 'unknown' | null
+  configs?: { nginx: string; caddy: string; apache: string }
 }
 
 export async function fetchSettings(): Promise<SettingsPayload> {

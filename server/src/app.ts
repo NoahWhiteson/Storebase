@@ -105,6 +105,7 @@ import {
   type UserRecord,
 } from './users.ts'
 import { loadDomain } from './domain.ts'
+import { acmeKeyAuthorization } from './gateway.ts'
 import { mountApp } from './web.ts'
 
 import type { ServerType } from '@hono/node-server'
@@ -202,6 +203,12 @@ export function createApp(config: ServerConfig) {
   const app = new Hono<{ Variables: Vars }>()
   const terminals = createTerminalHub(config)
   app.use('/api/*', cors({ origin: (origin) => origin || '*', credentials: true }))
+
+  app.get('/.well-known/acme-challenge/:token', (c) => {
+    const body = acmeKeyAuthorization(c.req.param('token'))
+    if (!body) return c.text('Not found', 404)
+    return c.text(body, 200, { 'content-type': 'text/plain' })
+  })
 
   app.get('/api/health', (c) => c.json({ ok: true, service: 'storebase' }))
 

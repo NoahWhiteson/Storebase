@@ -666,18 +666,29 @@ function DomainPanel({
     status === 'active'
       ? 'Live with HTTPS'
       : status === 'issuing'
-        ? 'Getting a Let’s Encrypt certificate'
+        ? info?.port80Owner === 'caddy'
+          ? 'Waiting for Caddy HTTPS'
+          : 'Getting a Let’s Encrypt certificate'
         : status === 'waiting-dns'
           ? 'Waiting for DNS'
           : status === 'error'
             ? 'Needs attention'
             : 'Not set'
+  const proxy = info?.httpMode === 'proxy'
+  const ownerLabel =
+    info?.port80Owner === 'nginx'
+      ? 'nginx'
+      : info?.port80Owner === 'caddy'
+        ? 'Caddy'
+        : info?.port80Owner === 'apache'
+          ? 'Apache'
+          : null
 
   return (
     <div className="max-w-lg">
       <Heading
         title="Domain"
-        hint="Point a hostname you own at this node. Storebase watches DNS, then mints a Let’s Encrypt cert and serves the site on 443."
+        hint="Point a hostname you own at this node. Storebase watches DNS, then mints a Let’s Encrypt cert. If nginx already owns 80/443, keep it and proxy to this node."
       />
       <label className="mb-4 block text-sm text-[#8d8d8d]">
         Hostname
@@ -685,7 +696,7 @@ function DomainPanel({
           className={`${fieldClass} mt-1.5`}
           value={hostname}
           onChange={(e) => setHostname(e.target.value)}
-          placeholder="drive.noahwhiteson.com"
+          placeholder="drive.example.com"
         />
       </label>
       <div className="mb-6 flex flex-wrap gap-2">
@@ -759,15 +770,66 @@ function DomainPanel({
       ) : null}
 
       <p className="text-xs leading-5 text-[#8d8d8d]">
-        At your registrar, create those records with DNS only — not a Cloudflare orange-cloud proxy. Let’s Encrypt needs
-        port 80 on this machine, then the site is served on 443. Leave the node port ({data.server?.livePort ?? 4780})
-        open for LAN/Mac pairing if you still want it.
+        At your registrar, create those records with DNS only — not a Cloudflare orange-cloud proxy. Leave the node port
+        ({data.server?.livePort ?? 4780}) open for LAN/Mac pairing if you still want it.
       </p>
-      {info && !info.httpBound && info.hostname ? (
+      {proxy && info ? (
+        <div className="mt-5">
+          <p className="mb-1 text-sm text-white">
+            {ownerLabel ? `${ownerLabel} already has port 80` : 'Something else already has port 80'}
+          </p>
+          <p className="mb-4 text-xs leading-5 text-[#8d8d8d]">
+            {info.port80Owner === 'caddy'
+              ? 'Keep Caddy. Paste this site block and reload — Caddy will terminate TLS and reverse-proxy Storebase. Don’t stop it.'
+              : 'Keep nginx. Paste the site below so ACME and HTTPS hit Storebase on the node port, then reload. Don’t stop it.'}
+          </p>
+          {info.port80Owner === 'caddy' ? (
+            <ConfigBlock
+              title="Caddyfile"
+              value={info.configs?.caddy ?? ''}
+              onToast={onToast}
+            />
+          ) : (
+            <>
+              <ConfigBlock title="nginx" value={info.configs?.nginx ?? ''} onToast={onToast} />
+              <ConfigBlock title="Apache" value={info.configs?.apache ?? ''} onToast={onToast} />
+              <ConfigBlock title="Caddyfile" value={info.configs?.caddy ?? ''} onToast={onToast} />
+            </>
+          )}
+        </div>
+      ) : null}
+      {info && !info.httpBound && !proxy && info.hostname ? (
         <p className="mt-3 text-sm text-[#e8c07d]">
-          Port 80 is not bound yet. Open it or run the node as root so ACME can answer.
+          Port 80 is not bound yet. Run the node as root, or give it cap_net_bind_service, so ACME can answer.
         </p>
       ) : null}
+    </div>
+  )
+}
+
+function ConfigBlock({
+  title,
+  value,
+  onToast,
+}: {
+  title: string
+  value: string
+  onToast: (message: string) => void
+}) {
+  if (!value) return null
+  return (
+    <div className="mb-4">
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <p className="text-sm text-[#8d8d8d]">{title}</p>
+        <Button
+          variant="outline"
+          className="h-8 shrink-0 rounded-full border-white/20 bg-transparent px-3 text-xs text-white hover:bg-white/10 hover:text-white"
+          onClick={() => void copyText(value).then((ok) => onToast(ok ? `Copied ${title}` : 'Could not copy'))}
+        >
+          Copy
+        </Button>
+      </div>
+      <pre className="overflow-x-auto rounded-xl bg-[#242424] p-4 font-mono text-xs leading-5 text-[#e8e8e8]">{value}</pre>
     </div>
   )
 }

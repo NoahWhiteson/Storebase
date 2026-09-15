@@ -1,3 +1,4 @@
+import { execSync } from 'node:child_process'
 import { X509Certificate } from 'node:crypto'
 import { createServer as createHttpServer, type Server as HttpServer } from 'node:http'
 import { createServer as createHttpsServer, type Server as HttpsServer } from 'node:https'
@@ -17,11 +18,20 @@ import {
   parseHostname,
   saveDomain,
   type DomainState,
+  type HttpMode,
+  type Port80Owner,
 } from './domain.ts'
 
 type AppHandle = {
   fetch: (request: Request) => Response | Promise<Response>
   attach: (server: HttpServer | HttpsServer) => void
+}
+
+export type GatewayListen = {
+  httpBound: boolean
+  httpsBound: boolean
+  httpMode: HttpMode
+  port80Owner: Port80Owner
 }
 
 const challenges = new Map<string, string>()
@@ -30,6 +40,10 @@ let gateway: DomainGateway | null = null
 
 export function getDomainGateway(): DomainGateway | null {
   return gateway
+}
+
+export function acmeKeyAuthorization(token: string): string | undefined {
+  return challenges.get(token)
 }
 
 export function startDomainGateway(config: ServerConfig, app: AppHandle): DomainGateway {
@@ -42,6 +56,8 @@ export class DomainGateway {
   private http: HttpServer | null = null
   private https: HttpsServer | null = null
   private busy = false
+  private proxyMode = false
+  private occupier: Port80Owner = null
   private config: ServerConfig
   private app: AppHandle
 
@@ -56,6 +72,15 @@ export class DomainGateway {
 
   get httpsBound(): boolean {
     return Boolean(this.https?.listening)
+  }
+
+  listenExtra(): GatewayListen {
+    return {
+      httpBound: this.httpBound,
+      httpsBound: this.httpsBound,
+      httpMode: this.proxyMode ? 'proxy' : 'direct',
+      port80Owner: this.occupier,
+    }
   }
 
   async boot(): Promise<void> {
@@ -125,8 +150,14 @@ export class DomainGateway {
         publicIpv4: ips.ipv4 ?? state.publicIpv4,
         publicIpv6: ips.ipv6 ?? state.publicIpv6,
       }
+      await this.ensureHttp()
       if (merged.status === 'active') {
+        if (this.caddyFronted()) {
+          await this.pollCaddyHttps(merged)
+          return
+        }
         if (needsRenew(merged.expiresAt)) {
+          if (!this.canIssue()) return
           await this.issue(merged)
         } else {
           await this.ensureHttps()
@@ -145,13 +176,19 @@ export class DomainGateway {
         })
         return
       }
-      await this.ensureHttp()
-      if (!this.httpBound) {
-        await saveDomain(this.config, {
-          ...merged,
-          status: 'error',
-          error: bindError(80),
-        })
+      if (this.caddyFronted()) {
+        await saveDomain(this.config, { ...merged, status: 'issuing', error: null })
+        await this.pollCaddyHttps(merged)
+        return
+      }
+      if (!this.canIssue()) {
+        if (!this.proxyMode) {
+          await saveDomain(this.config, {
+            ...merged,
+            status: 'error',
+            error: bindError(80),
+          })
+        }
         return
       }
       await this.issue(merged)
@@ -164,6 +201,27 @@ export class DomainGateway {
       })
     } finally {
       this.busy = false
+    }
+  }
+
+  private canIssue(): boolean {
+    return this.httpBound || this.proxyMode
+  }
+
+  private caddyFronted(): boolean {
+    return this.proxyMode && this.occupier === 'caddy'
+  }
+
+  private async pollCaddyHttps(state: DomainState): Promise<void> {
+    if (!state.hostname) return
+    try {
+      const res = await fetch(`https://${state.hostname}/api/health`, { signal: AbortSignal.timeout(8000) })
+      if (!res.ok) return
+      await saveDomain(this.config, { ...state, status: 'active', error: null })
+    } catch {
+      if (state.status !== 'active') {
+        await saveDomain(this.config, { ...state, status: 'issuing', error: null })
+      }
     }
   }
 
@@ -207,7 +265,8 @@ export class DomainGateway {
   }
 
   private async ensureHttp(): Promise<void> {
-    if (this.http?.listening) return
+    if (this.http?.listening || this.proxyMode) return
+    this.occupier = this.occupier ?? detectPort80Owner()
     const server = createHttpServer((req, res) => {
       const token = acmeToken(req.url)
       if (token) {
@@ -238,8 +297,14 @@ export class DomainGateway {
     try {
       await listen(server, 80)
       this.http = server
+      this.proxyMode = false
     } catch (err) {
       server.close()
+      if (errorCode(err) === 'EADDRINUSE') {
+        this.proxyMode = true
+        this.occupier = detectPort80Owner() ?? 'unknown'
+        return
+      }
       const current = await loadDomain(this.config)
       if (current.hostname) {
         await saveDomain(this.config, {
@@ -252,6 +317,7 @@ export class DomainGateway {
   }
 
   private async ensureHttps(): Promise<void> {
+    if (this.proxyMode) return
     const paths = certPaths(this.config)
     let key: string
     let cert: string
@@ -272,6 +338,11 @@ export class DomainGateway {
       this.https = server
     } catch (err) {
       server.close()
+      if (errorCode(err) === 'EADDRINUSE') {
+        this.proxyMode = true
+        this.occupier = this.occupier ?? detectPort80Owner() ?? 'unknown'
+        return
+      }
       const current = await loadDomain(this.config)
       await saveDomain(this.config, {
         ...current,
@@ -292,6 +363,23 @@ export class DomainError extends Error {
     super(message)
     this.name = 'DomainError'
   }
+}
+
+export function detectPort80Owner(): Port80Owner {
+  const blobs: string[] = []
+  for (const cmd of ['ss -tlnp', 'lsof -nP -iTCP:80 -sTCP:LISTEN']) {
+    try {
+      blobs.push(execSync(cmd, { encoding: 'utf8', timeout: 2500, stdio: ['ignore', 'pipe', 'ignore'] }))
+    } catch {
+      // binary missing or no permission for process names
+    }
+  }
+  const text = blobs.join('\n').toLowerCase()
+  if (!/:80\b/.test(text)) return null
+  if (text.includes('nginx')) return 'nginx'
+  if (text.includes('caddy')) return 'caddy'
+  if (text.includes('apache') || text.includes('httpd')) return 'apache'
+  return 'unknown'
 }
 
 function acmeToken(url: string | undefined): string | null {
@@ -327,13 +415,17 @@ function listen(server: HttpServer | HttpsServer, port: number): Promise<void> {
   })
 }
 
+function errorCode(err: unknown): string {
+  return err && typeof err === 'object' && 'code' in err ? String((err as { code?: string }).code) : ''
+}
+
 function bindError(port: number, err?: unknown): string {
-  const code = err && typeof err === 'object' && 'code' in err ? String((err as { code?: string }).code) : ''
+  const code = errorCode(err)
   if (code === 'EACCES') {
     return `Need permission to bind port ${port}. Run the node as root, or: sudo setcap cap_net_bind_service=+ep ${process.execPath}`
   }
   if (code === 'EADDRINUSE') {
-    return `Port ${port} is already in use. Stop nginx/caddy/apache on that port so Storebase can terminate TLS.`
+    return `Port ${port} is already in use. Keep your reverse proxy and point it at this node.`
   }
   return err instanceof Error ? err.message : `Could not listen on port ${port}`
 }
