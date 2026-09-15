@@ -314,7 +314,7 @@ enum CloudStub {
     guard let target else { return }
     let config = NSWorkspace.OpenConfiguration()
     config.activates = true
-    NSWorkspace.shared.open([url], withApplicationAt: target, configuration: config)
+    NSWorkspace.shared.open([url], withApplicationAt: target, configuration: config) { _, _ in }
   }
 
   private static func readXattr(_ url: URL) -> Meta? {
