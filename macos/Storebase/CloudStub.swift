@@ -4,11 +4,13 @@ import Foundation
 
 enum CloudStub {
   static let xattrName = "app.storebase.placeholder"
+  static let ext = "storebase"
 
   struct Meta: Codable {
     var path: String
     var size: Int64
     var state: String
+    var name: String?
   }
 
   private struct Session {
@@ -24,28 +26,21 @@ enum CloudStub {
   private static let lock = NSLock()
   private static var sessions: [Session] = []
   private static var sweeping = false
+  private static var pending: [URL] = []
 
   static func meta(at url: URL) -> Meta? {
-    let path = url.path
-    let needed = path.withCString { pth in
-      xattrName.withCString { key in
-        getxattr(pth, key, nil, 0, 0, 0)
-      }
-    }
-    guard needed > 0 else { return nil }
-    var data = Data(count: Int(needed))
-    let read = data.withUnsafeMutableBytes { raw in
-      path.withCString { pth in
-        xattrName.withCString { key in
-          getxattr(pth, key, raw.baseAddress, raw.count, 0, 0)
-        }
-      }
-    }
-    guard read > 0 else { return nil }
-    return try? JSONDecoder().decode(Meta.self, from: data.prefix(Int(read)))
+    if let fromXattr = readXattr(url) { return fromXattr }
+    guard url.pathExtension.lowercased() == ext else { return nil }
+    guard let data = try? Data(contentsOf: url) else { return nil }
+    return try? JSONDecoder().decode(Meta.self, from: data)
+  }
+
+  static func isCloudFile(_ url: URL) -> Bool {
+    url.pathExtension.lowercased() == ext || meta(at: url) != nil
   }
 
   static func isEvicted(_ url: URL, allocated: Int?) -> Bool {
+    if url.pathExtension.lowercased() == ext { return true }
     guard let meta = meta(at: url), meta.state == "evicted" else { return false }
     if let allocated, allocated > 8192 { return false }
     return true
@@ -58,10 +53,67 @@ enum CloudStub {
   }
 
   static func evict(url: URL, remotePath: String, size: Int64) {
-    makeSparse(url, size: size)
-    writeMeta(url, Meta(path: remotePath, size: size, state: "evicted"))
-    setOpenWith(url)
-    TrackedClouds.remember(local: url.path, remote: remotePath)
+    let display = displayName(url, remote: remotePath)
+    let dest = placeholderURL(url)
+    let payload = Meta(path: remotePath, size: size, state: "evicted", name: display)
+    guard let data = try? JSONEncoder().encode(payload) else { return }
+    if dest.standardizedFileURL != url.standardizedFileURL, FileManager.default.fileExists(atPath: dest.path) {
+      try? FileManager.default.removeItem(at: dest)
+    }
+    do {
+      try data.write(to: dest, options: .atomic)
+    } catch {
+      return
+    }
+    writeMeta(dest, payload)
+    hideExt(dest)
+    if dest.standardizedFileURL != url.standardizedFileURL {
+      try? FileManager.default.removeItem(at: url)
+    }
+    DispatchQueue.main.async {
+      if let icon = NSImage(named: "AppIcon") ?? NSApp.applicationIconImage {
+        NSWorkspace.shared.setIcon(icon, forFile: dest.path, options: [])
+      }
+    }
+    TrackedClouds.remember(local: dest.path, remote: remotePath)
+  }
+
+  static func migrate(in folders: [URL]) {
+    let fm = FileManager.default
+    for folder in folders {
+      guard let names = try? fm.contentsOfDirectory(atPath: folder.path) else { continue }
+      for name in names {
+        let url = folder.appendingPathComponent(name)
+        if url.pathExtension.lowercased() == ext {
+          hideExt(url)
+          continue
+        }
+        guard let info = meta(at: url) else { continue }
+        evict(url: url, remotePath: info.path, size: info.size)
+      }
+    }
+  }
+
+  static func enqueue(_ urls: [URL]) {
+    Task { @MainActor in
+      if AppRuntime.model?.paired == true {
+        await open(urls: urls)
+        return
+      }
+      lock.lock()
+      pending.append(contentsOf: urls)
+      lock.unlock()
+    }
+  }
+
+  @MainActor
+  static func flushPending() async {
+    lock.lock()
+    let urls = pending
+    pending = []
+    lock.unlock()
+    guard !urls.isEmpty else { return }
+    await open(urls: urls)
   }
 
   @MainActor
@@ -78,25 +130,27 @@ enum CloudStub {
   @MainActor
   private static func openOne(_ url: URL) async {
     guard let model = AppRuntime.model, model.paired, let base = URL(string: model.settings.nodeURL) else {
-      Notifier.send(title: "Storebase isn’t paired", body: "Connect the Mac app before opening a cloud copy.")
+      lock.lock()
+      pending.append(url)
+      lock.unlock()
+      Notifier.send(title: "Storebase isn’t paired", body: "Connect the Mac app, then open the file again.")
       return
     }
-    let info = meta(at: url)
-    let remote = info?.path
-    let size = info?.size ?? Int64((try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
-    guard let remote, !remote.isEmpty else {
+    guard let info = meta(at: url), !info.path.isEmpty else {
       Notifier.send(title: "Not a Storebase cloud copy", body: url.lastPathComponent)
       return
     }
+    let remote = info.path
+    let size = info.size
     let client = APIClient(baseURL: base, token: model.settings.token)
     do {
       try FileManager.default.createDirectory(at: cacheRoot(), withIntermediateDirectories: true)
       let dir = cacheRoot().appendingPathComponent(UUID().uuidString, isDirectory: true)
       try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-      var name = url.lastPathComponent
+      var name = info.name ?? url.deletingPathExtension().lastPathComponent
       if (name as NSString).pathExtension.isEmpty {
-        let ext = (remote as NSString).pathExtension
-        if !ext.isEmpty { name = "\(name).\(ext)" }
+        let fileExt = (remote as NSString).pathExtension
+        if !fileExt.isEmpty { name = "\(name).\(fileExt)" }
       }
       let cache = dir.appendingPathComponent(name)
       try await client.download(path: remote, to: cache)
@@ -116,7 +170,7 @@ enum CloudStub {
       )
       lock.unlock()
     } catch {
-      Notifier.send(title: "Couldn’t open from Storebase", body: "\(url.lastPathComponent): \(error.localizedDescription)")
+      Notifier.send(title: "Couldn’t open from Storebase", body: "\(displayName(url, remote: remote)): \(error.localizedDescription)")
     }
   }
 
@@ -210,6 +264,24 @@ enum CloudStub {
       .appendingPathComponent("app.storebase.mac/open", isDirectory: true)
   }
 
+  private static func placeholderURL(_ url: URL) -> URL {
+    url.pathExtension.lowercased() == ext ? url : url.appendingPathExtension(ext)
+  }
+
+  private static func displayName(_ url: URL, remote: String) -> String {
+    if url.pathExtension.lowercased() == ext {
+      return url.deletingPathExtension().lastPathComponent
+    }
+    if !url.lastPathComponent.isEmpty { return url.lastPathComponent }
+    return URL(fileURLWithPath: remote).lastPathComponent
+  }
+
+  private static func hideExt(_ url: URL) {
+    var values = URLResourceValues()
+    values.hasHiddenExtension = true
+    try? url.setResourceValues(values)
+  }
+
   private static func isOpen(_ url: URL) -> Bool {
     let proc = Process()
     proc.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
@@ -229,7 +301,7 @@ enum CloudStub {
   private static func openInDefaultApp(_ url: URL) {
     let ours = Bundle.main.bundleURL.standardizedFileURL
     let apps = NSWorkspace.shared.urlsForApplications(toOpen: url).filter {
-      $0.standardizedFileURL != ours
+      $0.standardizedFileURL != ours && $0.pathExtension == "app"
     }
     let fallbacks = [
       URL(fileURLWithPath: "/System/Applications/Preview.app"),
@@ -245,6 +317,26 @@ enum CloudStub {
     NSWorkspace.shared.open([url], withApplicationAt: target, configuration: config)
   }
 
+  private static func readXattr(_ url: URL) -> Meta? {
+    let path = url.path
+    let needed = path.withCString { pth in
+      xattrName.withCString { key in
+        getxattr(pth, key, nil, 0, 0, 0)
+      }
+    }
+    guard needed > 0 else { return nil }
+    var data = Data(count: Int(needed))
+    let read = data.withUnsafeMutableBytes { raw in
+      path.withCString { pth in
+        xattrName.withCString { key in
+          getxattr(pth, key, raw.baseAddress, raw.count, 0, 0)
+        }
+      }
+    }
+    guard read > 0 else { return nil }
+    return try? JSONDecoder().decode(Meta.self, from: data.prefix(Int(read)))
+  }
+
   private static func writeMeta(_ url: URL, _ meta: Meta) {
     guard let data = try? JSONEncoder().encode(meta) else { return }
     _ = url.path.withCString { pth in
@@ -254,55 +346,6 @@ enum CloudStub {
         }
       }
     }
-  }
-
-  private static func makeSparse(_ url: URL, size: Int64) {
-    let fd = Darwin.open(url.path, O_RDWR)
-    guard fd >= 0 else { return }
-    defer { Darwin.close(fd) }
-    _ = ftruncate(fd, 0)
-    _ = ftruncate(fd, off_t(size))
-  }
-
-  private static func setOpenWith(_ url: URL) {
-    let payload: [String: Any] = [
-      "bundleid": Bundle.main.bundleIdentifier ?? "app.storebase.mac",
-      "path": Bundle.main.bundlePath,
-      "version": Int(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "0") ?? 0,
-    ]
-    guard let data = try? PropertyListSerialization.data(fromPropertyList: payload, format: .binary, options: 0) else { return }
-    _ = url.path.withCString { pth in
-      "com.apple.LaunchServices.OpenWith".withCString { key in
-        data.withUnsafeBytes { buf in
-          setxattr(pth, key, buf.baseAddress, buf.count, 0, 0)
-        }
-      }
-    }
-    bindFinder(url)
-  }
-
-  private static func bindFinder(_ url: URL) {
-    let filePath = url.path
-    let appPath = Bundle.main.bundlePath
-    DispatchQueue.main.async {
-      let file = escapeApple(filePath)
-      let app = escapeApple(appPath)
-      let source = """
-      tell application "Finder"
-        try
-          set theFile to POSIX file "\(file)" as alias
-          set theApp to POSIX file "\(app)" as alias
-          set default application of theFile to theApp
-        end try
-      end tell
-      """
-      var err: NSDictionary?
-      NSAppleScript(source: source)?.executeAndReturnError(&err)
-    }
-  }
-
-  private static func escapeApple(_ value: String) -> String {
-    value.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
   }
 }
 

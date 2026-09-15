@@ -17,9 +17,9 @@
   <key>CFBundleIconName</key>
   <string>AppIcon</string>
   <key>CFBundleShortVersionString</key>
-  <string>1.6</string>
+  <string>1.7</string>
   <key>CFBundleVersion</key>
-  <string>8</string>
+  <string>9</string>
   <key>LSApplicationCategoryType</key>
   <string>public.app-category.utilities</string>
   <key>LSMinimumSystemVersion</key>
@@ -37,18 +37,44 @@
   <string>Storebase tells Finder to open cloud copies with this app, then hands the real file to Preview or the default app.</string>
   <key>LSSupportsOpeningDocumentsInPlace</key>
   <true/>
+  <key>UTExportedTypeDeclarations</key>
+  <array>
+    <dict>
+      <key>UTTypeIdentifier</key>
+      <string>app.storebase.placeholder</string>
+      <key>UTTypeDescription</key>
+      <string>Storebase cloud file</string>
+      <key>UTTypeConformsTo</key>
+      <array>
+        <string>public.data</string>
+      </array>
+      <key>UTTypeTagSpecification</key>
+      <dict>
+        <key>public.filename-extension</key>
+        <array>
+          <string>storebase</string>
+        </array>
+      </dict>
+    </dict>
+  </array>
   <key>CFBundleDocumentTypes</key>
   <array>
     <dict>
       <key>CFBundleTypeName</key>
-      <string>Storebase cloud copy</string>
+      <string>Storebase cloud file</string>
       <key>CFBundleTypeRole</key>
       <string>Editor</string>
       <key>LSHandlerRank</key>
-      <string>Alternate</string>
+      <string>Owner</string>
+      <key>CFBundleTypeIconFile</key>
+      <string>AppIcon</string>
       <key>LSItemContentTypes</key>
       <array>
-        <string>public.data</string>
+        <string>app.storebase.placeholder</string>
+      </array>
+      <key>CFBundleTypeExtensions</key>
+      <array>
+        <string>storebase</string>
       </array>
     </dict>
   </array>

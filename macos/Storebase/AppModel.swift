@@ -43,6 +43,7 @@ final class AppModel: ObservableObject {
     Notifier.request()
     AppRuntime.model = self
     restartEngine()
+    Task { await CloudStub.flushPending() }
   }
 
   func toggleCapture() {

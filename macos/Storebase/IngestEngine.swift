@@ -35,6 +35,7 @@ final class IngestEngine {
     guard !settings.token.isEmpty, let base = URL(string: settings.nodeURL) else { return }
     let folders = watchFolders(settings)
     if settings.usesPlaceholders {
+      CloudStub.migrate(in: folders)
       CloudStub.reclaimHydrated(in: folders)
       Task { await CloudStub.sweep(base: base, token: settings.token) }
     }
@@ -98,8 +99,8 @@ final class IngestEngine {
     guard let info = try? url.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey, .fileResourceIdentifierKey, .totalFileAllocatedSizeKey]) else { return }
     let size = Int64(info.fileSize ?? 0)
     let allocated = info.totalFileAllocatedSize
+    if CloudStub.isCloudFile(url) { return }
     if CloudStub.isEvicted(url, allocated: allocated) { return }
-    if CloudStub.meta(at: url)?.state == "hydrated" { return }
     guard size > 0 else { return }
     if let modified = info.contentModificationDate, Date().timeIntervalSince(modified) < settings.settleSeconds { return }
     let fingerprint = "\(url.path)|\(size)|\(info.contentModificationDate?.timeIntervalSince1970 ?? 0)"

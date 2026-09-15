@@ -16,7 +16,7 @@ chmod +x make-dmg.sh
 
 The script quits any old Storebase process (same bundle id as the first agent build), rebuilds, writes `macos/dist/Storebase.dmg`, and replaces `/Applications/Storebase.app`.
 
-You should see **1.6** under the title and the cube icon. A hard-drive glyph means the old copy is still running — `killall Storebase` then open `/Applications/Storebase.app`. HTTP to a public IP (no domain) is supposed to work — if ATS still complains, you are on an old binary.
+You should see **1.7** under the title and the cube icon. A hard-drive glyph means the old copy is still running — `killall Storebase` then open `/Applications/Storebase.app`. HTTP to a public IP (no domain) is supposed to work — if ATS still complains, you are on an old binary.
 
 - First time in Xcode: open `Storebase.xcodeproj`, pick your Team under Signing, then re-run the script.
 - No Apple Developer team: `UNSIGNED=1 ./make-dmg.sh` then right-click → Open the first launch (Gatekeeper).
@@ -31,7 +31,7 @@ If Finder shows a generic white document, you are on a build from before the cub
 3. Launch Storebase on the Mac, paste both, hit Connect.
 4. Turn **Capture on** (big button). New files in Downloads upload, then stay as cloud copies (same name, almost no disk) unless you change Storage.
 
-Double-click a cloud copy: Storebase pulls the real bytes into a cache folder (original name + extension) and opens Preview / QuickTime / whatever actually owns that type — not the zero-filled stub. Close the file and the Downloads entry goes back to a cloud copy.
+Double-click a cloud copy: Finder hands it to Storebase (it’s a Storebase file with the original name). Storebase pulls the real bytes and opens Preview / QuickTime / whatever owns that type. Close the file and Downloads goes back to a cloud copy. Existing zero-filled stubs convert the first time the app ticks.
 
 Deleting that file in Downloads (or another watched folder) moves it to Trash on the node if **If I delete a file here, delete it on Storebase too** is on (default). Turn it off in Settings → Storage.
 

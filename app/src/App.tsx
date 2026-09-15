@@ -72,6 +72,23 @@ function tempDir(folderPath: string): string {
   return folderPath && folderPath !== '.temp' ? folderPath : '.temp'
 }
 
+function itemsMatch(a: DriveItem[], b: DriveItem[]): boolean {
+  if (a.length !== b.length) return false
+  return a.every((item, i) => {
+    const other = b[i]
+    return (
+      !!other &&
+      item.id === other.id &&
+      item.name === other.name &&
+      item.modifiedAt === other.modifiedAt &&
+      item.size === other.size &&
+      item.starred === other.starred &&
+      item.trashed === other.trashed &&
+      item.shared === other.shared
+    )
+  })
+}
+
 type Account = {
   id: string
   name: string
@@ -124,6 +141,7 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
   const [ttlHours, setTtlHours] = useState(24)
   const [customDays, setCustomDays] = useState('')
   const uploadRef = useRef<HTMLInputElement>(null)
+  const refreshing = useRef(false)
 
   useEffect(() => {
     if (!toast) return
@@ -162,6 +180,8 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
 
   const refresh = useCallback(async (opts?: { silent?: boolean }) => {
     const silent = Boolean(opts?.silent)
+    if (silent && refreshing.current) return
+    refreshing.current = true
     if (!silent) {
       setLoadError(null)
       setLoading(true)
@@ -197,7 +217,8 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
       } else {
         entries = await listFiles({ path: folderPath })
       }
-      setItems(entries.map((entry) => toDriveItem(entry, { name: profile.name })))
+      const next = entries.map((entry) => toDriveItem(entry, { name: profile.name }))
+      setItems((prev) => (itemsMatch(prev, next) ? prev : next))
       const status = await fetch('/api/status', { credentials: 'include' }).then(
         (res) => res.json() as Promise<{ usedBytes?: number }>,
       )
@@ -205,6 +226,7 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
     } catch (err) {
       if (!silent) setLoadError(err instanceof Error ? err.message : 'Could not load files')
     } finally {
+      refreshing.current = false
       if (!silent) setLoading(false)
     }
   }, [folderPath, profile.name, search, section])
@@ -214,18 +236,32 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
   }, [refresh])
 
   useEffect(() => {
-    const src = new EventSource('/api/drive/events')
     let timer = 0
     const bump = () => {
       window.clearTimeout(timer)
       timer = window.setTimeout(() => {
         void refresh({ silent: true })
-      }, 120)
+      }, 200)
     }
+    const src = new EventSource('/api/drive/events', { withCredentials: true })
     src.addEventListener('drive', bump)
+    src.addEventListener('hello', bump)
+    src.addEventListener('message', bump)
+    const poll = window.setInterval(() => {
+      if (document.hidden) return
+      bump()
+    }, 2000)
+    const onVis = () => {
+      if (!document.hidden) bump()
+    }
+    document.addEventListener('visibilitychange', onVis)
+    window.addEventListener('focus', onVis)
     return () => {
       window.clearTimeout(timer)
+      window.clearInterval(poll)
       src.close()
+      document.removeEventListener('visibilitychange', onVis)
+      window.removeEventListener('focus', onVis)
     }
   }, [refresh])
 

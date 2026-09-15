@@ -258,7 +258,7 @@ struct StoragePane: View {
       }
       Section("After upload") {
         Toggle("Keep files in the folder as cloud copies", isOn: placeholdersBind)
-        Text("Same names in Downloads. Bytes stay on the node. Opening a file downloads a real copy into Preview (or the default app), then it goes back to the cloud when you close it.")
+        Text("Same names in Downloads (Storebase cloud files). Double-click opens Preview or the real app for that type. Close it and the Downloads entry goes back to a cloud copy.")
           .font(.caption)
           .foregroundStyle(.secondary)
         Toggle("If I delete a file here, delete it on Storebase too", isOn: mirrorDeletesBind)

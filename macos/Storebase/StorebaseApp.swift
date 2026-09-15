@@ -40,7 +40,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   }
 
   func application(_ application: NSApplication, open urls: [URL]) {
-    Task { await CloudStub.open(urls: urls) }
+    CloudStub.enqueue(urls)
+  }
+
+  func application(_ sender: NSApplication, openFile filename: String) -> Bool {
+    CloudStub.enqueue([URL(fileURLWithPath: filename)])
+    return true
+  }
+
+  func application(_ sender: NSApplication, openFiles filenames: [String]) {
+    CloudStub.enqueue(filenames.map { URL(fileURLWithPath: $0) })
+    sender.reply(toOpenOrPrint: .success)
   }
 
   func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
