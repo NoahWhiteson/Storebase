@@ -217,8 +217,12 @@ fi
 if [ "$OPEN_FW" = "1" ]; then
   if need_cmd ufw; then
     sudo ufw allow "${PORT}/tcp" || say "Could not open ufw. Open TCP $PORT yourself."
+    sudo ufw allow 80/tcp || true
+    sudo ufw allow 443/tcp || true
   elif need_cmd firewall-cmd; then
     sudo firewall-cmd --permanent --add-port="${PORT}/tcp" || true
+    sudo firewall-cmd --permanent --add-port=80/tcp || true
+    sudo firewall-cmd --permanent --add-port=443/tcp || true
     sudo firewall-cmd --reload || true
   fi
 fi

@@ -12,11 +12,15 @@ import {
   fetchPairing,
   fetchSettings,
   patchUser,
+  refreshDomain,
   revokeDevice,
   rotatePairCode,
   rotateSecret,
   saveAccount,
+  saveDomain,
   saveSettings,
+  clearDomain,
+  type DomainInfo,
   type PairingInfo,
   type SettingsPayload,
   type SettingsUser,
@@ -24,6 +28,7 @@ import {
 import { cn } from 'cn'
 import {
   ArrowLeft,
+  Globe,
   HardDrive,
   KeyRound,
   Laptop,
@@ -50,6 +55,7 @@ export type SettingsSection =
   | 'updates'
   | 'security'
   | 'terminals'
+  | 'domain'
 
 type Account = { id: string; name: string; email: string; role: 'admin' | 'user' }
 
@@ -104,6 +110,7 @@ export function Settings({
     { id: 'devices', label: 'Mac app', icon: Laptop },
     { id: 'general', label: 'Platform', icon: SlidersHorizontal, admin: true },
     { id: 'server', label: 'Server', icon: Server, admin: true },
+    { id: 'domain', label: 'Domain', icon: Globe, admin: true },
     { id: 'storage', label: 'Storage', icon: HardDrive, admin: true },
     { id: 'users', label: 'Users', icon: Users, admin: true },
     { id: 'terminals', label: 'Terminals', icon: SquareTerminal, admin: true },
@@ -194,6 +201,9 @@ export function Settings({
         ) : null}
         {data && admin && section === 'server' ? (
           <ServerPanel data={data} onSaved={reload} onToast={onToast} />
+        ) : null}
+        {data && admin && section === 'domain' ? (
+          <DomainPanel data={data} onSaved={reload} onToast={onToast} />
         ) : null}
         {data && admin && section === 'storage' ? (
           <StoragePanel data={data} onSaved={reload} onToast={onToast} />
@@ -579,6 +589,185 @@ function ServerPanel({
       <Button className="h-11 rounded-full bg-white text-[#1a1a1a] hover:bg-[#f2f2f2]" disabled={busy} onClick={() => void save()}>
         {busy ? 'Saving…' : 'Save'}
       </Button>
+    </div>
+  )
+}
+
+function DomainPanel({
+  data,
+  onSaved,
+  onToast,
+}: {
+  data: SettingsPayload
+  onSaved: () => Promise<void>
+  onToast: (message: string) => void
+}) {
+  const [hostname, setHostname] = useState(data.domain?.hostname ?? '')
+  const [info, setInfo] = useState<DomainInfo | null>(data.domain ?? null)
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    setInfo(data.domain ?? null)
+    if (data.domain?.hostname) setHostname(data.domain.hostname)
+  }, [data.domain])
+
+  useEffect(() => {
+    if (info?.status !== 'waiting-dns' && info?.status !== 'issuing') return
+    const id = window.setInterval(() => {
+      void refreshDomain()
+        .then(setInfo)
+        .catch(() => {})
+    }, 4000)
+    return () => window.clearInterval(id)
+  }, [info?.status])
+
+  async function save() {
+    setBusy(true)
+    try {
+      const next = await saveDomain(hostname)
+      setInfo(next)
+      await onSaved()
+      onToast('Saved. Add the DNS records below, then wait — SSL issues itself.')
+    } catch (err) {
+      onToast(err instanceof Error ? err.message : 'Could not save domain')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function check() {
+    setBusy(true)
+    try {
+      setInfo(await refreshDomain())
+      await onSaved()
+    } catch (err) {
+      onToast(err instanceof Error ? err.message : 'Could not refresh DNS')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function remove() {
+    setBusy(true)
+    try {
+      setInfo(await clearDomain())
+      setHostname('')
+      await onSaved()
+      onToast('Domain removed. Site is back on the node port.')
+    } catch (err) {
+      onToast(err instanceof Error ? err.message : 'Could not remove domain')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const status = info?.status ?? 'idle'
+  const statusText =
+    status === 'active'
+      ? 'Live with HTTPS'
+      : status === 'issuing'
+        ? 'Getting a Let’s Encrypt certificate'
+        : status === 'waiting-dns'
+          ? 'Waiting for DNS'
+          : status === 'error'
+            ? 'Needs attention'
+            : 'Not set'
+
+  return (
+    <div className="max-w-lg">
+      <Heading
+        title="Domain"
+        hint="Point a hostname you own at this node. Storebase watches DNS, then mints a Let’s Encrypt cert and serves the site on 443."
+      />
+      <label className="mb-4 block text-sm text-[#8d8d8d]">
+        Hostname
+        <Input
+          className={`${fieldClass} mt-1.5`}
+          value={hostname}
+          onChange={(e) => setHostname(e.target.value)}
+          placeholder="drive.noahwhiteson.com"
+        />
+      </label>
+      <div className="mb-6 flex flex-wrap gap-2">
+        <Button className="h-11 rounded-full bg-white text-[#1a1a1a] hover:bg-[#f2f2f2]" disabled={busy} onClick={() => void save()}>
+          {busy ? 'Saving…' : 'Use this domain'}
+        </Button>
+        {info?.hostname ? (
+          <>
+            <Button
+              variant="outline"
+              className="h-11 rounded-full border-white/20 bg-transparent text-white hover:bg-white/10 hover:text-white"
+              disabled={busy}
+              onClick={() => void check()}
+            >
+              Recheck DNS
+            </Button>
+            <Button
+              variant="outline"
+              className="h-11 rounded-full border-white/20 bg-transparent text-[#f28b82] hover:bg-white/10 hover:text-[#f28b82]"
+              disabled={busy}
+              onClick={() => void remove()}
+            >
+              Remove
+            </Button>
+          </>
+        ) : null}
+      </div>
+
+      <p className="mb-1 text-sm text-white">{statusText}</p>
+      {info?.httpsUrl ? (
+        <a href={info.httpsUrl} className="mb-4 block text-sm text-white underline decoration-white/30 underline-offset-4">
+          {info.httpsUrl}
+        </a>
+      ) : (
+        <p className={`mb-4 text-sm ${status === 'error' ? 'text-[#f28b82]' : 'text-[#8d8d8d]'}`}>
+          {info?.error ?? 'Save a hostname to get the records your DNS host needs.'}
+        </p>
+      )}
+      {info?.error && info.status !== 'idle' && info.httpsUrl ? (
+        <p className="mb-4 text-sm text-[#f28b82]">{info.error}</p>
+      ) : null}
+
+      {info?.records.length ? (
+        <>
+          <p className="mb-2 text-sm text-[#8d8d8d]">DNS records</p>
+          <div className="mb-4 overflow-hidden rounded-xl bg-[#242424]">
+            {info.records.map((record) => (
+              <div key={`${record.type}-${record.host}`} className="border-b border-white/5 px-4 py-3 last:border-0">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-xs uppercase tracking-wide text-[#8d8d8d]">
+                      {record.type} · TTL {record.ttl}
+                    </p>
+                    <p className="truncate text-sm text-white">{record.host}</p>
+                    <p className="break-all font-mono text-sm text-[#e8e8e8]">{record.value}</p>
+                  </div>
+                  <Button
+                    variant="outline"
+                    className="h-8 shrink-0 rounded-full border-white/20 bg-transparent px-3 text-xs text-white hover:bg-white/10 hover:text-white"
+                    onClick={() =>
+                      void copyText(record.value).then((ok) => onToast(ok ? `Copied ${record.type}` : 'Could not copy'))
+                    }
+                  >
+                    Copy
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
+      ) : null}
+
+      <p className="text-xs leading-5 text-[#8d8d8d]">
+        At your registrar, create those records with DNS only — not a Cloudflare orange-cloud proxy. Let’s Encrypt needs
+        port 80 on this machine, then the site is served on 443. Leave the node port ({data.server?.livePort ?? 4780})
+        open for LAN/Mac pairing if you still want it.
+      </p>
+      {info && !info.httpBound && info.hostname ? (
+        <p className="mt-3 text-sm text-[#e8c07d]">
+          Port 80 is not bound yet. Open it or run the node as root so ACME can answer.
+        </p>
+      ) : null}
     </div>
   )
 }

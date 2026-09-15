@@ -43,6 +43,7 @@ export async function issueSession(c: Context, config: ServerConfig, userId: str
     path: '/',
     sameSite: 'Lax',
     maxAge: MAX_AGE,
+    secure: isHttps(c),
   })
 }
 
@@ -76,6 +77,16 @@ export async function readSessionUserId(c: Context, config: ServerConfig): Promi
 
 export function clearSession(c: Context): void {
   deleteCookie(c, COOKIE, { path: '/' })
+}
+
+function isHttps(c: Context): boolean {
+  const forwarded = c.req.header('x-forwarded-proto')
+  if (forwarded) return forwarded.split(',')[0]?.trim() === 'https'
+  try {
+    return new URL(c.req.url).protocol === 'https:'
+  } catch {
+    return false
+  }
 }
 
 export async function rotateSecret(config: ServerConfig): Promise<void> {

@@ -104,6 +104,7 @@ import {
   verifyPassword,
   type UserRecord,
 } from './users.ts'
+import { loadDomain } from './domain.ts'
 import { mountApp } from './web.ts'
 
 import type { ServerType } from '@hono/node-server'
@@ -384,9 +385,11 @@ export function createApp(config: ServerConfig) {
     const user = c.get('user')
     const code = await ensurePairCode(config, user.id)
     const devices = await listDevices(config, user.id)
+    const site = await loadDomain(config)
+    const extras = site.hostname && site.status === 'active' ? [`https://${site.hostname}`] : []
     return c.json({
       code: formatPairCode(code),
-      urls: pairUrls(config, c.req.header('host')),
+      urls: pairUrls(config, c.req.header('host'), extras),
       devices: devices.map(publicDevice),
     })
   })

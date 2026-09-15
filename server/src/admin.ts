@@ -9,6 +9,8 @@ import { requirePool, writeManifest } from './pool.ts'
 import { folderSize } from './quota.ts'
 import { issueSession, rotateSecret } from './session.ts'
 import { updateStatus } from './update.ts'
+import { publicDomain } from './domain.ts'
+import { DomainError, getDomainGateway } from './gateway.ts'
 import type { TerminalHub } from './terminals.ts'
 import {
   createUser,
@@ -88,6 +90,7 @@ export function mountAdmin(app: Hono<{ Variables: Vars }>, config: ServerConfig,
         quotaBytes: personalQuota(person),
       })),
     )
+    const gateway = getDomainGateway()
     return c.json({
       admin: true,
       account,
@@ -103,6 +106,10 @@ export function mountAdmin(app: Hono<{ Variables: Vars }>, config: ServerConfig,
         bindPort: platform.bindPort,
         restartNeeded: platform.bindHost !== config.host || platform.bindPort !== config.port,
       },
+      domain: await publicDomain(config, {
+        httpBound: gateway?.httpBound,
+        httpsBound: gateway?.httpsBound,
+      }),
       storage: {
         reservedBytes: manifest.reservedBytes,
         reservedGb: bytesToGb(manifest.reservedBytes),
@@ -169,6 +176,39 @@ export function mountAdmin(app: Hono<{ Variables: Vars }>, config: ServerConfig,
     }
 
     return c.json({ ok: true })
+  })
+
+  app.put('/api/settings/domain', async (c) => {
+    const denied = adminOnly(c.get('user'))
+    if (denied) return c.json({ error: denied }, 403)
+    const gateway = getDomainGateway()
+    if (!gateway) return c.json({ error: 'Domain gateway is not running' }, 503)
+    const body = await c.req.json<{ hostname?: string }>()
+    try {
+      await gateway.setHostname(body.hostname ?? '')
+      return c.json(await publicDomain(config, { httpBound: gateway.httpBound, httpsBound: gateway.httpsBound }))
+    } catch (err) {
+      if (err instanceof DomainError) return c.json({ error: err.message }, 400)
+      throw err
+    }
+  })
+
+  app.post('/api/settings/domain/refresh', async (c) => {
+    const denied = adminOnly(c.get('user'))
+    if (denied) return c.json({ error: denied }, 403)
+    const gateway = getDomainGateway()
+    if (!gateway) return c.json({ error: 'Domain gateway is not running' }, 503)
+    await gateway.refresh()
+    return c.json(await publicDomain(config, { httpBound: gateway.httpBound, httpsBound: gateway.httpsBound }))
+  })
+
+  app.delete('/api/settings/domain', async (c) => {
+    const denied = adminOnly(c.get('user'))
+    if (denied) return c.json({ error: denied }, 403)
+    const gateway = getDomainGateway()
+    if (!gateway) return c.json({ error: 'Domain gateway is not running' }, 503)
+    await gateway.clear()
+    return c.json(await publicDomain(config, { httpBound: gateway.httpBound, httpsBound: false }))
   })
 
   app.post('/api/settings/rotate-secret', async (c) => {

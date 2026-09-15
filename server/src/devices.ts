@@ -176,7 +176,7 @@ function addPairUrl(urls: Set<string>, raw: string) {
   }
 }
 
-export function pairUrls(config: ServerConfig, requestHost?: string | null): string[] {
+export function pairUrls(config: ServerConfig, requestHost?: string | null, extras: string[] = []): string[] {
   const urls = new Set<string>()
   if (requestHost) addPairUrl(urls, requestHost)
   if (!isBindAll(config.host)) addPairUrl(urls, `${config.host}:${config.port}`)
@@ -184,12 +184,15 @@ export function pairUrls(config: ServerConfig, requestHost?: string | null): str
   for (const ip of lanIPv4()) addPairUrl(urls, `${ip}:${config.port}`)
   const host = hostname()
   if (host && !isBindAll(host)) addPairUrl(urls, `${host}:${config.port}`)
+  for (const extra of extras) addPairUrl(urls, extra)
   return [...urls].sort((a, b) => pairUrlRank(a) - pairUrlRank(b) || a.localeCompare(b))
 }
 
 function pairUrlRank(raw: string): number {
   try {
-    const h = new URL(raw).hostname
+    const u = new URL(raw)
+    if (u.protocol === 'https:') return -1
+    const h = u.hostname
     if (/^\d+\.\d+\.\d+\.\d+$/.test(h) && h !== '127.0.0.1') return 0
     if (h === '127.0.0.1' || h === 'localhost') return 2
     return 1

@@ -53,6 +53,23 @@ export type SettingsPayload = {
     lastError: string | null
     autoUpdate: boolean
   }
+  domain?: DomainInfo
+}
+
+export type DnsRecord = { type: 'A' | 'AAAA'; host: string; value: string; ttl: number }
+
+export type DomainInfo = {
+  hostname: string | null
+  status: 'idle' | 'waiting-dns' | 'issuing' | 'active' | 'error'
+  error: string | null
+  publicIpv4: string | null
+  publicIpv6: string | null
+  issuedAt: string | null
+  expiresAt: string | null
+  records: DnsRecord[]
+  httpsUrl: string | null
+  httpBound: boolean
+  httpsBound: boolean
 }
 
 export async function fetchSettings(): Promise<SettingsPayload> {
@@ -135,4 +152,16 @@ export async function rotatePairCode(): Promise<{ code: string }> {
 
 export async function revokeDevice(id: string): Promise<void> {
   await api(`/api/devices/${id}`, { method: 'DELETE' })
+}
+
+export async function saveDomain(hostname: string): Promise<DomainInfo> {
+  return api('/api/settings/domain', { method: 'PUT', body: JSON.stringify({ hostname }) })
+}
+
+export async function refreshDomain(): Promise<DomainInfo> {
+  return api('/api/settings/domain/refresh', { method: 'POST' })
+}
+
+export async function clearDomain(): Promise<DomainInfo> {
+  return api('/api/settings/domain', { method: 'DELETE' })
 }

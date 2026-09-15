@@ -6,6 +6,7 @@ import { loadPlatform } from './platform.ts'
 import { applyUpdate, checkGithub, startUpdateLoop } from './update.ts'
 import { purgeExpiredTrash } from './trash.ts'
 import { purgeExpiredTemp } from './temp.ts'
+import { startDomainGateway } from './gateway.ts'
 import { ensureUserDrive, isConfigured, loadUsers } from './users.ts'
 
 function arg(name: string): string | undefined {
@@ -65,6 +66,7 @@ async function start(): Promise<void> {
     startUpdateLoop(config, async () => (await loadPlatform(config)).autoUpdate)
   })
   app.attach(server)
+  startDomainGateway(config, app)
 }
 
 async function update(): Promise<void> {
