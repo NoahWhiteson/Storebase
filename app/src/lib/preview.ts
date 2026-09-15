@@ -1,13 +1,13 @@
-export type PreviewKind = 'image' | 'video' | 'audio' | 'pdf' | 'markdown' | 'text' | 'none'
+export type PreviewKind = 'image' | 'video' | 'audio' | 'pdf' | 'markdown' | 'text' | 'sheet' | 'none'
 
 const IMAGE = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico'])
 const VIDEO = new Set(['mp4', 'webm', 'mov', 'ogg'])
 const AUDIO = new Set(['mp3', 'wav', 'aac', 'flac', 'ogg', 'm4a'])
 const MARKDOWN = new Set(['md', 'markdown'])
+const SHEET = new Set(['csv', 'tsv'])
 const TEXT = new Set([
   'txt',
   'json',
-  'csv',
   'xml',
   'html',
   'htm',
@@ -38,7 +38,6 @@ const TEXT = new Set([
   'env',
   'log',
   'sql',
-  'rs',
   'kt',
   'swift',
   'php',
@@ -50,6 +49,11 @@ const TEXT = new Set([
   'conf',
   'gitignore',
   'dockerfile',
+  'vue',
+  'svelte',
+  'scss',
+  'less',
+  'mdx',
 ])
 
 export function extOf(name: string): string {
@@ -65,6 +69,7 @@ export function previewKind(name: string): PreviewKind {
   if (AUDIO.has(ext)) return 'audio'
   if (ext === 'pdf') return 'pdf'
   if (MARKDOWN.has(ext)) return 'markdown'
+  if (SHEET.has(ext)) return 'sheet'
   if (TEXT.has(ext)) return 'text'
   return 'none'
 }

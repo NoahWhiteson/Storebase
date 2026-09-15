@@ -1,8 +1,9 @@
 import { StorebaseLogo } from '@/components/StorebaseLogo'
 import { Button } from '@/components/ui/button'
+import { delimiterFor, parseCsv, serializeCsv } from '@/lib/csv'
 import { previewKind, renderMarkdown } from '@/lib/preview'
-import { Download, X } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { Download, Eye, Pencil, Plus, Save, X } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
 
 const TEXT_CAP = 1_500_000
 
@@ -12,28 +13,40 @@ export function FilePreview({
   downloadUrl,
   onClose,
   closable = true,
+  editable = false,
+  onSave,
 }: {
   name: string
   url: string
   downloadUrl: string
   onClose: () => void
   closable?: boolean
+  editable?: boolean
+  onSave?: (content: string) => Promise<void>
 }) {
   const kind = previewKind(name)
+  const canEdit = Boolean(editable && onSave && (kind === 'text' || kind === 'markdown' || kind === 'sheet'))
   const [text, setText] = useState<string | null>(null)
+  const [draft, setDraft] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [truncated, setTruncated] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [mode, setMode] = useState<'edit' | 'preview'>(canEdit ? 'edit' : 'preview')
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key === 'Escape' && closable) onClose()
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's' && canEdit && !truncated) {
+        e.preventDefault()
+        void persist()
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [closable, onClose])
+  })
 
   useEffect(() => {
-    if (kind !== 'text' && kind !== 'markdown') return
+    if (kind !== 'text' && kind !== 'markdown' && kind !== 'sheet') return
     let gone = false
     setText(null)
     setError(null)
@@ -47,6 +60,7 @@ export function FilePreview({
         if (gone) return
         setTruncated(buf.byteLength > TEXT_CAP)
         setText(decoded)
+        setDraft(decoded)
       })
       .catch((err: unknown) => {
         if (!gone) setError(err instanceof Error ? err.message : 'Could not load file')
@@ -55,6 +69,23 @@ export function FilePreview({
       gone = true
     }
   }, [kind, url])
+
+  const dirty = canEdit && !truncated && text != null && draft !== text
+
+  async function persist(next = draft) {
+    if (!onSave || truncated || text == null) return
+    setSaving(true)
+    setError(null)
+    try {
+      await onSave(next)
+      setText(next)
+      setDraft(next)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not save')
+    } finally {
+      setSaving(false)
+    }
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-[#141414] text-white">
@@ -66,7 +97,30 @@ export function FilePreview({
         ) : (
           <StorebaseLogo className="size-7" />
         )}
-        <div className="min-w-0 flex-1 truncate text-sm font-medium">{name}</div>
+        <div className="min-w-0 flex-1 truncate text-sm font-medium">
+          {name}
+          {dirty ? <span className="ml-2 text-xs text-[#8d8d8d]">unsaved</span> : null}
+        </div>
+        {canEdit && kind === 'markdown' && !truncated ? (
+          <Button
+            variant="ghost"
+            className="h-9 rounded-full"
+            onClick={() => setMode((current) => (current === 'edit' ? 'preview' : 'edit'))}
+          >
+            {mode === 'edit' ? <Eye className="size-4" /> : <Pencil className="size-4" />}
+            {mode === 'edit' ? 'Preview' : 'Edit'}
+          </Button>
+        ) : null}
+        {canEdit && !truncated ? (
+          <Button
+            className="h-9 rounded-full bg-white px-4 text-[#1a1a1a] hover:bg-[#f2f2f2]"
+            disabled={saving || !dirty}
+            onClick={() => void persist()}
+          >
+            <Save className="size-4" />
+            {saving ? 'Saving…' : 'Save'}
+          </Button>
+        ) : null}
         <Button
           className="h-9 rounded-full bg-white px-4 text-[#1a1a1a] hover:bg-[#f2f2f2]"
           onClick={() => window.open(downloadUrl, '_blank')}
@@ -90,17 +144,39 @@ export function FilePreview({
         {kind === 'pdf' ? (
           <iframe title={name} src={url} className="h-full min-h-[70vh] w-full rounded-lg bg-white" />
         ) : null}
-        {kind === 'text' || kind === 'markdown' ? (
-          error ? (
+        {kind === 'text' || kind === 'markdown' || kind === 'sheet' ? (
+          error && text == null ? (
             <p className="text-sm text-[#f28b82]">{error}</p>
           ) : text == null ? (
             <p className="text-sm text-[#8d8d8d]">Loading…</p>
-          ) : kind === 'markdown' ? (
+          ) : kind === 'sheet' ? (
             <div>
               {truncated ? <p className="mb-3 text-xs text-[#8d8d8d]">Showing the first 1.5 MB.</p> : null}
+              {error ? <p className="mb-3 text-sm text-[#f28b82]">{error}</p> : null}
+              <SheetEditor
+                name={name}
+                text={draft}
+                readOnly={!canEdit || truncated}
+                onChange={setDraft}
+              />
+            </div>
+          ) : kind === 'markdown' && (mode === 'preview' || !canEdit || truncated) ? (
+            <div>
+              {truncated ? <p className="mb-3 text-xs text-[#8d8d8d]">Showing the first 1.5 MB.</p> : null}
+              {error ? <p className="mb-3 text-sm text-[#f28b82]">{error}</p> : null}
               <article
                 className="md-body mx-auto max-w-3xl text-sm leading-6 text-[#e8e8e8]"
-                dangerouslySetInnerHTML={{ __html: renderMarkdown(text) }}
+                dangerouslySetInnerHTML={{ __html: renderMarkdown(draft) }}
+              />
+            </div>
+          ) : canEdit && !truncated ? (
+            <div className="mx-auto flex h-full max-w-5xl flex-col">
+              {error ? <p className="mb-3 text-sm text-[#f28b82]">{error}</p> : null}
+              <textarea
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                spellCheck={kind === 'markdown' || name.toLowerCase().endsWith('.txt')}
+                className="min-h-[70vh] w-full flex-1 resize-none rounded-xl bg-[#1c1c1c] p-4 font-mono text-[13px] leading-5 text-[#e8e8e8] outline-none"
               />
             </div>
           ) : (
@@ -125,6 +201,80 @@ export function FilePreview({
           </div>
         ) : null}
       </div>
+    </div>
+  )
+}
+
+function SheetEditor({
+  name,
+  text,
+  readOnly,
+  onChange,
+}: {
+  name: string
+  text: string
+  readOnly: boolean
+  onChange: (next: string) => void
+}) {
+  const delimiter = delimiterFor(name)
+  const rows = useMemo(() => parseCsv(text, delimiter), [delimiter, text])
+
+  function commit(next: string[][]) {
+    onChange(serializeCsv(next, delimiter))
+  }
+
+  function setCell(r: number, c: number, value: string) {
+    const next = rows.map((row, i) => (i === r ? row.map((cell, j) => (j === c ? value : cell)) : [...row]))
+    commit(next)
+  }
+
+  function addRow() {
+    const width = rows[0]?.length ?? 1
+    commit([...rows, Array.from({ length: width }, () => '')])
+  }
+
+  function addCol() {
+    commit(rows.map((row) => [...row, '']))
+  }
+
+  return (
+    <div className="mx-auto max-w-6xl">
+      <div className="overflow-auto rounded-xl border border-white/10">
+        <table className="min-w-full border-collapse text-sm">
+          <tbody>
+            {rows.map((row, r) => (
+              <tr key={r}>
+                <td className="sticky left-0 w-10 bg-[#1a1a1a] px-2 py-1 text-center text-xs text-[#8d8d8d]">{r + 1}</td>
+                {row.map((cell, c) => (
+                  <td key={c} className="border border-white/10 p-0">
+                    {readOnly ? (
+                      <div className="min-w-[7rem] px-2 py-1.5 whitespace-pre-wrap">{cell}</div>
+                    ) : (
+                      <input
+                        value={cell}
+                        onChange={(e) => setCell(r, c, e.target.value)}
+                        className="min-w-[7rem] bg-transparent px-2 py-1.5 text-white outline-none"
+                      />
+                    )}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {readOnly ? null : (
+        <div className="mt-3 flex flex-wrap gap-2">
+          <Button variant="ghost" className="h-9 rounded-full" onClick={addRow}>
+            <Plus className="size-4" />
+            Row
+          </Button>
+          <Button variant="ghost" className="h-9 rounded-full" onClick={addCol}>
+            <Plus className="size-4" />
+            Column
+          </Button>
+        </div>
+      )}
     </div>
   )
 }

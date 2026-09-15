@@ -1,6 +1,6 @@
 import { FileGlyph } from '@/components/FileGlyph'
 import { FilePreview } from '@/components/FilePreview'
-import { FileView, type SortKey } from '@/components/FileView'
+import { FileView, sortItems, type SortKey } from '@/components/FileView'
 import { Settings, type SettingsSection } from '@/components/Settings'
 import { ShareDialog } from '@/components/ShareDialog'
 import { Sidebar } from '@/components/Sidebar'
@@ -27,10 +27,12 @@ import {
   listFiles,
   logout,
   mkdir,
+  moveFiles,
   parseSharePath,
   rawUrl,
   renameFile,
   restoreFile,
+  saveContent,
   starFile,
   toDriveItem,
   trashFile,
@@ -41,7 +43,7 @@ import {
 import { formatBytes } from '@/lib/format'
 import type { DriveItem, FileKind, SectionId } from '@/types'
 import { ChevronRight } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
 
 const titles: Record<SectionId, string> = {
   home: 'Welcome to Storebase',
@@ -61,6 +63,7 @@ type Account = {
   role: 'admin' | 'user'
   reservedBytes: number
   usedBytes: number
+  quotaBytes?: number | null
   host: string
   defaultView?: 'grid' | 'list'
   terminalsEnabled?: boolean
@@ -89,6 +92,7 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
   const [sort, setSort] = useState<SortKey>('name')
   const [preview, setPreview] = useState<DriveItem | null>(null)
   const [selectedIds, setSelectedIds] = useState<string[]>([])
+  const anchorId = useRef<string | null>(null)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -221,9 +225,20 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
     setSidebarOpen(false)
   }
 
-  function select(id: string, additive: boolean) {
+  function select(id: string, mods: { toggle: boolean; range: boolean }) {
     setSelectedIds((current) => {
-      if (additive) {
+      if (mods.range && anchorId.current) {
+        const a = orderedIds.indexOf(anchorId.current)
+        const b = orderedIds.indexOf(id)
+        if (a >= 0 && b >= 0) {
+          const [lo, hi] = a < b ? [a, b] : [b, a]
+          const range = orderedIds.slice(lo, hi + 1)
+          if (mods.toggle) return [...new Set([...current, ...range])]
+          return range
+        }
+      }
+      if (!mods.range) anchorId.current = id
+      if (mods.toggle) {
         return current.includes(id) ? current.filter((x) => x !== id) : [...current, id]
       }
       return current.length === 1 && current[0] === id ? current : [id]
@@ -410,18 +425,33 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
     }
   }
 
-  async function onUpload(files: FileList | null) {
+  async function onUpload(files: FileList | null, dest?: string) {
     if (!files?.length) return
-    const dir = section === 'computers' ? '' : folderPath
+    const dir = dest ?? (section === 'computers' ? '' : folderPath)
     try {
       for (const file of Array.from(files)) {
         await uploadFile(dir, file)
       }
       setSection('my-drive')
+      if (dest) setFolderPath(dest)
       notify(files.length === 1 ? `Uploaded ${files[0].name}` : `Uploaded ${files.length} files`)
       await refresh()
     } catch (err) {
       notify(err instanceof Error ? err.message : 'Upload failed')
+    }
+  }
+
+  async function moveTo(paths: string[], dest: string) {
+    const valid = paths.filter((id) => id !== dest && !dest.startsWith(`${id}/`) && !id.startsWith('share:') && id !== '__node__')
+    if (!valid.length) return
+    try {
+      const moved = await moveFiles(valid, dest)
+      if (!moved.length) return
+      notify(moved.length === 1 ? `Moved ${moved[0].name}` : `Moved ${moved.length} items`)
+      setSelectedIds([])
+      await refresh()
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Could not move')
     }
   }
 
@@ -450,11 +480,60 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
       : null
 
   const visible = computerItem ? [computerItem] : items
+  const orderedIds = useMemo(() => sortItems(visible, sort).map((item) => item.id), [sort, visible])
+  const canMove =
+    !search.trim() &&
+    section !== 'trash' &&
+    section !== 'shared' &&
+    section !== 'spam' &&
+    !folderPath.startsWith('share:')
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== 'a') return
+      const t = e.target as HTMLElement | null
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return
+      e.preventDefault()
+      setSelectedIds(orderedIds)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [orderedIds])
+
   const heading = search.trim()
     ? `Results for "${search.trim()}"`
     : folderPath
       ? crumbs[crumbs.length - 1]?.name ?? titles[section]
       : titles[section]
+
+  function dropDest(dest: string) {
+    return {
+      onDragOver: (e: DragEvent) => {
+        if (!canMove) return
+        e.preventDefault()
+        e.dataTransfer.dropEffect = 'move'
+      },
+      onDrop: (e: DragEvent) => {
+        e.preventDefault()
+        e.stopPropagation()
+        if (e.dataTransfer.files.length) {
+          void onUpload(e.dataTransfer.files, dest)
+          return
+        }
+        try {
+          const parsed = JSON.parse(e.dataTransfer.getData('text/plain')) as unknown
+          if (Array.isArray(parsed)) {
+            void moveTo(
+              parsed.filter((id): id is string => typeof id === 'string'),
+              dest,
+            )
+          }
+        } catch {
+          // not an internal move
+        }
+      },
+    }
+  }
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-[#1a1a1a] text-foreground">
@@ -522,6 +601,7 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
                     type="button"
                     className="hover:text-foreground"
                     onClick={() => goSection(section === 'shared' ? 'shared' : 'my-drive')}
+                    {...(canMove ? dropDest('') : {})}
                   >
                     {section === 'shared' ? 'Shared with me' : 'My files'}
                   </button>
@@ -535,15 +615,24 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
                           setFolderPath(crumb.id)
                           setSelectedIds([])
                         }}
+                        {...(canMove && i < crumbs.length - 1 ? dropDest(crumb.id) : {})}
                       >
                         {crumb.name}
                       </button>
                     </span>
                   ))}
+                  {selectedIds.length > 1 ? (
+                    <span className="ml-2 text-xs text-[#8d8d8d]">{selectedIds.length} selected</span>
+                  ) : null}
                 </>
               ) : (
                 <div className="flex w-full flex-wrap items-center justify-between gap-3">
-                  <h1 className="text-2xl font-normal tracking-tight text-foreground">{heading}</h1>
+                  <div className="flex items-baseline gap-3">
+                    <h1 className="text-2xl font-normal tracking-tight text-foreground">{heading}</h1>
+                    {selectedIds.length > 1 ? (
+                      <span className="text-sm text-[#8d8d8d]">{selectedIds.length} selected</span>
+                    ) : null}
+                  </div>
                   {section === 'trash' && items.length > 0 ? (
                     <Button
                       variant="ghost"
@@ -569,6 +658,7 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
                       type="button"
                       onClick={() => openItem(folder)}
                       className="flex min-w-[200px] items-center gap-3 rounded-xl px-3 py-3 text-left hover:bg-white/5"
+                      {...(canMove ? dropDest(folder.id) : {})}
                     >
                       <FileGlyph kind="folder" size="sm" />
                       <span className="truncate text-sm">{folder.name}</span>
@@ -595,6 +685,7 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
                 onSort={setSort}
                 onView={setView}
                 canCreate={!search.trim() && (section === 'my-drive' || section === 'home') && !folderPath.startsWith('share:')}
+                canMove={canMove}
                 onNewFolder={() => {
                   setNameDraft('')
                   setDialog({ mode: 'create' })
@@ -621,6 +712,8 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
                   window.open(downloadUrl(item.id), '_blank')
                 }}
                 onUnzip={(id) => void unzip(id)}
+                onMove={(paths, dest) => void moveTo(paths, dest)}
+                onDropFiles={(files, dest) => void onUpload(files, dest)}
               />
             )}
           </div>
@@ -679,6 +772,16 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
           name={preview.name}
           url={rawUrl(preview.id)}
           downloadUrl={downloadUrl(preview.id)}
+          editable={preview.owned !== false && !preview.trashed}
+          onSave={
+            preview.owned !== false && !preview.trashed
+              ? async (content) => {
+                  await saveContent(preview.id, content)
+                  notify(`Saved ${preview.name}`)
+                  await refresh()
+                }
+              : undefined
+          }
           onClose={() => setPreview(null)}
         />
       ) : null}

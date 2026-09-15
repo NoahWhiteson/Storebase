@@ -53,8 +53,13 @@ export async function touchRecent(root: string, path: string): Promise<void> {
 
 export async function rewritePath(root: string, from: string, to: string): Promise<void> {
   const meta = await loadMeta(root)
-  meta.starred = meta.starred.map((path) => (path === from ? to : path))
-  meta.recents = meta.recents.map((item) => (item.path === from ? { ...item, path: to } : item))
+  const map = (path: string) => {
+    if (path === from) return to
+    if (path.startsWith(`${from}/`)) return `${to}${path.slice(from.length)}`
+    return path
+  }
+  meta.starred = meta.starred.map(map)
+  meta.recents = meta.recents.map((item) => ({ ...item, path: map(item.path) }))
   await saveMeta(root, meta)
 }
 

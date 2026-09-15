@@ -12,11 +12,13 @@ import { updateStatus } from './update.ts'
 import type { TerminalHub } from './terminals.ts'
 import {
   createUser,
+  effectiveReserved,
   ensureUserDrive,
   findByEmail,
   findById,
   hashPassword,
   loadUsers,
+  personalQuota,
   saveUsers,
   toPublic,
   validEmail,
@@ -36,6 +38,25 @@ function adminCount(users: UserRecord[]): number {
   return users.filter((user) => user.role === 'admin').length
 }
 
+async function parseQuotaGb(
+  config: ServerConfig,
+  value: unknown,
+  usedBytes: number,
+): Promise<{ bytes: number | null; error?: string }> {
+  if (value == null || value === '') return { bytes: null }
+  const gb = Number(value)
+  if (!(gb > 0) || !Number.isFinite(gb)) return { bytes: null, error: 'Quota must be greater than 0 GB' }
+  const bytes = gbToBytes(gb)
+  const manifest = await requirePool(config)
+  if (bytes > manifest.reservedBytes) {
+    return { bytes: null, error: 'Quota is larger than this node’s reserve' }
+  }
+  if (bytes < usedBytes) {
+    return { bytes: null, error: 'Quota is smaller than files already stored' }
+  }
+  return { bytes }
+}
+
 export function mountAdmin(app: Hono<{ Variables: Vars }>, config: ServerConfig, hub: TerminalHub): void {
   app.get('/api/settings', async (c) => {
     const user = c.get('user')
@@ -46,7 +67,9 @@ export function mountAdmin(app: Hono<{ Variables: Vars }>, config: ServerConfig,
     const account = {
       ...toPublic(user),
       usedBytes,
-      reservedBytes: manifest.reservedBytes,
+      reservedBytes: effectiveReserved(user, manifest.reservedBytes),
+      quotaBytes: personalQuota(user),
+      nodeReservedBytes: manifest.reservedBytes,
     }
     if (user.role !== 'admin') {
       return c.json({
@@ -62,6 +85,7 @@ export function mountAdmin(app: Hono<{ Variables: Vars }>, config: ServerConfig,
       users.map(async (person) => ({
         ...toPublic(person),
         usedBytes: await folderSize(join(config.driveDir, person.id)),
+        quotaBytes: personalQuota(person),
       })),
     )
     return c.json({
@@ -136,6 +160,11 @@ export function mountAdmin(app: Hono<{ Variables: Vars }>, config: ServerConfig,
       if (reservedBytes > disk.freeBytes + poolUsed) {
         return c.json({ error: 'That reserve is larger than this disk can hold' }, 400)
       }
+      const users = await loadUsers(config)
+      const maxUserQuota = users.reduce((max, person) => Math.max(max, personalQuota(person) ?? 0), 0)
+      if (reservedBytes < maxUserQuota) {
+        return c.json({ error: 'Reserve is smaller than a user’s storage cap' }, 400)
+      }
       await writeManifest(config, reservedBytes)
     }
 
@@ -159,6 +188,7 @@ export function mountAdmin(app: Hono<{ Variables: Vars }>, config: ServerConfig,
       users.map(async (person) => ({
         ...toPublic(person),
         usedBytes: await folderSize(join(config.driveDir, person.id)),
+        quotaBytes: personalQuota(person),
       })),
     )
     return c.json({ users: people })
@@ -167,7 +197,13 @@ export function mountAdmin(app: Hono<{ Variables: Vars }>, config: ServerConfig,
   app.post('/api/users', async (c) => {
     const denied = adminOnly(c.get('user'))
     if (denied) return c.json({ error: denied }, 403)
-    const body = await c.req.json<{ name?: string; email?: string; password?: string; role?: UserRole }>()
+    const body = await c.req.json<{
+      name?: string
+      email?: string
+      password?: string
+      role?: UserRole
+      quotaGb?: number | null
+    }>()
     const name = body.name?.trim() ?? ''
     const email = body.email?.trim() ?? ''
     const password = body.password ?? ''
@@ -177,7 +213,9 @@ export function mountAdmin(app: Hono<{ Variables: Vars }>, config: ServerConfig,
     if (password.length < 8) return c.json({ error: 'Password must be at least 8 characters' }, 400)
     const users = await loadUsers(config)
     if (findByEmail(users, email)) return c.json({ error: 'That email is already on this node' }, 409)
-    const created = await createUser({ name, email, password, role })
+    const parsedQuota = await parseQuotaGb(config, body.quotaGb, 0)
+    if (parsedQuota.error) return c.json({ error: parsedQuota.error }, 400)
+    const created = await createUser({ name, email, password, role, quotaBytes: parsedQuota.bytes })
     await saveUsers(config, [...users, created])
     await ensureUserDrive(config, created.id)
     return c.json({ user: toPublic(created) }, 201)
@@ -187,7 +225,13 @@ export function mountAdmin(app: Hono<{ Variables: Vars }>, config: ServerConfig,
     const denied = adminOnly(c.get('user'))
     if (denied) return c.json({ error: denied }, 403)
     const id = c.req.param('id')
-    const body = await c.req.json<{ name?: string; email?: string; role?: UserRole; password?: string }>()
+    const body = await c.req.json<{
+      name?: string
+      email?: string
+      role?: UserRole
+      password?: string
+      quotaGb?: number | null
+    }>()
     const users = await loadUsers(config)
     const person = findById(users, id)
     if (!person) return c.json({ error: 'User not found' }, 404)
@@ -207,6 +251,12 @@ export function mountAdmin(app: Hono<{ Variables: Vars }>, config: ServerConfig,
     if (body.password) {
       if (body.password.length < 8) return c.json({ error: 'Password must be at least 8 characters' }, 400)
       person.password = await hashPassword(body.password)
+    }
+    if ('quotaGb' in body) {
+      const used = await folderSize(join(config.driveDir, person.id))
+      const parsedQuota = await parseQuotaGb(config, body.quotaGb, used)
+      if (parsedQuota.error) return c.json({ error: parsedQuota.error }, 400)
+      person.quotaBytes = parsedQuota.bytes
     }
     await saveUsers(config, users)
     return c.json({ user: toPublic(person) })

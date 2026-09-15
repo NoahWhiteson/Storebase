@@ -180,7 +180,13 @@ export function Settings({
           <StoragePanel data={data} onSaved={reload} onToast={onToast} />
         ) : null}
         {data && admin && section === 'users' ? (
-          <UsersPanel meId={account.id} users={data.users ?? []} onSaved={reload} onToast={onToast} />
+          <UsersPanel
+            meId={account.id}
+            users={data.users ?? []}
+            nodeGb={data.storage?.reservedGb ?? 0}
+            onSaved={reload}
+            onToast={onToast}
+          />
         ) : null}
         {data && admin && section === 'terminals' ? (
           <TerminalsPanel data={data} onSaved={reload} onPlatform={onPlatform} onToast={onToast} />
@@ -298,7 +304,8 @@ function AccountPanel({
         onChange={(e) => setNewPassword(e.target.value)}
       />
       <p className="mb-6 text-sm text-[#8d8d8d]">
-        Your files use {formatBytes(data.account.usedBytes)} of {formatBytes(data.account.reservedBytes)} on this node.
+        Your files use {formatBytes(data.account.usedBytes)} of {formatBytes(data.account.reservedBytes)}
+        {data.account.quotaBytes ? ' (your cap)' : ' on this node'}.
       </p>
       <Button className="h-11 rounded-full bg-white text-[#1a1a1a] hover:bg-[#f2f2f2]" disabled={busy} onClick={() => void save()}>
         {busy ? 'Saving…' : 'Save'}
@@ -480,7 +487,7 @@ function StoragePanel({
 
   return (
     <div className="max-w-xl">
-      <Heading title="Storage" hint="Hard cap for every account on this node." />
+      <Heading title="Storage" hint="Node-wide reserve. Admins set per-user caps under Users." />
       <div className="mb-2 flex items-end gap-2">
         <span className="text-[56px] leading-none font-medium tracking-tight tabular-nums">{gb >= 100 ? gb.toFixed(0) : gb.toFixed(1)}</span>
         <span className="mb-1 text-xl text-[#8d8d8d]">GB</span>
@@ -505,7 +512,10 @@ function StoragePanel({
               {user.name}
               <span className="text-[#8d8d8d]"> · {user.role}</span>
             </span>
-            <span className="tabular-nums text-[#8d8d8d]">{formatBytes(user.usedBytes)}</span>
+            <span className="tabular-nums text-[#8d8d8d]">
+              {formatBytes(user.usedBytes)}
+              {user.quotaBytes ? ` / ${formatBytes(user.quotaBytes)}` : ' / node'}
+            </span>
           </div>
         ))}
       </div>
@@ -519,11 +529,13 @@ function StoragePanel({
 function UsersPanel({
   meId,
   users,
+  nodeGb,
   onSaved,
   onToast,
 }: {
   meId: string
   users: SettingsUser[]
+  nodeGb: number
   onSaved: () => Promise<void>
   onToast: (message: string) => void
 }) {
@@ -531,15 +543,18 @@ function UsersPanel({
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [role, setRole] = useState<'admin' | 'user'>('user')
+  const [quotaGb, setQuotaGb] = useState('')
   const [busy, setBusy] = useState(false)
 
   async function add() {
     setBusy(true)
     try {
-      await createUser({ name, email, password, role })
+      const gb = quotaGb.trim() ? Number(quotaGb) : null
+      await createUser({ name, email, password, role, quotaGb: gb })
       setName('')
       setEmail('')
       setPassword('')
+      setQuotaGb('')
       setRole('user')
       await onSaved()
       onToast(`Added ${name.trim() || email}`)
@@ -584,7 +599,7 @@ function UsersPanel({
 
   return (
     <div className="max-w-3xl">
-      <Heading title="Users" hint="Each account gets its own drive on this machine." />
+      <Heading title="Users" hint="Each account gets its own drive. Set a GB cap per person, or leave blank for the node default." />
       <div className="mb-8 grid gap-2 sm:grid-cols-2">
         <Input className={fieldClass} placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} />
         <Input className={fieldClass} placeholder="Email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
@@ -595,7 +610,14 @@ function UsersPanel({
           value={password}
           onChange={(e) => setPassword(e.target.value)}
         />
-        <div className="flex gap-2">
+        <Input
+          className={fieldClass}
+          placeholder={`Storage GB (blank = node ${nodeGb ? Math.round(nodeGb * 10) / 10 : ''} GB)`}
+          inputMode="decimal"
+          value={quotaGb}
+          onChange={(e) => setQuotaGb(e.target.value)}
+        />
+        <div className="flex gap-2 sm:col-span-2">
           <button
             type="button"
             onClick={() => setRole('user')}
@@ -634,10 +656,12 @@ function UsersPanel({
                 <div className="text-sm text-[#8d8d8d]">{user.email}</div>
                 <div className="mt-1 text-xs text-[#8d8d8d]">
                   {user.role} · {formatBytes(user.usedBytes)}
+                  {user.quotaBytes ? ` of ${formatBytes(user.quotaBytes)}` : ' · node default'}
                   {user.createdAt ? ` · ${formatDate(user.createdAt)}` : ''}
                 </div>
               </div>
               <div className="flex flex-wrap gap-2">
+                <QuotaField user={user} nodeGb={nodeGb} onSaved={onSaved} onToast={onToast} />
                 <Button
                   variant="ghost"
                   className="h-8 rounded-full"
@@ -658,6 +682,52 @@ function UsersPanel({
           </div>
         ))}
       </div>
+    </div>
+  )
+}
+
+function QuotaField({
+  user,
+  nodeGb,
+  onSaved,
+  onToast,
+}: {
+  user: SettingsUser
+  nodeGb: number
+  onSaved: () => Promise<void>
+  onToast: (message: string) => void
+}) {
+  const asGb = (bytes: number | null) => (bytes != null ? String(Math.round((bytes / 1024 ** 3) * 10) / 10) : '')
+  const [value, setValue] = useState(asGb(user.quotaBytes))
+  useEffect(() => {
+    setValue(asGb(user.quotaBytes))
+  }, [user.quotaBytes])
+
+  async function save() {
+    const trimmed = value.trim()
+    try {
+      await patchUser(user.id, { quotaGb: trimmed === '' ? null : Number(trimmed) })
+      await onSaved()
+      onToast(trimmed === '' ? `${user.name} uses the node default (${Math.round(nodeGb * 10) / 10} GB)` : `${user.name} capped at ${trimmed} GB`)
+    } catch (err) {
+      onToast(err instanceof Error ? err.message : 'Could not set quota')
+    }
+  }
+
+  return (
+    <div className="flex items-center gap-1">
+      <Input
+        className="h-8 w-24 rounded-full border-0 bg-[#242424] px-3 text-xs text-white"
+        placeholder="GB"
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') void save()
+        }}
+      />
+      <Button variant="ghost" className="h-8 rounded-full" onClick={() => void save()}>
+        Cap
+      </Button>
     </div>
   )
 }

@@ -57,6 +57,8 @@ export type Me = {
   host: string
   reservedBytes: number
   usedBytes: number
+  quotaBytes?: number | null
+  nodeReservedBytes?: number
   nodeName?: string
   defaultView?: 'grid' | 'list'
   terminalsEnabled?: boolean
@@ -142,6 +144,8 @@ export async function login(email: string, password: string): Promise<Me> {
     reservedBytes: number
     usedBytes: number
     host?: string
+    quotaBytes?: number | null
+    nodeReservedBytes?: number
     nodeName?: string
     defaultView?: 'grid' | 'list'
     terminalsEnabled?: boolean
@@ -154,6 +158,8 @@ export async function login(email: string, password: string): Promise<Me> {
     host: body.host ?? '',
     reservedBytes: body.reservedBytes,
     usedBytes: body.usedBytes,
+    quotaBytes: body.quotaBytes,
+    nodeReservedBytes: body.nodeReservedBytes,
     nodeName: body.nodeName,
     defaultView: body.defaultView,
     terminalsEnabled: body.terminalsEnabled,
@@ -203,6 +209,22 @@ export async function renameFile(path: string, name: string): Promise<FileEntry>
     body: JSON.stringify({ path, name }),
   })
   return body.item
+}
+
+export async function saveContent(path: string, content: string): Promise<FileEntry> {
+  const body = await api<{ item: FileEntry }>('/api/files/content', {
+    method: 'PUT',
+    body: JSON.stringify({ path, content }),
+  })
+  return body.item
+}
+
+export async function moveFiles(paths: string[], dest: string): Promise<FileEntry[]> {
+  const body = await api<{ items: FileEntry[] }>('/api/files/move', {
+    method: 'POST',
+    body: JSON.stringify({ paths, dest }),
+  })
+  return body.items
 }
 
 export async function starFile(path: string, starred: boolean): Promise<void> {

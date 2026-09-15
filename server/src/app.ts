@@ -43,12 +43,14 @@ import {
   isTrashPath,
   listPath,
   makeFolder,
+  moveEntries,
   openDownload,
   removePath,
   renameEntry,
   saveFile,
   unzipArchive,
   walkVisible,
+  writeFileContent,
 } from './storage.ts'
 import {
   emptyTrash,
@@ -63,11 +65,13 @@ import { mountTerminals } from './terminal-api.ts'
 import { attachTerminalWs } from './terminal-ws.ts'
 import { createTerminalHub } from './terminals.ts'
 import {
+  effectiveReserved,
   ensureUserDrive,
   findByEmail,
   findById,
   isConfigured,
   loadUsers,
+  personalQuota,
   toPublic,
   verifyPassword,
   type UserRecord,
@@ -77,6 +81,15 @@ import { mountApp } from './web.ts'
 import type { ServerType } from '@hono/node-server'
 
 type Vars = { user: UserRecord; root: string }
+
+async function quotaGate(config: ServerConfig, user: UserRecord) {
+  const manifest = await requirePool(config)
+  return {
+    poolRoot: config.driveDir,
+    nodeReserved: manifest.reservedBytes,
+    userQuota: personalQuota(user),
+  }
+}
 
 function publicPath(path: string): boolean {
   return (
@@ -147,7 +160,9 @@ export function createApp(config: ServerConfig) {
     return c.json({
       user: toPublic(user),
       host: hostname(),
-      reservedBytes: manifest.reservedBytes,
+      reservedBytes: effectiveReserved(user, manifest.reservedBytes),
+      quotaBytes: personalQuota(user),
+      nodeReservedBytes: manifest.reservedBytes,
       usedBytes,
       nodeName: platform.nodeName,
       defaultView: platform.defaultView,
@@ -237,10 +252,12 @@ export function createApp(config: ServerConfig) {
     return c.json({
       user: toPublic(user),
       host: hostname(),
-      reservedBytes: manifest.reservedBytes,
+      reservedBytes: effectiveReserved(user, manifest.reservedBytes),
+      quotaBytes: personalQuota(user),
+      nodeReservedBytes: manifest.reservedBytes,
       usedBytes,
       usedGb: bytesToGb(usedBytes),
-      reservedGb: bytesToGb(manifest.reservedBytes),
+      reservedGb: bytesToGb(effectiveReserved(user, manifest.reservedBytes)),
       nodeName: platform.nodeName,
       defaultView: platform.defaultView,
       terminalsEnabled: terminalsAllowed(user, platform),
@@ -256,12 +273,14 @@ export function createApp(config: ServerConfig) {
     return c.json({
       host: hostname(),
       dataDir: config.dataDir,
-      reservedBytes: manifest.reservedBytes,
-      reservedGb: bytesToGb(manifest.reservedBytes),
+      reservedBytes: effectiveReserved(user, manifest.reservedBytes),
+      reservedGb: bytesToGb(effectiveReserved(user, manifest.reservedBytes)),
+      quotaBytes: personalQuota(user),
+      nodeReservedBytes: manifest.reservedBytes,
       usedBytes,
       usedGb: bytesToGb(usedBytes),
       poolUsedBytes: poolUsed,
-      availableBytes: Math.max(0, manifest.reservedBytes - poolUsed),
+      availableBytes: Math.max(0, effectiveReserved(user, manifest.reservedBytes) - usedBytes),
       user: toPublic(user),
     })
   })
@@ -444,9 +463,8 @@ export function createApp(config: ServerConfig) {
     const root = c.get('root')
     const body = await c.req.json<{ path?: string }>()
     if (!body.path) return c.json({ error: 'path required' }, 400)
-    const manifest = await requirePool(config)
     try {
-      const item = await unzipArchive(root, config.driveDir, body.path, manifest.reservedBytes)
+      const item = await unzipArchive(root, body.path, await quotaGate(config, c.get('user')))
       return c.json({ item: { ...item, starred: false, trashed: false } }, 201)
     } catch (err) {
       if (err instanceof QuotaError) return c.json({ error: err.message, code: err.code }, 507)
@@ -456,18 +474,72 @@ export function createApp(config: ServerConfig) {
 
   app.post('/api/files/upload', async (c) => {
     const root = c.get('root')
-    const manifest = await requirePool(config)
     const dir = c.req.query('path') ?? ''
     const form = await c.req.parseBody()
     const file = form.file
     if (!(file instanceof File)) return c.json({ error: 'file field required' }, 400)
     const buf = Buffer.from(await file.arrayBuffer())
     try {
-      const item = await saveFile(root, config.driveDir, dir, file.name, buf, manifest.reservedBytes)
+      const item = await saveFile(root, dir, file.name, buf, await quotaGate(config, c.get('user')))
       await touchRecent(root, item.path)
       return c.json({ item: { ...item, starred: false, trashed: false } }, 201)
     } catch (err) {
       if (err instanceof QuotaError) return c.json({ error: err.message, code: err.code }, 507)
+      throw err
+    }
+  })
+
+  app.put('/api/files/content', async (c) => {
+    const root = c.get('root')
+    const body = await c.req.json<{ path?: string; content?: string }>()
+    if (!body.path || typeof body.content !== 'string') return c.json({ error: 'path and content required' }, 400)
+    try {
+      const item = await writeFileContent(root, body.path, body.content, await quotaGate(config, c.get('user')))
+      await touchRecent(root, item.path)
+      return c.json({
+        item: {
+          ...item,
+          starred: (await loadMeta(root)).starred.includes(item.path),
+          trashed: false,
+          shared: await pathIsShared(config, c.get('user').id, item.path),
+        },
+      })
+    } catch (err) {
+      if (err instanceof QuotaError) return c.json({ error: err.message, code: err.code }, 507)
+      throw err
+    }
+  })
+
+  app.post('/api/files/move', async (c) => {
+    const root = c.get('root')
+    const user = c.get('user')
+    const body = await c.req.json<{ paths?: string[]; dest?: string }>()
+    const paths = (body.paths ?? []).filter((path) => typeof path === 'string' && path.length > 0)
+    if (!paths.length) return c.json({ error: 'paths required' }, 400)
+    const dest = body.dest ?? ''
+    try {
+      const moved = await moveEntries(root, paths, dest)
+      for (const entry of moved) {
+        await rewritePath(root, entry.from, entry.to)
+        await rewriteShares(config, user.id, entry.from, entry.to)
+        await rewriteLinks(config, user.id, entry.from, entry.to)
+      }
+      const meta = await loadMeta(root)
+      return c.json({
+        items: await Promise.all(
+          moved.map(async (entry) => ({
+            ...entry.item,
+            starred: meta.starred.includes(entry.item.path),
+            trashed: false,
+            shared: await pathIsShared(config, user.id, entry.item.path),
+          })),
+        ),
+      })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Could not move'
+      if (message.includes('itself') || message.includes('trash') || message.includes('Destination')) {
+        return c.json({ error: message }, 400)
+      }
       throw err
     }
   })

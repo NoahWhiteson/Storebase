@@ -15,6 +15,7 @@ export type UserRecord = {
   role: UserRole
   password: string
   createdAt: string
+  quotaBytes?: number | null
 }
 
 export type PublicUser = {
@@ -23,6 +24,7 @@ export type PublicUser = {
   email: string
   role: UserRole
   createdAt: string
+  quotaBytes: number | null
 }
 
 function normalizeEmail(email: string): string {
@@ -50,7 +52,23 @@ export async function saveUsers(config: ServerConfig, users: UserRecord[]): Prom
 }
 
 export function toPublic(user: UserRecord): PublicUser {
-  return { id: user.id, name: user.name, email: user.email, role: user.role, createdAt: user.createdAt }
+  return {
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    role: user.role,
+    createdAt: user.createdAt,
+    quotaBytes: personalQuota(user),
+  }
+}
+
+export function personalQuota(user: UserRecord): number | null {
+  if (user.quotaBytes == null || !(user.quotaBytes > 0)) return null
+  return user.quotaBytes
+}
+
+export function effectiveReserved(user: UserRecord, nodeReserved: number): number {
+  return personalQuota(user) ?? nodeReserved
 }
 
 export async function isConfigured(config: ServerConfig): Promise<boolean> {
@@ -96,6 +114,7 @@ export async function createUser(input: {
   email: string
   password: string
   role: UserRole
+  quotaBytes?: number | null
 }): Promise<UserRecord> {
   return {
     id: crypto.randomUUID(),
@@ -104,5 +123,6 @@ export async function createUser(input: {
     role: input.role,
     password: await hashPassword(input.password),
     createdAt: new Date().toISOString(),
+    quotaBytes: input.quotaBytes ?? null,
   }
 }

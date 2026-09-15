@@ -9,6 +9,7 @@ export type PublicUser = {
   email: string
   role: 'admin' | 'user'
   createdAt?: string
+  quotaBytes?: number | null
 }
 
 export type SetupState =

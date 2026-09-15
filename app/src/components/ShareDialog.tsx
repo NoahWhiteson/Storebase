@@ -8,19 +8,18 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
+import { copyText } from '@/lib/clipboard'
 import {
   createLink,
   createShare,
   deleteLink,
   deleteShare,
-  listPeople,
   listShares,
   publicLinkUrl,
   type LinkInfo,
-  type Person,
   type ShareInfo,
 } from '@/lib/api'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 export function ShareDialog({
   path,
@@ -33,17 +32,16 @@ export function ShareDialog({
   onClose: () => void
   onToast: (message: string) => void
 }) {
-  const [people, setPeople] = useState<Person[]>([])
   const [shares, setShares] = useState<ShareInfo[]>([])
   const [link, setLink] = useState<LinkInfo | null>(null)
   const [email, setEmail] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const urlRef = useRef<HTMLInputElement>(null)
 
   async function reload() {
     try {
-      const [nextPeople, payload] = await Promise.all([listPeople(), listShares(path)])
-      setPeople(nextPeople)
+      const payload = await listShares(path)
       setShares(payload.shares)
       setLink(payload.link)
       setError(null)
@@ -55,6 +53,22 @@ export function ShareDialog({
   useEffect(() => {
     void reload()
   }, [path])
+
+  async function copyUrl(value: string) {
+    urlRef.current?.focus()
+    urlRef.current?.select()
+    const ok = await copyText(value)
+    if (!ok && urlRef.current) {
+      urlRef.current.select()
+      try {
+        document.execCommand('copy')
+      } catch {
+        setError('Copy failed. Select the link and copy it yourself.')
+        return
+      }
+    }
+    onToast('Link copied')
+  }
 
   async function shareWith(target: string) {
     const trimmed = target.trim()
@@ -94,8 +108,7 @@ export function ShareDialog({
       if (on) {
         const next = await createLink(path)
         setLink(next)
-        const url = publicLinkUrl(next.token)
-        await navigator.clipboard?.writeText(url)
+        await copyUrl(publicLinkUrl(next.token))
         onToast('Link copied. Anyone with it can view, not the rest of the app.')
       } else if (link) {
         await deleteLink(link.id)
@@ -109,8 +122,6 @@ export function ShareDialog({
     }
   }
 
-  const taken = new Set(shares.map((share) => share.toUserId))
-  const available = people.filter((person) => !taken.has(person.id))
   const url = link ? publicLinkUrl(link.token) : ''
 
   return (
@@ -119,7 +130,7 @@ export function ShareDialog({
         <DialogHeader>
           <DialogTitle>Share {name}</DialogTitle>
           <DialogDescription className="text-[#8d8d8d]">
-            People on this node, or anyone with a view-only link.
+            Send it by email to someone on this node, or copy a view-only link.
           </DialogDescription>
         </DialogHeader>
 
@@ -147,13 +158,16 @@ export function ShareDialog({
           </button>
           {link ? (
             <div className="mt-3 flex gap-2">
-              <Input readOnly className="h-10 rounded-xl border-0 bg-[#242424] text-xs text-white" value={url} />
+              <Input
+                ref={urlRef}
+                readOnly
+                className="h-10 rounded-xl border-0 bg-[#242424] text-xs text-white"
+                value={url}
+                onFocus={(e) => e.currentTarget.select()}
+              />
               <Button
                 className="h-10 shrink-0 rounded-full bg-white px-3 text-[#1a1a1a] hover:bg-[#f2f2f2]"
-                onClick={() => {
-                  void navigator.clipboard?.writeText(url)
-                  onToast('Link copied')
-                }}
+                onClick={() => void copyUrl(url)}
               >
                 Copy
               </Button>
@@ -178,31 +192,8 @@ export function ShareDialog({
             ))}
           </div>
         ) : (
-          <p className="text-sm text-[#8d8d8d]">Nobody on this node has it yet.</p>
+          <p className="text-sm text-[#8d8d8d]">Nobody has email access yet.</p>
         )}
-
-        {available.length > 0 ? (
-          <div className="space-y-2">
-            <p className="text-xs font-medium text-[#8d8d8d]">On this node</p>
-            {available.map((person) => (
-              <div key={person.id} className="flex items-center justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="truncate text-sm">{person.name}</div>
-                  <div className="truncate text-xs text-[#8d8d8d]">{person.email}</div>
-                </div>
-                <Button
-                  className="h-8 rounded-full bg-white px-3 text-[#1a1a1a] hover:bg-[#f2f2f2]"
-                  disabled={busy}
-                  onClick={() => void shareWith(person.email)}
-                >
-                  Share
-                </Button>
-              </div>
-            ))}
-          </div>
-        ) : people.length === 0 ? (
-          <p className="text-sm text-[#8d8d8d]">Add another account in Settings if you want to share internally.</p>
-        ) : null}
 
         <Input
           className="h-11 rounded-xl border-0 bg-[#242424] text-white placeholder:text-[#8d8d8d] outline-none focus-visible:ring-0"

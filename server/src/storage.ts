@@ -1,7 +1,7 @@
 import { createReadStream } from 'node:fs'
 import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname, join, relative, resolve, sep } from 'node:path'
-import { assertFits, folderSize } from './quota.ts'
+import { assertWriteFits, folderSize } from './quota.ts'
 
 export const TRASH_DIR = '.trash'
 
@@ -91,16 +91,19 @@ export async function makeFolder(root: string, relPath: string): Promise<DriveEn
   return toEntry(root, full, info)
 }
 
+export type QuotaGate = {
+  poolRoot: string
+  nodeReserved: number
+  userQuota: number | null
+}
+
 export async function saveFile(
   root: string,
-  poolRoot: string,
   relDir: string,
   filename: string,
   bytes: Buffer,
-  reservedBytes: number,
+  quota: QuotaGate,
 ): Promise<DriveEntry> {
-  const used = await folderSize(poolRoot)
-  assertFits(used, bytes.byteLength, reservedBytes)
   const dir = resolveSafe(root, relDir)
   await mkdir(dir, { recursive: true })
   const safeName = basename(filename)
@@ -108,9 +111,84 @@ export async function saveFile(
     throw new Error('Invalid file name')
   }
   const full = resolveSafe(root, join(relDir, safeName))
+  let extra = bytes.byteLength
+  try {
+    const existing = await stat(full)
+    if (existing.isFile()) extra = Math.max(0, bytes.byteLength - existing.size)
+  } catch {
+    // new file
+  }
+  await assertWriteFits({
+    userRoot: root,
+    poolRoot: quota.poolRoot,
+    incoming: extra,
+    nodeReserved: quota.nodeReserved,
+    userQuota: quota.userQuota,
+  })
   await writeFile(full, bytes)
   const info = await stat(full)
   return toEntry(root, full, info)
+}
+
+export async function writeFileContent(
+  root: string,
+  relPath: string,
+  content: string,
+  quota: QuotaGate,
+): Promise<DriveEntry> {
+  if (isTrashPath(relPath)) throw new Error('Cannot edit trash')
+  const full = resolveSafe(root, relPath)
+  const info = await stat(full)
+  if (info.isDirectory()) throw new Error('Cannot edit a folder')
+  const buf = Buffer.from(content, 'utf8')
+  if (buf.byteLength > 8_000_000) throw new Error('File is too large to edit in the browser')
+  const extra = Math.max(0, buf.byteLength - info.size)
+  await assertWriteFits({
+    userRoot: root,
+    poolRoot: quota.poolRoot,
+    incoming: extra,
+    nodeReserved: quota.nodeReserved,
+    userQuota: quota.userQuota,
+  })
+  await writeFile(full, buf)
+  const next = await stat(full)
+  return toEntry(root, full, next)
+}
+
+export type MovedEntry = { from: string; to: string; item: DriveEntry }
+
+export async function moveEntries(root: string, relPaths: string[], destDir: string): Promise<MovedEntry[]> {
+  if (destDir && isTrashPath(destDir)) throw new Error('Cannot move into trash')
+  const destFull = resolveSafe(root, destDir)
+  const destInfo = await stat(destFull)
+  if (!destInfo.isDirectory()) throw new Error('Destination is not a folder')
+
+  const unique = [...new Set(relPaths.filter(Boolean))]
+  const top = unique.filter(
+    (path) => !unique.some((other) => other !== path && (path === other || path.startsWith(`${other}/`))),
+  )
+  if (!top.length) throw new Error('Nothing to move')
+
+  for (const rel of top) {
+    if (isTrashPath(rel)) throw new Error('Cannot move trash')
+    const full = resolveSafe(root, rel)
+    await stat(full)
+    if (full === destFull) throw new Error('Cannot move a folder into itself')
+    if (destFull.startsWith(`${full}${sep}`)) throw new Error('Cannot move a folder into itself')
+  }
+
+  const moved: MovedEntry[] = []
+  for (const rel of top) {
+    const full = resolveSafe(root, rel)
+    if (dirname(full) === destFull) continue
+    const name = await uniqueIn(destFull, basename(full))
+    const dest = join(destFull, name)
+    await rename(full, dest)
+    const info = await stat(dest)
+    const item = toEntry(root, dest, info)
+    moved.push({ from: rel, to: item.path, item })
+  }
+  return moved
 }
 
 export async function renameEntry(root: string, relPath: string, nextName: string): Promise<DriveEntry> {
@@ -236,12 +314,7 @@ export async function openDownload(root: string, relPath: string) {
   }
 }
 
-export async function unzipArchive(
-  root: string,
-  poolRoot: string,
-  relPath: string,
-  reservedBytes: number,
-): Promise<DriveEntry> {
+export async function unzipArchive(root: string, relPath: string, quota: QuotaGate): Promise<DriveEntry> {
   const full = resolveSafe(root, relPath)
   const info = await stat(full)
   if (info.isDirectory()) throw new Error('Not a zip file')
@@ -258,8 +331,13 @@ export async function unzipArchive(
     files.push({ rel: clean, data })
   }
   if (!files.length) throw new Error('That zip is empty')
-  const used = await folderSize(poolRoot)
-  assertFits(used, incoming, reservedBytes)
+  await assertWriteFits({
+    userRoot: root,
+    poolRoot: quota.poolRoot,
+    incoming,
+    nodeReserved: quota.nodeReserved,
+    userQuota: quota.userQuota,
+  })
   const parent = dirname(full)
   const folderName = await uniqueIn(parent, basename(full).replace(/\.zip$/i, ''))
   const destRoot = join(parent, folderName)

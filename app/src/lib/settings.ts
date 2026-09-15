@@ -3,11 +3,16 @@ import type { PublicUser } from '@/lib/setup'
 
 export type DiskInfo = { totalBytes: number; freeBytes: number }
 
-export type SettingsUser = PublicUser & { usedBytes: number }
+export type SettingsUser = PublicUser & { usedBytes: number; quotaBytes: number | null }
 
 export type SettingsPayload = {
   admin: boolean
-  account: PublicUser & { usedBytes: number; reservedBytes: number }
+  account: PublicUser & {
+    usedBytes: number
+    reservedBytes: number
+    quotaBytes?: number | null
+    nodeReservedBytes?: number
+  }
   platform: {
     nodeName: string
     signInMessage?: string
@@ -76,6 +81,7 @@ export async function createUser(body: {
   email: string
   password: string
   role: 'admin' | 'user'
+  quotaGb?: number | null
 }): Promise<PublicUser> {
   const res = await api<{ user: PublicUser }>('/api/users', { method: 'POST', body: JSON.stringify(body) })
   return res.user
@@ -83,7 +89,7 @@ export async function createUser(body: {
 
 export async function patchUser(
   id: string,
-  body: { name?: string; email?: string; role?: 'admin' | 'user'; password?: string },
+  body: { name?: string; email?: string; role?: 'admin' | 'user'; password?: string; quotaGb?: number | null },
 ): Promise<PublicUser> {
   const res = await api<{ user: PublicUser }>(`/api/users/${id}`, { method: 'PATCH', body: JSON.stringify(body) })
   return res.user

@@ -23,10 +23,25 @@ export async function folderSize(dir: string): Promise<number> {
   return total
 }
 
-export function assertFits(used: number, incoming: number, reserved: number): void {
+export function assertFits(used: number, incoming: number, reserved: number, message?: string): void {
   if (used + incoming > reserved) {
     const over = used + incoming - reserved
-    throw new QuotaError(`Not enough reserved space (${over} bytes over cap)`)
+    throw new QuotaError(message ?? `Not enough reserved space (${over} bytes over cap)`)
+  }
+}
+
+export async function assertWriteFits(opts: {
+  userRoot: string
+  poolRoot: string
+  incoming: number
+  nodeReserved: number
+  userQuota: number | null
+}): Promise<void> {
+  const poolUsed = await folderSize(opts.poolRoot)
+  assertFits(poolUsed, opts.incoming, opts.nodeReserved)
+  if (opts.userQuota != null) {
+    const used = await folderSize(opts.userRoot)
+    assertFits(used, opts.incoming, opts.userQuota, 'Over this account’s storage cap')
   }
 }
 

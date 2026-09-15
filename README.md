@@ -49,11 +49,11 @@ App `43123`, API `4780`. Vite proxies `/api`. Production installs serve the buil
 ## How files work
 
 - Each signed-in user has an isolated folder on the node.
-- Quota is the reserve you picked at onboarding, shared across the machine.
+- Node reserve is the disk cap for the machine. Admins can also set a per-user GB cap in Settings → Users (blank = node default). Uploads fail if either cap would be exceeded.
 - Passwords are scrypt hashes in `data/users.json`. Sessions are httpOnly cookies.
 - Hidden `.trash`, `.trash-index.json`, and `.storebase-meta.json` live in that user’s folder.
-- Right-click Share to give another account on this node access, or turn on Anyone with the link for a view-only page (`/s/...`). They cannot see the rest of the app. User shares live in `data/shares.json`, links in `data/links.json`.
-- Open a file to preview it (images, video, audio, PDF, markdown, text, code). Right-click a zip to unzip it next to the archive.
+- Right-click Share to email someone on this node, or turn on Anyone with the link for a view-only page (`/s/...`). They cannot see the rest of the app. User shares live in `data/shares.json`, links in `data/links.json`.
+- Open a file to preview it (images, video, audio, PDF, markdown, text, code). Text, code, markdown, and CSV/TSV can be edited in place. Right-click a zip to unzip it next to the archive. Drag files or folders onto a folder (or a breadcrumb) to move them. Shift-click and Ctrl/Cmd-click select multiple items; Ctrl/Cmd-A selects all.
 - Trash keeps files for 30 days, then the node deletes them. Empty trash wipes now. Files over 20 GB skip trash — the UI warns you and delete is permanent.
 - Admins open Settings (gear) for platform, bind address, storage cap, users, terminals, updates, and session rotation. Everyone can edit their own account. Platform copy lives in `data/settings.json`. Bind/auto-update writes `.env` and apply on restart.
 - Terminal in the sidebar/top bar opens a real shell on the node. Settings → Terminals has a master on/off, plus per-user max and idle expiry. Off hides the tab and kills live shells.
