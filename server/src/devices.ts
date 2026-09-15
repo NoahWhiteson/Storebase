@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto'
-import { hostname } from 'node:os'
+import { hostname, networkInterfaces } from 'node:os'
 import { join } from 'node:path'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import type { ServerConfig } from './config.ts'
@@ -148,14 +148,54 @@ export async function touchDevice(config: ServerConfig, authorization?: string |
   await save(config, data)
 }
 
+function isBindAll(host: string): boolean {
+  const h = host.replace(/^\[|\]$/g, '').toLowerCase()
+  return h === '0.0.0.0' || h === '::' || h === '*'
+}
+
+function lanIPv4(): string[] {
+  const out: string[] = []
+  for (const addrs of Object.values(networkInterfaces())) {
+    for (const row of addrs ?? []) {
+      if (row.family === 'IPv4' && !row.internal) out.push(row.address)
+    }
+  }
+  return out
+}
+
+function addPairUrl(urls: Set<string>, raw: string) {
+  try {
+    const u = new URL(raw.includes('://') ? raw : `http://${raw}`)
+    if (isBindAll(u.hostname)) return
+    u.pathname = ''
+    u.search = ''
+    u.hash = ''
+    urls.add(u.origin)
+  } catch {
+    // skip junk hosts
+  }
+}
+
 export function pairUrls(config: ServerConfig, requestHost?: string | null): string[] {
   const urls = new Set<string>()
-  if (requestHost) urls.add(`http://${requestHost}`)
-  urls.add(`http://${config.host}:${config.port}`)
-  urls.add(`http://127.0.0.1:${config.port}`)
+  if (requestHost) addPairUrl(urls, requestHost)
+  if (!isBindAll(config.host)) addPairUrl(urls, `${config.host}:${config.port}`)
+  addPairUrl(urls, `127.0.0.1:${config.port}`)
+  for (const ip of lanIPv4()) addPairUrl(urls, `${ip}:${config.port}`)
   const host = hostname()
-  if (host) urls.add(`http://${host}:${config.port}`)
-  return [...urls]
+  if (host && !isBindAll(host)) addPairUrl(urls, `${host}:${config.port}`)
+  return [...urls].sort((a, b) => pairUrlRank(a) - pairUrlRank(b) || a.localeCompare(b))
+}
+
+function pairUrlRank(raw: string): number {
+  try {
+    const h = new URL(raw).hostname
+    if (/^\d+\.\d+\.\d+\.\d+$/.test(h) && h !== '127.0.0.1') return 0
+    if (h === '127.0.0.1' || h === 'localhost') return 2
+    return 1
+  } catch {
+    return 5
+  }
 }
 
 export function publicDevice(device: DeviceRecord) {

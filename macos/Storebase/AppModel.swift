@@ -73,9 +73,14 @@ final class AppModel: ObservableObject {
     pairingBusy = true
     pairingError = nil
     defer { pairingBusy = false }
-    let raw = nodeURLDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard let url = URL(string: raw), url.scheme != nil else {
+    var raw = nodeURLDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+    if !raw.isEmpty, !raw.contains("://") { raw = "http://\(raw)" }
+    guard let url = URL(string: raw), let scheme = url.scheme, let host = url.host, !scheme.isEmpty else {
       pairingError = "Node link needs a scheme, like http://192.168.1.12:4780"
+      return
+    }
+    if host == "0.0.0.0" || host == "::" || host == "[::]" {
+      pairingError = "0.0.0.0 is the listen address, not a URL. Use 127.0.0.1 if the node is on this Mac, or the server’s LAN/public IP."
       return
     }
     var name = settings.deviceName.trimmingCharacters(in: .whitespacesAndNewlines)
