@@ -3,6 +3,7 @@ import { hostname, networkInterfaces } from 'node:os'
 import { join } from 'node:path'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import type { ServerConfig } from './config.ts'
+import { detectPublicIps } from './domain.ts'
 
 const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
 
@@ -176,14 +177,29 @@ function addPairUrl(urls: Set<string>, raw: string) {
   }
 }
 
-export function pairUrls(config: ServerConfig, requestHost?: string | null, extras: string[] = []): string[] {
+function isPrivateV4(host: string): boolean {
+  const m = host.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/)
+  if (!m) return false
+  const a = Number(m[1])
+  const b = Number(m[2])
+  if (a === 10 || a === 127) return true
+  if (a === 192 && b === 168) return true
+  if (a === 172 && b >= 16 && b <= 31) return true
+  if (a === 169 && b === 254) return true
+  if (a === 100 && b >= 64 && b <= 127) return true
+  return false
+}
+
+export async function pairUrls(config: ServerConfig, requestHost?: string | null, extras: string[] = []): Promise<string[]> {
   const urls = new Set<string>()
   if (requestHost) addPairUrl(urls, requestHost)
   if (!isBindAll(config.host)) addPairUrl(urls, `${config.host}:${config.port}`)
   addPairUrl(urls, `127.0.0.1:${config.port}`)
   for (const ip of lanIPv4()) addPairUrl(urls, `${ip}:${config.port}`)
   const host = hostname()
-  if (host && !isBindAll(host)) addPairUrl(urls, `${host}:${config.port}`)
+  if (host && host.includes('.') && !isBindAll(host)) addPairUrl(urls, `${host}:${config.port}`)
+  const pub = await detectPublicIps()
+  if (pub.ipv4 && !isPrivateV4(pub.ipv4)) addPairUrl(urls, `${pub.ipv4}:${config.port}`)
   for (const extra of extras) addPairUrl(urls, extra)
   return [...urls].sort((a, b) => pairUrlRank(a) - pairUrlRank(b) || a.localeCompare(b))
 }
@@ -191,11 +207,12 @@ export function pairUrls(config: ServerConfig, requestHost?: string | null, extr
 function pairUrlRank(raw: string): number {
   try {
     const u = new URL(raw)
-    if (u.protocol === 'https:') return -1
+    if (u.protocol === 'https:') return 0
     const h = u.hostname
-    if (/^\d+\.\d+\.\d+\.\d+$/.test(h) && h !== '127.0.0.1') return 0
-    if (h === '127.0.0.1' || h === 'localhost') return 2
-    return 1
+    if (h === '127.0.0.1' || h === 'localhost') return 4
+    if (isPrivateV4(h)) return 3
+    if (/^\d+\.\d+\.\d+\.\d+$/.test(h)) return 1
+    return 2
   } catch {
     return 5
   }

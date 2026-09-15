@@ -95,15 +95,22 @@ function validStatus(value: unknown): value is DomainStatus {
   return value === 'idle' || value === 'waiting-dns' || value === 'issuing' || value === 'active' || value === 'error'
 }
 
+let ipCache: { at: number; ipv4: string | null; ipv6: string | null } | null = null
+
 export async function detectPublicIps(): Promise<{ ipv4: string | null; ipv6: string | null }> {
+  if (ipCache && Date.now() - ipCache.at < 5 * 60_000) {
+    return { ipv4: ipCache.ipv4, ipv6: ipCache.ipv6 }
+  }
   const [ipv4, ipv6] = await Promise.all([
     fetchText('https://api.ipify.org'),
     fetchText('https://api6.ipify.org'),
   ])
-  return {
+  const resolved = {
     ipv4: isV4(ipv4) ? ipv4 : firstLocalV4(),
     ipv6: isV6(ipv6) ? ipv6 : null,
   }
+  ipCache = { at: Date.now(), ...resolved }
+  return resolved
 }
 
 async function fetchText(url: string): Promise<string | null> {

@@ -326,7 +326,7 @@ function DevicesPanel({ onToast }: { onToast: (message: string) => void }) {
     <div className="max-w-lg">
       <Heading
         title="Mac app"
-        hint="Install Storebase on a Mac, then paste this node’s link and pairing code. Use a real IP or hostname — not 0.0.0.0. Browser downloads can go to this drive instead of staying on disk."
+        hint="Install Storebase on a Mac, then paste this node’s link and pairing code. Off-LAN (Mac → VPS) that has to be the public IP or a domain — not 10.x / 192.168.x on the server. Never 0.0.0.0."
       />
       {error ? <p className="mb-4 text-sm text-[#f28b82]">{error}</p> : null}
       {!info ? (

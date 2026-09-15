@@ -396,7 +396,7 @@ export function createApp(config: ServerConfig) {
     const extras = site.hostname && site.status === 'active' ? [`https://${site.hostname}`] : []
     return c.json({
       code: formatPairCode(code),
-      urls: pairUrls(config, c.req.header('host'), extras),
+      urls: await pairUrls(config, c.req.header('host'), extras),
       devices: devices.map(publicDevice),
     })
   })
