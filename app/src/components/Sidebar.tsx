@@ -15,7 +15,6 @@ import { cn } from 'cn'
 import {
   AlertTriangle,
   Clock,
-  Computer,
   FolderPlus,
   HardDrive,
   Home,
@@ -36,7 +35,6 @@ import {
 const nav: { id: SectionId; label: string; icon: typeof Home }[] = [
   { id: 'home', label: 'Home', icon: Home },
   { id: 'my-drive', label: 'My files', icon: HardDrive },
-  { id: 'computers', label: 'Computers', icon: Computer },
   { id: 'shared', label: 'Shared with me', icon: Users },
   { id: 'recent', label: 'Recent', icon: Clock },
   { id: 'starred', label: 'Starred', icon: Star },

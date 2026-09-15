@@ -6,6 +6,19 @@ import { cors } from 'hono/cors'
 import { mountAdmin } from './admin.ts'
 import { bytesToGb, type ServerConfig } from './config.ts'
 import {
+  ensurePairCode,
+  formatPairCode,
+  listDevices,
+  pairDevice,
+  pairUrls,
+  PairError,
+  publicDevice,
+  readDeviceUserId,
+  revokeDevice,
+  rotatePairCode,
+  touchDevice,
+} from './devices.ts'
+import {
   deleteLink,
   dropLinksForPath,
   ensureLink,
@@ -111,6 +124,7 @@ function publicPath(path: string): boolean {
     path === '/api/health' ||
     path === '/api/setup' ||
     path === '/api/login' ||
+    path === '/api/pair' ||
     path.startsWith('/api/public/')
   )
 }
@@ -245,6 +259,36 @@ export function createApp(config: ServerConfig) {
     return c.json({ ok: true })
   })
 
+  app.post('/api/pair', async (c) => {
+    if (!(await isConfigured(config))) {
+      return c.json({ error: 'Setup required', configured: false }, 503)
+    }
+    const body = await c.req.json<{ code?: string; name?: string; platform?: string }>()
+    try {
+      const paired = await pairDevice(config, body.code ?? '', body.name ?? 'Mac', body.platform ?? 'mac')
+      const users = await loadUsers(config)
+      const user = findById(users, paired.userId)
+      if (!user) return c.json({ error: 'Unknown pairing code' }, 401)
+      const root = await ensureUserDrive(config, user.id)
+      const manifest = await requirePool(config)
+      const usedBytes = await folderSize(root)
+      const platform = await loadPlatform(config)
+      return c.json({
+        token: paired.device.token,
+        device: publicDevice(paired.device),
+        user: toPublic(user),
+        host: hostname(),
+        nodeName: platform.nodeName,
+        reservedBytes: effectiveReserved(user, manifest.reservedBytes),
+        quotaBytes: personalQuota(user),
+        usedBytes,
+      })
+    } catch (err) {
+      if (err instanceof PairError) return c.json({ error: err.message }, err.status as 400 | 401)
+      throw err
+    }
+  })
+
   app.get('/api/public/:token', async (c) => {
     try {
       const { owner, item, link } = await resolveLink(config, c.req.param('token'))
@@ -298,7 +342,8 @@ export function createApp(config: ServerConfig) {
       return c.json({ error: 'Setup required', configured: false }, 503)
     }
     if (c.req.path === '/api/logout') return next()
-    const userId = await readSessionUserId(c, config)
+    const userId =
+      (await readSessionUserId(c, config)) ?? (await readDeviceUserId(config, c.req.header('authorization')))
     if (!userId) return c.json({ error: 'Sign in required' }, 401)
     const users = await loadUsers(config)
     const user = findById(users, userId)
@@ -306,6 +351,7 @@ export function createApp(config: ServerConfig) {
       clearSession(c)
       return c.json({ error: 'Sign in required' }, 401)
     }
+    await touchDevice(config, c.req.header('authorization'))
     const root = await ensureUserDrive(config, user.id)
     await ensureDir(root)
     c.set('user', user)
@@ -334,12 +380,37 @@ export function createApp(config: ServerConfig) {
     })
   })
 
+  app.get('/api/devices', async (c) => {
+    const user = c.get('user')
+    const code = await ensurePairCode(config, user.id)
+    const devices = await listDevices(config, user.id)
+    return c.json({
+      code: formatPairCode(code),
+      urls: pairUrls(config, c.req.header('host')),
+      devices: devices.map(publicDevice),
+    })
+  })
+
+  app.post('/api/devices/code', async (c) => {
+    const user = c.get('user')
+    const code = await rotatePairCode(config, user.id)
+    return c.json({ code: formatPairCode(code) })
+  })
+
+  app.delete('/api/devices/:id', async (c) => {
+    const user = c.get('user')
+    const ok = await revokeDevice(config, user.id, c.req.param('id'))
+    if (!ok) return c.json({ error: 'Device not found' }, 404)
+    return c.json({ ok: true })
+  })
+
   app.get('/api/status', async (c) => {
     const user = c.get('user')
     const root = c.get('root')
     const manifest = await requirePool(config)
     const usedBytes = await folderSize(root)
     const poolUsed = await folderSize(config.driveDir)
+    const platform = await loadPlatform(config)
     return c.json({
       host: hostname(),
       dataDir: config.dataDir,
@@ -352,6 +423,7 @@ export function createApp(config: ServerConfig) {
       poolUsedBytes: poolUsed,
       availableBytes: Math.max(0, effectiveReserved(user, manifest.reservedBytes) - usedBytes),
       user: toPublic(user),
+      nodeName: platform.nodeName,
     })
   })
 

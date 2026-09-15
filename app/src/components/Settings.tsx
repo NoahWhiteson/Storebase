@@ -2,17 +2,22 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Progress } from '@/components/ui/progress'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { copyText } from '@/lib/clipboard'
 import { formatBytes, formatDate } from '@/lib/format'
 import {
   applyUpdate,
   checkUpdate,
   createUser,
   deleteUser,
+  fetchPairing,
   fetchSettings,
   patchUser,
+  revokeDevice,
+  rotatePairCode,
   rotateSecret,
   saveAccount,
   saveSettings,
+  type PairingInfo,
   type SettingsPayload,
   type SettingsUser,
 } from '@/lib/settings'
@@ -21,6 +26,7 @@ import {
   ArrowLeft,
   HardDrive,
   KeyRound,
+  Laptop,
   RefreshCw,
   Server,
   Shield,
@@ -34,7 +40,16 @@ import { useEffect, useMemo, useState } from 'react'
 const fieldClass =
   'h-11 rounded-xl border-0 bg-[#242424] text-white shadow-none placeholder:text-[#8d8d8d] outline-none focus:outline-none focus-visible:outline-none focus-visible:ring-0'
 
-export type SettingsSection = 'account' | 'general' | 'server' | 'storage' | 'users' | 'updates' | 'security' | 'terminals'
+export type SettingsSection =
+  | 'account'
+  | 'devices'
+  | 'general'
+  | 'server'
+  | 'storage'
+  | 'users'
+  | 'updates'
+  | 'security'
+  | 'terminals'
 
 type Account = { id: string; name: string; email: string; role: 'admin' | 'user' }
 
@@ -54,7 +69,9 @@ export function Settings({
   onToast: (message: string) => void
 }) {
   const [section, setSection] = useState<SettingsSection>(
-    account.role === 'admin' || initialSection === 'account' ? initialSection : 'account',
+    account.role === 'admin' || initialSection === 'account' || initialSection === 'devices'
+      ? initialSection
+      : 'account',
   )
   const [data, setData] = useState<SettingsPayload | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -79,11 +96,12 @@ export function Settings({
   const admin = Boolean(data?.admin ?? account.role === 'admin')
 
   useEffect(() => {
-    setSection(admin || initialSection === 'account' ? initialSection : 'account')
+    setSection(admin || initialSection === 'account' || initialSection === 'devices' ? initialSection : 'account')
   }, [admin, initialSection])
 
   const nav: { id: SettingsSection; label: string; icon: typeof UserRound; admin?: boolean }[] = [
     { id: 'account', label: 'Account', icon: UserRound },
+    { id: 'devices', label: 'Mac app', icon: Laptop },
     { id: 'general', label: 'Platform', icon: SlidersHorizontal, admin: true },
     { id: 'server', label: 'Server', icon: Server, admin: true },
     { id: 'storage', label: 'Storage', icon: HardDrive, admin: true },
@@ -170,6 +188,7 @@ export function Settings({
         {data && section === 'account' ? (
           <AccountPanel data={data} onSaved={onAccount} onToast={onToast} />
         ) : null}
+        {section === 'devices' ? <DevicesPanel onToast={onToast} /> : null}
         {data && admin && section === 'general' ? (
           <GeneralPanel data={data} onSaved={reload} onPlatform={onPlatform} onToast={onToast} />
         ) : null}
@@ -239,6 +258,131 @@ function Toggle({
         />
       </span>
     </button>
+  )
+}
+
+function DevicesPanel({ onToast }: { onToast: (message: string) => void }) {
+  const [info, setInfo] = useState<PairingInfo | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  async function reload() {
+    try {
+      setInfo(await fetchPairing())
+      setError(null)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not load pairing')
+    }
+  }
+
+  useEffect(() => {
+    void reload()
+  }, [])
+
+  async function copy(label: string, value: string) {
+    const ok = await copyText(value)
+    onToast(ok ? `Copied ${label}` : 'Could not copy')
+  }
+
+  async function rotate() {
+    setBusy(true)
+    try {
+      const next = await rotatePairCode()
+      setInfo((current) => (current ? { ...current, code: next.code } : current))
+      onToast('New pairing code. Old unused codes are dead.')
+    } catch (err) {
+      onToast(err instanceof Error ? err.message : 'Could not rotate')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function drop(id: string) {
+    setBusy(true)
+    try {
+      await revokeDevice(id)
+      onToast('Mac disconnected')
+      await reload()
+    } catch (err) {
+      onToast(err instanceof Error ? err.message : 'Could not revoke')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const url = info?.urls[0] ?? ''
+
+  return (
+    <div className="max-w-lg">
+      <Heading
+        title="Mac app"
+        hint="Install Storebase on a Mac, then paste this node’s link and pairing code. Browser downloads can go to this drive instead of staying on disk."
+      />
+      {error ? <p className="mb-4 text-sm text-[#f28b82]">{error}</p> : null}
+      {!info ? (
+        <p className="text-sm text-[#8d8d8d]">Loading pairing…</p>
+      ) : (
+        <>
+          <p className="mb-2 text-sm text-[#8d8d8d]">Node link</p>
+          <div className="mb-4 flex gap-2">
+            <Input readOnly className={fieldClass} value={url} />
+            <Button
+              className="h-11 shrink-0 rounded-full bg-white px-4 text-[#1a1a1a] hover:bg-[#f2f2f2]"
+              onClick={() => void copy('link', url)}
+            >
+              Copy
+            </Button>
+          </div>
+          {info.urls.length > 1 ? (
+            <p className="mb-4 text-xs text-[#8d8d8d]">Also reachable at {info.urls.slice(1).join(' · ')}</p>
+          ) : null}
+          <p className="mb-2 text-sm text-[#8d8d8d]">Pairing code</p>
+          <div className="mb-4 flex gap-2">
+            <Input readOnly className={`${fieldClass} font-mono tracking-[0.2em]`} value={info.code} />
+            <Button
+              className="h-11 shrink-0 rounded-full bg-white px-4 text-[#1a1a1a] hover:bg-[#f2f2f2]"
+              onClick={() => void copy('code', info.code)}
+            >
+              Copy
+            </Button>
+          </div>
+          <Button
+            variant="outline"
+            className="mb-8 h-10 rounded-full border-white/20 bg-transparent text-white hover:bg-white/10 hover:text-white"
+            disabled={busy}
+            onClick={() => void rotate()}
+          >
+            New code
+          </Button>
+          <h2 className="mb-2 text-sm font-medium text-white">Paired Macs</h2>
+          {info.devices.length === 0 ? (
+            <p className="text-sm text-[#8d8d8d]">None yet. Open the Mac app and connect.</p>
+          ) : (
+            <ul className="space-y-2">
+              {info.devices.map((device) => (
+                <li
+                  key={device.id}
+                  className="flex items-center justify-between gap-3 rounded-xl bg-[#242424] px-4 py-3"
+                >
+                  <div className="min-w-0">
+                    <p className="truncate text-sm text-white">{device.name}</p>
+                    <p className="text-xs text-[#8d8d8d]">Last seen {formatDate(device.lastSeenAt)}</p>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    className="h-8 rounded-full text-[#f28b82] hover:bg-white/5 hover:text-[#f28b82]"
+                    disabled={busy}
+                    onClick={() => void drop(device.id)}
+                  >
+                    Revoke
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
+      )}
+    </div>
   )
 }
 

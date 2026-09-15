@@ -46,6 +46,8 @@ cd app && npm install && npm run dev
 
 App `43123`, API `4780`. Vite proxies `/api`. Production installs serve the built app from the node port directly.
 
+Mac client: open `macos/Storebase.xcodeproj` on a Mac (menu bar app). Pair from Settings → Mac app with the node link and pairing code. Details in `macos/README.md`.
+
 ## How files work
 
 - Each signed-in user has an isolated folder on the node.
@@ -55,6 +57,7 @@ App `43123`, API `4780`. Vite proxies `/api`. Production installs serve the buil
 - Right-click Share to email someone on this node, or turn on Anyone with the link for a view-only page (`/s/...`). They cannot see the rest of the app. User shares live in `data/shares.json`, links in `data/links.json`.
 - Open a file to preview it (images, video, audio, PDF, markdown, text, code). Text, code, markdown, and CSV/TSV can be edited in place. Right-click a zip to unzip it next to the archive. Drag files or folders onto a folder (or a breadcrumb) to move them. Shift-click and Ctrl/Cmd-click select multiple items; Ctrl/Cmd-A selects all.
 - Temp is a timer folder. Set 1 hour / 1 day / 3 / 7 / 30 days (or a custom day count). Each file is deleted that long after it landed in Temp. Changing the timer recalculates remaining life from when the file was added. Right-click Move to Temp, or upload while you’re on the tab. Keep in My files pulls it back out.
+- The Mac app (Settings → Mac app) pairs with a link + code, watches Downloads, and can route installers to Temp. It notifies you if the node is out of storage.
 - Trash keeps files for 30 days, then the node deletes them. Empty trash wipes now. Files over 20 GB skip trash — the UI warns you and delete is permanent.
 - Admins open Settings (gear) for platform, bind address, storage cap, users, terminals, updates, and session rotation. Everyone can edit their own account. Platform copy lives in `data/settings.json`. Bind/auto-update writes `.env` and apply on restart.
 - Terminal in the sidebar/top bar opens a real shell on the node. Settings → Terminals has a master on/off, plus per-user max and idle expiry. Off hides the tab and kills live shells.

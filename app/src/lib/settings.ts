@@ -110,3 +110,29 @@ export async function checkUpdate() {
 export async function applyUpdate() {
   return api<NonNullable<SettingsPayload['update']>>('/api/update?force=1', { method: 'POST' })
 }
+
+export type PairedDevice = {
+  id: string
+  name: string
+  platform: string
+  createdAt: string
+  lastSeenAt: string
+}
+
+export type PairingInfo = {
+  code: string
+  urls: string[]
+  devices: PairedDevice[]
+}
+
+export async function fetchPairing(): Promise<PairingInfo> {
+  return api('/api/devices')
+}
+
+export async function rotatePairCode(): Promise<{ code: string }> {
+  return api('/api/devices/code', { method: 'POST' })
+}
+
+export async function revokeDevice(id: string): Promise<void> {
+  await api(`/api/devices/${id}`, { method: 'DELETE' })
+}

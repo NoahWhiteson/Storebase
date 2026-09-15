@@ -607,9 +607,6 @@ function EmptyState({ section, search }: { section: SectionId; search: string })
   } else if (section === 'recent') {
     title = 'No recent files'
     body = 'Open something and it will show up in this list.'
-  } else if (section === 'computers') {
-    title = 'No computers backup'
-    body = 'Backup a desktop folder and it appears in Computers.'
   } else if (section === 'temp') {
     title = 'Temp is empty'
     body = 'Files here delete on the timer you set. Upload, or move something from My files.'

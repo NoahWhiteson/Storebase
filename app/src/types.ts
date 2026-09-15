@@ -12,7 +12,6 @@ export type FileKind =
 export type SectionId =
   | 'home'
   | 'my-drive'
-  | 'computers'
   | 'shared'
   | 'recent'
   | 'starred'

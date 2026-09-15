@@ -52,7 +52,6 @@ import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } fro
 const titles: Record<SectionId, string> = {
   home: 'Home',
   'my-drive': 'My files',
-  computers: 'Computers',
   shared: 'Shared with me',
   recent: 'Recent',
   starred: 'Starred',
@@ -94,7 +93,6 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
   const quota = account.reservedBytes > 0 ? account.reservedBytes : 100 * 1024 ** 3
   const [items, setItems] = useState<DriveItem[]>([])
   const [usedBytes, setUsedBytes] = useState(account.usedBytes)
-  const [host, setHost] = useState(account.host)
   const [profile, setProfile] = useState({ name: account.name, email: account.email })
   const me = { owner: profile.name, ownerInitials: initials(profile.name) }
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -190,17 +188,14 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
         setTtlHours(settings.ttlHours)
       } else if (section === 'spam') {
         entries = []
-      } else if (section === 'computers' && !folderPath) {
-        entries = []
       } else {
         entries = await listFiles({ path: folderPath })
       }
       setItems(entries.map((entry) => toDriveItem(entry, { name: profile.name })))
       const status = await fetch('/api/status', { credentials: 'include' }).then(
-        (res) => res.json() as Promise<{ usedBytes?: number; host?: string }>,
+        (res) => res.json() as Promise<{ usedBytes?: number }>,
       )
       if (typeof status.usedBytes === 'number') setUsedBytes(status.usedBytes)
-      if (status.host) setHost(status.host)
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : 'Could not load files')
     } finally {
@@ -271,13 +266,6 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
       return
     }
     if (item.kind === 'folder') {
-      if (item.computer) {
-        setSection('my-drive')
-        setFolderPath('')
-        setSelectedIds([])
-        setSearch('')
-        return
-      }
       if (item.shareName) setShareLabel(item.shareName)
       setSection(isTempId(item.id) ? 'temp' : item.id.startsWith('share:') ? 'shared' : 'my-drive')
       setFolderPath(item.id)
@@ -437,7 +425,7 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
       audio: 'Untitled.txt',
       zip: 'Untitled.txt',
     }
-    const dir = section === 'temp' ? tempDir(folderPath) : section === 'computers' ? '' : folderPath
+    const dir = section === 'temp' ? tempDir(folderPath) : folderPath
     try {
       if (kind === 'folder') {
         await mkdir(joinPath(dir, names.folder))
@@ -454,7 +442,7 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
 
   async function onUpload(files: FileList | null, dest?: string) {
     if (!files?.length) return
-    const dir = dest ?? (section === 'temp' ? tempDir(folderPath) : section === 'computers' ? '' : folderPath)
+    const dir = dest ?? (section === 'temp' ? tempDir(folderPath) : folderPath)
     try {
       for (const file of Array.from(files)) {
         await uploadFile(dir, file)
@@ -526,26 +514,7 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
     onSignedOut()
   }
 
-  const computerItem: DriveItem | null =
-    section === 'computers' && !folderPath && !search.trim()
-      ? {
-          id: '__node__',
-          name: host || 'This node',
-          kind: 'folder',
-          parentId: null,
-          owner: profile.name,
-          ownerInitials: me.ownerInitials,
-          modifiedAt: new Date().toISOString(),
-          size: null,
-          starred: false,
-          shared: false,
-          trashed: false,
-          spam: false,
-          computer: true,
-        }
-      : null
-
-  const visible = computerItem ? [computerItem] : items
+  const visible = items
   const orderedIds = useMemo(() => sortItems(visible, sort).map((item) => item.id), [sort, visible])
   const canMove =
     !search.trim() &&
@@ -733,7 +702,7 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
               />
             ) : null}
 
-            {loading && items.length === 0 && !computerItem ? (
+            {loading && items.length === 0 ? (
               <p className="text-sm text-[#8d8d8d]">Loading your files…</p>
             ) : (
               <FileView
