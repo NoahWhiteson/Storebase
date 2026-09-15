@@ -165,7 +165,7 @@ export function DriveApp() {
   }
 
   return (
-    <div className="flex h-full min-h-[540px] flex-col overflow-hidden bg-[#1a1a1a] text-[#e8e8e8]">
+    <div className="relative flex h-full min-h-0 flex-col overflow-hidden bg-[#1a1a1a] text-[#e8e8e8]">
       <header className="flex h-16 shrink-0 items-center bg-[#1a1a1a]">
         <div className="flex h-full w-auto shrink-0 items-center gap-2 px-3 md:w-[256px] md:gap-2.5 md:px-4">
           <Button
@@ -181,21 +181,15 @@ export function DriveApp() {
           <span className="text-[20px] font-medium tracking-tight text-white">Storebase</span>
         </div>
         <div className="flex h-full min-w-0 flex-1 items-center gap-2 px-3 md:gap-3 md:pr-4 md:pl-2">
-          {pane === 'settings' ? (
-            <div className="min-w-0 flex-1 text-[15px] font-medium text-white">Settings</div>
-          ) : pane === 'terminals' ? (
-            <div className="min-w-0 flex-1 text-[15px] font-medium text-white">Terminal</div>
-          ) : (
-            <div className="relative flex h-12 min-w-0 flex-1 items-center">
-              <Search className="pointer-events-none absolute left-4 size-[18px] text-[#9a9a9a]" />
-              <Input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search in Storebase"
-                className="h-12 rounded-full border-0 bg-[#242424] pl-12 text-[15px] shadow-none placeholder:text-[#8d8d8d] outline-none focus-visible:bg-[#2a2a2a] focus-visible:ring-0"
-              />
-            </div>
-          )}
+          <div className="relative flex h-12 min-w-0 flex-1 items-center">
+            <Search className="pointer-events-none absolute left-4 size-[18px] text-[#9a9a9a]" />
+            <Input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search in Storebase"
+              className="h-12 rounded-full border-0 bg-[#242424] pl-12 text-[15px] shadow-none placeholder:text-[#8d8d8d] outline-none focus-visible:bg-[#2a2a2a] focus-visible:ring-0"
+            />
+          </div>
           <div className="flex shrink-0 items-center gap-0.5">
             <Tooltip>
               <TooltipTrigger asChild>
@@ -279,7 +273,7 @@ export function DriveApp() {
         </div>
       </header>
 
-      <div className="flex min-h-0 flex-1">
+      <div className="flex min-h-0 flex-1 overflow-hidden">
         <aside className="hidden h-full md:flex">
           <SidebarBody
             section={section}
@@ -290,7 +284,7 @@ export function DriveApp() {
           />
         </aside>
         {mobileOpen ? (
-          <div className="fixed inset-0 z-40 md:hidden">
+          <div className="absolute inset-0 z-40 md:hidden">
             <button type="button" className="absolute inset-0 bg-black/50" aria-label="Close sidebar" onClick={() => setMobileOpen(false)} />
             <div className="relative z-10 h-full bg-[#1a1a1a]">
               <SidebarBody
@@ -320,7 +314,7 @@ export function DriveApp() {
         ) : pane === 'terminals' ? (
           <TerminalPane onBack={() => setPane('files')} />
         ) : (
-          <main className="min-w-0 flex-1 overflow-y-auto px-4 py-5 md:px-8">
+          <main className="min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain px-4 py-5 md:px-8">
             <h1 className="mb-6 text-2xl font-normal tracking-tight text-foreground">{titles[section]}</h1>
             {items.length === 0 ? (
               <EmptyState section={section} search={search} />
@@ -602,7 +596,7 @@ function EmptyState({ section, search }: { section: SectionId; search: string })
     body = 'Suspicious shares get parked here.'
   }
   return (
-    <div className="flex min-h-[320px] flex-col items-center justify-center px-6 text-center">
+    <div className="flex flex-col items-center justify-center px-6 py-16 text-center">
       <FileGlyph kind="folder" size="lg" />
       <h2 className="mt-4 text-lg font-medium">{title}</h2>
       <p className="mt-1 max-w-sm text-sm text-[#8d8d8d]">{body}</p>
@@ -670,7 +664,7 @@ function SettingsPane({
           </nav>
         </ScrollArea>
       </aside>
-      <main className="min-w-0 flex-1 overflow-y-auto px-4 py-5 md:px-8">
+      <main className="min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain px-4 py-5 md:px-8">
         {section === 'account' ? (
           <div className="max-w-lg">
             <h1 className="text-2xl font-medium tracking-tight text-white">Account</h1>

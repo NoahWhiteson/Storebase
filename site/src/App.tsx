@@ -75,7 +75,7 @@ export default function Landing() {
 
         <section className="px-4 pb-16 md:px-8">
           <div className="mx-auto max-w-6xl overflow-hidden rounded-2xl border border-white/10 shadow-[0_24px_80px_rgba(0,0,0,0.45)]">
-            <div className="h-[min(78vh,820px)] min-h-[560px]">
+            <div className="h-[720px] overflow-hidden overscroll-contain">
               <DriveApp />
             </div>
           </div>
@@ -121,7 +121,7 @@ export default function Landing() {
             </p>
           </div>
           <div className="overflow-hidden rounded-2xl border border-white/10">
-            <div className="flex min-h-[420px] flex-col bg-[#1a1a1a] text-white">
+            <div className="flex h-[420px] flex-col overflow-hidden bg-[#1a1a1a] text-white">
               <header className="flex h-16 items-center gap-2.5 px-5">
                 <StorebaseLogo className="size-8" />
                 <span className="text-[20px] font-medium tracking-tight">Storebase</span>
