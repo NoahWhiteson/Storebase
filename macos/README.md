@@ -11,6 +11,28 @@ Menu bar client (macOS 14+). Pairs with a Storebase node, watches folders like D
 
 You can drag `Storebase.app` to `/Applications` after a Release build.
 
+## Get a DMG
+
+There isn’t a prebuilt disk image in the repo — it has to be compiled on a Mac.
+
+```bash
+cd macos
+chmod +x make-dmg.sh
+./make-dmg.sh
+```
+
+That writes `macos/dist/Storebase.dmg`. Open it and drag Storebase onto Applications.
+
+- First time in Xcode: open `Storebase.xcodeproj`, pick your Team under Signing, then re-run the script.
+- No Apple Developer team (just you): `UNSIGNED=1 ./make-dmg.sh` then right-click → Open the first launch (Gatekeeper).
+- Signed for other machines: `TEAM_ID=YOUR10DIGIT ./make-dmg.sh`
+
+Or in Xcode: Product → Archive → Distribute App → Copy App, then:
+
+```bash
+hdiutil create -volname Storebase -srcfolder /path/to/Storebase.app -ov -format UDZO Storebase.dmg
+```
+
 ## Pair
 
 1. Run your Storebase node and sign in on the web app.
