@@ -5,6 +5,7 @@ Self-hosted Drive. Install it on a machine you own, reserve disk, and every acco
 ```
 app/       web client
 server/    node: per-user drives, auth, quota, auto-update
+site/      marketing landing (Vite, same UI as the app)
 install.sh one-command installer
 ```
 
@@ -41,10 +42,11 @@ Updates are opt-in. Auto-update stays off unless you said yes at install or flip
 ```bash
 cd server && npm install && npm start
 cd app && npm install && npm run dev
+cd site && npm install && npm run dev
 ./storebase update --check
 ```
 
-App `43123`, API `4780`. Vite proxies `/api`. Production installs serve the built app from the node port directly.
+App `43123`, landing `43124`, API `4780`. Vite proxies `/api`. Production installs serve the built app from the node port directly.
 
 Mac client: on a Mac run `macos/make-dmg.sh`, then open Storebase.app (Dock + window + menu bar). Pair from Settings → Mac app. Details in `macos/README.md`.
 
