@@ -331,7 +331,7 @@ enum CloudStub {
   }
 
   static func hasStorebaseTag(_ url: URL) -> Bool {
-    let tags = ((try? url.resourceValues(forKeys: [.tagNamesKey]).tagNames) ?? []) + (readStringListXattr(url, userTagsKey) ?? [])
+    let tags = readStringListXattr(url, userTagsKey) ?? []
     if tags.contains(where: { tagBase($0).caseInsensitiveCompare(tagLabel) == .orderedSame }) {
       return true
     }
@@ -346,15 +346,12 @@ enum CloudStub {
   }
 
   private static func applyFinderTag(_ url: URL) {
-    var file = url
-    let existing = (try? url.resourceValues(forKeys: [.tagNamesKey]).tagNames) ?? []
-    if !existing.contains(where: { tagBase($0).caseInsensitiveCompare(tagLabel) == .orderedSame }) {
-      var values = URLResourceValues()
-      values.tagNames = existing + [tagLabel]
-      try? file.setResourceValues(values)
+    var tags = readStringListXattr(url, userTagsKey) ?? []
+    if tags.contains(where: { tagBase($0).caseInsensitiveCompare(tagLabel) == .orderedSame }) {
+      return
     }
-    if hasStorebaseTag(url) { return }
-    writePlist(url, userTagsKey, existing + [tagLabel])
+    tags.append(tagLabel)
+    writePlist(url, userTagsKey, tags)
   }
 
   private static func applyComment(_ url: URL) {
