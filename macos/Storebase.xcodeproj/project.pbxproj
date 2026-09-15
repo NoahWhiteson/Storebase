@@ -17,6 +17,8 @@
 		2BA54AF1795254D1AFC49714 /* StorebaseApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C12902FB6395B1B89F7C1D0 /* StorebaseApp.swift */; };
 		4C81A0E19B2F4C6DA11E03B7 /* MainWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D27B6F04A8C4E21B3C90D14 /* MainWindow.swift */; };
 		E06ED8AC7DEF592DBEC41BCD /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = C937ACB7E67F5DCEBA552CED /* Assets.xcassets */; };
+		C41E8B0A7F2D4C1E9A6B3D50 /* AppIcon.icns in Resources */ = {isa = PBXBuildFile; fileRef = 1F8C0D2E6A4B4F90B7C1E234 /* AppIcon.icns */; };
+		A90D1C3B8E5F4A2C9D70B681 /* AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = 6B2E9F14C0A84D5E8F31A947 /* AppIcon.icon */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -30,6 +32,8 @@
 		2C12902FB6395B1B89F7C1D0 /* StorebaseApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StorebaseApp.swift; sourceTree = "<group>"; };
 		9D27B6F04A8C4E21B3C90D14 /* MainWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainWindow.swift; sourceTree = "<group>"; };
 		C937ACB7E67F5DCEBA552CED /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		1F8C0D2E6A4B4F90B7C1E234 /* AppIcon.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = AppIcon.icns; sourceTree = "<group>"; };
+		6B2E9F14C0A84D5E8F31A947 /* AppIcon.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = AppIcon.icon; sourceTree = "<group>"; };
 		28C811E339CF5D5FB13C018C /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		B7C9C4BB2798514B8BC6AC0E /* Storebase.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Storebase.entitlements; sourceTree = "<group>"; };
 		339C95AB09785AB098B53029 /* Storebase.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Storebase.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -75,6 +79,8 @@
 				2C12902FB6395B1B89F7C1D0 /* StorebaseApp.swift */,
 				9D27B6F04A8C4E21B3C90D14 /* MainWindow.swift */,
 				C937ACB7E67F5DCEBA552CED /* Assets.xcassets */,
+				1F8C0D2E6A4B4F90B7C1E234 /* AppIcon.icns */,
+				6B2E9F14C0A84D5E8F31A947 /* AppIcon.icon */,
 				28C811E339CF5D5FB13C018C /* Info.plist */,
 				B7C9C4BB2798514B8BC6AC0E /* Storebase.entitlements */,
 			);
@@ -135,6 +141,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				E06ED8AC7DEF592DBEC41BCD /* Assets.xcassets in Resources */,
+				C41E8B0A7F2D4C1E9A6B3D50 /* AppIcon.icns in Resources */,
+				A90D1C3B8E5F4A2C9D70B681 /* AppIcon.icon in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -194,16 +202,19 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
+				ASSETCATALOG_COMPILER_OTHER_FLAGS = "--enable-icon-stack-fallback-generation=disabled";
+				ASSETCATALOG_COMPILER_STANDALONE_ICON_BEHAVIOR = all;
 				CODE_SIGN_ENTITLEMENTS = Storebase/Storebase.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Storebase/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.1;
 				PRODUCT_BUNDLE_IDENTIFIER = app.storebase.mac;
 				PRODUCT_NAME = Storebase;
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -215,16 +226,19 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
+				ASSETCATALOG_COMPILER_OTHER_FLAGS = "--enable-icon-stack-fallback-generation=disabled";
+				ASSETCATALOG_COMPILER_STANDALONE_ICON_BEHAVIOR = all;
 				CODE_SIGN_ENTITLEMENTS = Storebase/Storebase.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Storebase/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.1;
 				PRODUCT_BUNDLE_IDENTIFIER = app.storebase.mac;
 				PRODUCT_NAME = Storebase;
 				SWIFT_EMIT_LOC_STRINGS = YES;

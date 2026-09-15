@@ -14,7 +14,9 @@ chmod +x make-dmg.sh
 ./make-dmg.sh
 ```
 
-Open `macos/dist/Storebase.dmg`, drag Storebase onto Applications, launch it from Launchpad or `/Applications/Storebase.app`.
+The script quits any old Storebase process (same bundle id as the first agent build), rebuilds 1.1, writes `macos/dist/Storebase.dmg`, and replaces `/Applications/Storebase.app`.
+
+You should see **1.1** under the title and the cube icon. A hard-drive glyph means the old copy is still running — `killall Storebase` then open `/Applications/Storebase.app`.
 
 - First time in Xcode: open `Storebase.xcodeproj`, pick your Team under Signing, then re-run the script.
 - No Apple Developer team: `UNSIGNED=1 ./make-dmg.sh` then right-click → Open the first launch (Gatekeeper).
