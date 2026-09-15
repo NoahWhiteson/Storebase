@@ -53,7 +53,7 @@ final class APIClient {
     ]
     request.httpBody = try JSONSerialization.data(withJSONObject: body)
     let (data, response) = try await URLSession.shared.data(for: request)
-    try throwIfNeeded(data: data, response: response)
+    try Self.throwIfNeeded(data: data, response: response)
     return try JSONDecoder().decode(PairResponse.self, from: data)
   }
 
@@ -67,7 +67,7 @@ final class APIClient {
     request.setValue("application/json", forHTTPHeaderField: "Content-Type")
     request.httpBody = try JSONSerialization.data(withJSONObject: ["path": path])
     let (data, response) = try await URLSession.shared.data(for: request)
-    try throwIfNeeded(data: data, response: response)
+    try Self.throwIfNeeded(data: data, response: response)
   }
 
   func upload(fileURL: URL, destDir: String) async throws {
@@ -81,13 +81,13 @@ final class APIClient {
     request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
     request.httpBody = try Self.multipart(fileURL: fileURL, boundary: boundary)
     let (data, response) = try await URLSession.shared.data(for: request)
-    try throwIfNeeded(data: data, response: response)
+    try Self.throwIfNeeded(data: data, response: response)
   }
 
   private func get<T: Decodable>(_ path: String, as: T.Type) async throws -> T {
     let request = authorized(path: path)
     let (data, response) = try await URLSession.shared.data(for: request)
-    try throwIfNeeded(data: data, response: response)
+    try Self.throwIfNeeded(data: data, response: response)
     return try JSONDecoder().decode(T.self, from: data)
   }
 
