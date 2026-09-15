@@ -107,9 +107,14 @@ export function toDriveItem(entry: FileEntry, owner: { name: string }): DriveIte
     computer: false,
     owned: !entry.path.startsWith('share:'),
     daysLeft: entry.daysLeft,
+    expiresAt: entry.expiresAt,
     shareId: entry.shareId,
     shareName: entry.shareName,
   }
+}
+
+export function isTempId(id: string): boolean {
+  return id === '.temp' || id.startsWith('.temp/')
 }
 
 async function parse<T>(res: Response): Promise<T> {
@@ -285,6 +290,30 @@ export async function deleteLink(id: string): Promise<void> {
 
 export async function unzipFile(path: string): Promise<void> {
   await api('/api/files/unzip', { method: 'POST', body: JSON.stringify({ path }) })
+}
+
+export async function fetchTempSettings(): Promise<{ ttlHours: number }> {
+  return api('/api/temp')
+}
+
+export async function setTempTtl(hours: number): Promise<{ ttlHours: number }> {
+  return api('/api/temp', { method: 'PATCH', body: JSON.stringify({ ttlHours: hours }) })
+}
+
+export async function moveToTemp(paths: string[]): Promise<FileEntry[]> {
+  const body = await api<{ items: FileEntry[] }>('/api/temp/move', {
+    method: 'POST',
+    body: JSON.stringify({ paths }),
+  })
+  return body.items
+}
+
+export async function keepFromTemp(path: string): Promise<FileEntry> {
+  const body = await api<{ item: FileEntry }>('/api/temp/keep', {
+    method: 'POST',
+    body: JSON.stringify({ path }),
+  })
+  return body.item
 }
 
 export function publicLinkUrl(token: string): string {

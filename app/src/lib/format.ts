@@ -30,6 +30,31 @@ export function formatDateTime(iso: string): string {
   return DATE_TIME_FMT.format(new Date(iso))
 }
 
+export function formatRemaining(iso: string): string {
+  const ms = new Date(iso).getTime() - Date.now()
+  if (!Number.isFinite(ms) || ms <= 0) return 'Expires now'
+  const minute = 60_000
+  const hour = 60 * minute
+  const day = 24 * hour
+  if (ms < hour) {
+    const mins = Math.max(1, Math.round(ms / minute))
+    return `${mins} min left`
+  }
+  if (ms < 2 * day) {
+    const hours = Math.max(1, Math.round(ms / hour))
+    return `${hours} hour${hours === 1 ? '' : 's'} left`
+  }
+  const days = Math.max(1, Math.round(ms / day))
+  return `${days} day${days === 1 ? '' : 's'} left`
+}
+
+export function formatTtl(hours: number): string {
+  if (hours < 24) return `${hours} hour${hours === 1 ? '' : 's'}`
+  const days = hours / 24
+  if (Number.isInteger(days)) return `${days} day${days === 1 ? '' : 's'}`
+  return `${hours} hours`
+}
+
 export function formatRelative(iso: string): string {
   const then = new Date(iso).getTime()
   const now = Date.now()

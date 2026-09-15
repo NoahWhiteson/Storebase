@@ -9,9 +9,9 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu'
-import { formatBytes, formatDate } from '@/lib/format'
+import { formatBytes, formatDate, formatRemaining } from '@/lib/format'
 import { isZipName, previewKind } from '@/lib/preview'
-import { rawUrl } from '@/lib/api'
+import { isTempId, rawUrl } from '@/lib/api'
 import type { DriveItem, SectionId } from '@/types'
 import { cn } from 'cn'
 import type { DragEvent, ReactNode } from 'react'
@@ -30,6 +30,7 @@ import {
   Pencil,
   Share2,
   Star,
+  Timer,
   Trash2,
   Undo2,
   Upload,
@@ -76,6 +77,8 @@ type FileViewProps = {
   onUnzip: (id: string) => void
   onMove: (paths: string[], dest: string) => void
   onDropFiles?: (files: FileList, dest: string) => void
+  onMoveToTemp: (id: string) => void
+  onKeep: (id: string) => void
 }
 
 export function FileView(props: FileViewProps) {
@@ -237,7 +240,9 @@ function ListView(props: FileViewProps & { items: DriveItem[]; drag: DragApi }) 
       <div className="hidden grid-cols-[minmax(0,2fr)_140px_160px_100px] gap-3 px-3 py-2 text-xs font-medium text-[#8d8d8d] md:grid">
         <span>Name</span>
         <span>Owner</span>
-        <span>{props.section === 'trash' ? 'Retention' : 'Date modified'}</span>
+        <span>
+          {props.section === 'trash' || props.section === 'temp' ? 'Retention' : 'Date modified'}
+        </span>
         <span className="text-right">File size</span>
       </div>
       {props.items.map((item) => (
@@ -291,7 +296,12 @@ function GridView({
                   className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left hover:bg-white/5"
                 >
                   <FileGlyph kind="folder" size="sm" />
-                  <span className="min-w-0 flex-1 truncate text-sm font-medium">{item.name}</span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-medium">{item.name}</span>
+                    {item.expiresAt && !item.trashed ? (
+                      <span className="block truncate text-xs text-[#8d8d8d]">{when(item)}</span>
+                    ) : null}
+                  </span>
                   <Marks item={item} />
                 </Tile>
               </ItemMenu>
@@ -435,10 +445,13 @@ function handlers(props: FileViewProps) {
     onRemoveShare: props.onRemoveShare,
     onDownload: props.onDownload,
     onUnzip: props.onUnzip,
+    onMoveToTemp: props.onMoveToTemp,
+    onKeep: props.onKeep,
   }
 }
 
 function when(item: DriveItem): string {
+  if (item.expiresAt && !item.trashed) return formatRemaining(item.expiresAt)
   if (item.trashed && item.daysLeft != null) {
     if (item.daysLeft <= 0) return 'Expires today'
     return `${item.daysLeft} day${item.daysLeft === 1 ? '' : 's'} left`
@@ -468,6 +481,8 @@ function ItemMenu({
   onRemoveShare,
   onDownload,
   onUnzip,
+  onMoveToTemp,
+  onKeep,
 }: {
   item: DriveItem
   children: ReactNode
@@ -481,10 +496,13 @@ function ItemMenu({
   onRemoveShare: (id: string) => void
   onDownload: (item: DriveItem) => void
   onUnzip: (id: string) => void
+  onMoveToTemp: (id: string) => void
+  onKeep: (id: string) => void
 }) {
   const inbound = item.owned === false
   const shareRoot = inbound && Boolean(item.shareId) && item.id === `share:${item.shareId}`
   const zip = !inbound && !item.trashed && isZipName(item.name)
+  const inTemp = isTempId(item.id)
 
   return (
     <ContextMenu>
@@ -526,6 +544,17 @@ function ItemMenu({
           <Download />
           Download
         </ContextMenuItem>
+        {inbound || item.trashed || item.computer ? null : inTemp ? (
+          <ContextMenuItem onSelect={() => onKeep(item.id)}>
+            <HardDrive />
+            Keep in My files
+          </ContextMenuItem>
+        ) : (
+          <ContextMenuItem onSelect={() => onMoveToTemp(item.id)}>
+            <Timer />
+            Move to Temp
+          </ContextMenuItem>
+        )}
         {item.trashed || !inbound || shareRoot ? <ContextMenuSeparator /> : null}
         {item.trashed ? (
           <>
@@ -581,6 +610,9 @@ function EmptyState({ section, search }: { section: SectionId; search: string })
   } else if (section === 'computers') {
     title = 'No computers backup'
     body = 'Backup a desktop folder and it appears in Computers.'
+  } else if (section === 'temp') {
+    title = 'Temp is empty'
+    body = 'Files here delete on the timer you set. Upload, or move something from My files.'
   }
 
   return (

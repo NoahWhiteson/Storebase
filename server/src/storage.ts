@@ -292,6 +292,13 @@ export function isTrashPath(relPath: string): boolean {
   return clean === TRASH_DIR || clean.startsWith(`${TRASH_DIR}/`)
 }
 
+export const TEMP_DIR = '.temp'
+
+export function isTempPath(relPath: string): boolean {
+  const clean = relPath.replaceAll('\\', '/').replace(/^\/+/, '')
+  return clean === TEMP_DIR || clean.startsWith(`${TEMP_DIR}/`)
+}
+
 export async function removePath(root: string, relPath: string): Promise<void> {
   if (!relPath || relPath === '/' || relPath === '.') {
     throw new Error('Refusing to delete the drive root')

@@ -38,9 +38,11 @@ import {
   ShareError,
 } from './shares.ts'
 import {
+  TEMP_DIR,
   ensureDir,
   entryAt,
   entrySize,
+  isTempPath,
   isTrashPath,
   listPath,
   makeFolder,
@@ -53,6 +55,18 @@ import {
   walkVisible,
   writeFileContent,
 } from './storage.ts'
+import {
+  dropTempPath,
+  ensureTemp,
+  getTempTtlHours,
+  keepFromTemp,
+  listTempItems,
+  moveIntoTemp,
+  purgeExpiredTemp,
+  rewriteTempPath,
+  setTempTtlHours,
+  trackTemp,
+} from './temp.ts'
 import {
   emptyTrash,
   forgetTrashPath,
@@ -161,6 +175,12 @@ function sendFile(
       'content-length': String(file.size),
     },
   })
+}
+
+async function touchTempMove(root: string, from: string, to: string): Promise<void> {
+  if (isTempPath(from) && isTempPath(to)) await rewriteTempPath(root, from, to)
+  else if (isTempPath(to)) await trackTemp(root, to)
+  else if (isTempPath(from)) await dropTempPath(root, from)
 }
 
 export function createApp(config: ServerConfig) {
@@ -468,6 +488,26 @@ export function createApp(config: ServerConfig) {
         items: items.map((item) => ({ ...item, starred: false, trashed: true, shared: false })),
       })
     }
+    if (view === 'temp') {
+      const dropped = await purgeExpiredTemp(root)
+      for (const rel of dropped) {
+        await dropPath(root, rel)
+        await dropSharesForPath(config, user.id, rel)
+        await dropLinksForPath(config, user.id, rel)
+      }
+      const sub = !path || path === TEMP_DIR ? '' : path.replace(new RegExp(`^${TEMP_DIR}/`), '')
+      const listed = await listTempItems(root, sub)
+      return c.json({
+        path: sub ? `${TEMP_DIR}/${sub}` : TEMP_DIR,
+        ttlHours: listed.ttlHours,
+        items: listed.items.map((item) => ({
+          ...item,
+          starred: starred.has(item.path),
+          trashed: false,
+          shared: sharedFlag(item.path),
+        })),
+      })
+    }
     if (view === 'starred') {
       const items = []
       for (const rel of meta.starred) {
@@ -506,7 +546,73 @@ export function createApp(config: ServerConfig) {
     if (!body.path) return c.json({ error: 'path required' }, 400)
     const item = await makeFolder(root, body.path)
     await touchRecent(root, item.path)
+    if (isTempPath(item.path)) await trackTemp(root, item.path)
     return c.json({ item: { ...item, starred: false, trashed: false } }, 201)
+  })
+
+  app.get('/api/temp', async (c) => {
+    const root = c.get('root')
+    await purgeExpiredTemp(root)
+    return c.json({ ttlHours: await getTempTtlHours(root) })
+  })
+
+  app.patch('/api/temp', async (c) => {
+    const root = c.get('root')
+    const body = await c.req.json<{ ttlHours?: number }>()
+    const ttlHours = await setTempTtlHours(root, Number(body.ttlHours))
+    return c.json({ ttlHours })
+  })
+
+  app.post('/api/temp/move', async (c) => {
+    const root = c.get('root')
+    const user = c.get('user')
+    const body = await c.req.json<{ paths?: string[] }>()
+    const paths = (body.paths ?? []).filter((path) => typeof path === 'string' && path.length > 0)
+    if (!paths.length) return c.json({ error: 'paths required' }, 400)
+    try {
+      const moved = await moveIntoTemp(root, paths)
+      for (const entry of moved) {
+        await rewritePath(root, entry.from, entry.to)
+        await rewriteShares(config, user.id, entry.from, entry.to)
+        await rewriteLinks(config, user.id, entry.from, entry.to)
+      }
+      const meta = await loadMeta(root)
+      return c.json({
+        items: moved.map((entry) => ({
+          ...entry.item,
+          starred: meta.starred.includes(entry.item.path),
+          trashed: false,
+          shared: false,
+        })),
+      })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Could not move to Temp'
+      return c.json({ error: message }, 400)
+    }
+  })
+
+  app.post('/api/temp/keep', async (c) => {
+    const root = c.get('root')
+    const user = c.get('user')
+    const body = await c.req.json<{ path?: string }>()
+    if (!body.path) return c.json({ error: 'path required' }, 400)
+    try {
+      const item = await keepFromTemp(root, body.path)
+      await rewritePath(root, body.path, item.path)
+      await rewriteShares(config, user.id, body.path, item.path)
+      await rewriteLinks(config, user.id, body.path, item.path)
+      return c.json({
+        item: {
+          ...item,
+          starred: (await loadMeta(root)).starred.includes(item.path),
+          trashed: false,
+          shared: await pathIsShared(config, user.id, item.path),
+        },
+      })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Could not keep'
+      return c.json({ error: message }, 400)
+    }
   })
 
   app.post('/api/files/unzip', async (c) => {
@@ -515,6 +621,7 @@ export function createApp(config: ServerConfig) {
     if (!body.path) return c.json({ error: 'path required' }, 400)
     try {
       const item = await unzipArchive(root, body.path, await quotaGate(config, c.get('user')))
+      if (isTempPath(item.path)) await trackTemp(root, item.path)
       return c.json({ item: { ...item, starred: false, trashed: false } }, 201)
     } catch (err) {
       if (err instanceof QuotaError) return c.json({ error: err.message, code: err.code }, 507)
@@ -532,6 +639,7 @@ export function createApp(config: ServerConfig) {
     try {
       const item = await saveFile(root, dir, file.name, buf, await quotaGate(config, c.get('user')))
       await touchRecent(root, item.path)
+      if (isTempPath(item.path)) await trackTemp(root, item.path)
       return c.json({ item: { ...item, starred: false, trashed: false } }, 201)
     } catch (err) {
       if (err instanceof QuotaError) return c.json({ error: err.message, code: err.code }, 507)
@@ -568,11 +676,13 @@ export function createApp(config: ServerConfig) {
     if (!paths.length) return c.json({ error: 'paths required' }, 400)
     const dest = body.dest ?? ''
     try {
+      if (dest === TEMP_DIR) await ensureTemp(root)
       const moved = await moveEntries(root, paths, dest)
       for (const entry of moved) {
         await rewritePath(root, entry.from, entry.to)
         await rewriteShares(config, user.id, entry.from, entry.to)
         await rewriteLinks(config, user.id, entry.from, entry.to)
+        await touchTempMove(root, entry.from, entry.to)
       }
       const meta = await loadMeta(root)
       return c.json({
@@ -602,6 +712,7 @@ export function createApp(config: ServerConfig) {
     await rewritePath(root, body.path, item.path)
     await rewriteShares(config, c.get('user').id, body.path, item.path)
     await rewriteLinks(config, c.get('user').id, body.path, item.path)
+    await touchTempMove(root, body.path, item.path)
     return c.json({
       item: {
         ...item,
@@ -640,12 +751,14 @@ export function createApp(config: ServerConfig) {
       }
       await removePath(root, body.path)
       await dropPath(root, body.path)
+      await dropTempPath(root, body.path)
       await dropSharesForPath(config, user.id, body.path)
       await dropLinksForPath(config, user.id, body.path)
       return c.json({ ok: true, permanent: true, size })
     }
     const { item, record } = await trashEntry(root, body.path)
     await dropPath(root, body.path)
+    await dropTempPath(root, body.path)
     return c.json({
       item: { ...item, starred: false, trashed: true, shared: false, trashedAt: record.trashedAt, daysLeft: 30 },
       permanent: false,
@@ -657,6 +770,7 @@ export function createApp(config: ServerConfig) {
     const body = await c.req.json<{ path?: string }>()
     if (!body.path) return c.json({ error: 'path required' }, 400)
     const item = await restoreTrash(root, body.path)
+    if (isTempPath(item.path)) await trackTemp(root, item.path)
     return c.json({ item: { ...item, starred: false, trashed: false, shared: await pathIsShared(config, c.get('user').id, item.path) } })
   })
 

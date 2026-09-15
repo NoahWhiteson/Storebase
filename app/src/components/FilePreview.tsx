@@ -130,7 +130,7 @@ export function FilePreview({
           Download
         </Button>
       </header>
-      <div className={kind === 'video' ? 'flex min-h-0 flex-1 overflow-hidden bg-black' : 'min-h-0 flex-1 overflow-auto p-4 md:p-8'}>
+      <div className={kind === 'video' ? 'relative flex min-h-0 flex-1 overflow-hidden bg-black' : 'min-h-0 flex-1 overflow-auto p-4 md:p-8'}>
         {kind === 'image' ? (
           <img src={url} alt={name} className="mx-auto max-h-full max-w-full object-contain" />
         ) : null}

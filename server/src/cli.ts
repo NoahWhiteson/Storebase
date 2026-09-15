@@ -5,6 +5,7 @@ import { describeReserve, initPool, readManifest } from './pool.ts'
 import { loadPlatform } from './platform.ts'
 import { applyUpdate, checkGithub, startUpdateLoop } from './update.ts'
 import { purgeExpiredTrash } from './trash.ts'
+import { purgeExpiredTemp } from './temp.ts'
 import { ensureUserDrive, isConfigured, loadUsers } from './users.ts'
 
 function arg(name: string): string | undefined {
@@ -54,7 +55,9 @@ async function start(): Promise<void> {
       console.log(`Drive ${config.driveDir} · reserved ${reserve}`)
       const users = await loadUsers(config)
       for (const user of users) {
-        await purgeExpiredTrash(await ensureUserDrive(config, user.id))
+        const root = await ensureUserDrive(config, user.id)
+        await purgeExpiredTrash(root)
+        await purgeExpiredTemp(root)
       }
     } else {
       console.log('Not configured. Open the app to finish onboarding.')

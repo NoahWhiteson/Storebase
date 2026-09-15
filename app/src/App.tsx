@@ -22,16 +22,21 @@ import {
   deleteShare,
   downloadUrl,
   emptyTrash,
+  fetchTempSettings,
   initials,
+  isTempId,
+  keepFromTemp,
   listFiles,
   logout,
   mkdir,
   moveFiles,
+  moveToTemp,
   parseSharePath,
   rawUrl,
   renameFile,
   restoreFile,
   saveContent,
+  setTempTtl,
   starFile,
   toDriveItem,
   trashFile,
@@ -39,7 +44,7 @@ import {
   uploadFile,
   type FileEntry,
 } from '@/lib/api'
-import { formatBytes } from '@/lib/format'
+import { formatBytes, formatTtl } from '@/lib/format'
 import type { DriveItem, FileKind, SectionId } from '@/types'
 import { ChevronRight } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
@@ -51,8 +56,21 @@ const titles: Record<SectionId, string> = {
   shared: 'Shared with me',
   recent: 'Recent',
   starred: 'Starred',
+  temp: 'Temp',
   spam: 'Spam',
   trash: 'Trash',
+}
+
+const TTL_PRESETS = [
+  { label: '1 hour', hours: 1 },
+  { label: '1 day', hours: 24 },
+  { label: '3 days', hours: 72 },
+  { label: '7 days', hours: 168 },
+  { label: '30 days', hours: 720 },
+]
+
+function tempDir(folderPath: string): string {
+  return folderPath && folderPath !== '.temp' ? folderPath : '.temp'
 }
 
 type Account = {
@@ -102,6 +120,8 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
   const [confirm, setConfirm] = useState<
     null | { mode: 'permanent'; id: string; name: string; size: number } | { mode: 'empty-trash' } | { mode: 'delete-forever'; id: string; name: string }
   >(null)
+  const [ttlHours, setTtlHours] = useState(24)
+  const [customDays, setCustomDays] = useState('')
   const uploadRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -112,6 +132,13 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
 
   const crumbs = useMemo(() => {
     if (!folderPath) return []
+    if (isTempId(folderPath)) {
+      const rest = folderPath === '.temp' ? [] : folderPath.slice('.temp/'.length).split('/').filter(Boolean)
+      return rest.map((name, i) => ({
+        id: `.temp/${rest.slice(0, i + 1).join('/')}`,
+        name,
+      }))
+    }
     const shared = parseSharePath(folderPath)
     if (shared) {
       const root = { id: `share:${shared.shareId}`, name: shareLabel || 'Shared' }
@@ -156,6 +183,11 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
         } else {
           entries = await listFiles({ view: 'shared' })
         }
+      } else if (section === 'temp') {
+        const sub = folderPath.replace(/^\.temp\/?/, '')
+        entries = await listFiles({ view: 'temp', path: sub })
+        const settings = await fetchTempSettings()
+        setTtlHours(settings.ttlHours)
       } else if (section === 'spam') {
         entries = []
       } else if (section === 'computers' && !folderPath) {
@@ -247,7 +279,7 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
         return
       }
       if (item.shareName) setShareLabel(item.shareName)
-      setSection(item.id.startsWith('share:') ? 'shared' : 'my-drive')
+      setSection(isTempId(item.id) ? 'temp' : item.id.startsWith('share:') ? 'shared' : 'my-drive')
       setFolderPath(item.id)
       setSelectedIds([])
       setSearch('')
@@ -365,12 +397,19 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
     if (!name) return
     try {
       if (dialog?.mode === 'create') {
-        const path = joinPath(section === 'my-drive' ? folderPath : '', name)
+        const path = joinPath(section === 'temp' ? tempDir(folderPath) : section === 'my-drive' ? folderPath : '', name)
         await mkdir(path)
         notify(`Created ${name}`)
       }
       if (dialog?.mode === 'create-file') {
-        const dir = section === 'my-drive' || section === 'home' ? (section === 'my-drive' ? folderPath : '') : ''
+        const dir =
+          section === 'temp'
+            ? tempDir(folderPath)
+            : section === 'my-drive' || section === 'home'
+              ? section === 'my-drive'
+                ? folderPath
+                : ''
+              : ''
         await uploadFile(dir, new File([''], name))
         notify(`Created ${name}`)
       }
@@ -398,14 +437,14 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
       audio: 'Untitled.txt',
       zip: 'Untitled.txt',
     }
-    const dir = section === 'computers' ? '' : folderPath
+    const dir = section === 'temp' ? tempDir(folderPath) : section === 'computers' ? '' : folderPath
     try {
       if (kind === 'folder') {
         await mkdir(joinPath(dir, names.folder))
       } else {
         await uploadFile(dir, new File([''], names[kind]))
       }
-      setSection('my-drive')
+      if (section !== 'temp') setSection('my-drive')
       notify(`Created ${names[kind]}`)
       await refresh()
     } catch (err) {
@@ -415,17 +454,56 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
 
   async function onUpload(files: FileList | null, dest?: string) {
     if (!files?.length) return
-    const dir = dest ?? (section === 'computers' ? '' : folderPath)
+    const dir = dest ?? (section === 'temp' ? tempDir(folderPath) : section === 'computers' ? '' : folderPath)
     try {
       for (const file of Array.from(files)) {
         await uploadFile(dir, file)
       }
-      setSection('my-drive')
+      if (section !== 'temp') setSection(isTempId(dir) ? 'temp' : 'my-drive')
       if (dest) setFolderPath(dest)
       notify(files.length === 1 ? `Uploaded ${files[0].name}` : `Uploaded ${files.length} files`)
       await refresh()
     } catch (err) {
       notify(err instanceof Error ? err.message : 'Upload failed')
+    }
+  }
+
+  async function sendToTemp(id: string) {
+    const ids = selectedIds.includes(id) && selectedIds.length > 1 ? selectedIds : [id]
+    const valid = ids.filter((path) => !isTempId(path) && !path.startsWith('share:') && path !== '__node__')
+    if (!valid.length) return
+    try {
+      const moved = await moveToTemp(valid)
+      notify(moved.length === 1 ? `Moved ${moved[0].name} to Temp` : `Moved ${moved.length} items to Temp`)
+      setSelectedIds([])
+      await refresh()
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Could not move to Temp')
+    }
+  }
+
+  async function keepItem(id: string) {
+    const item = items.find((entry) => entry.id === id)
+    if (!item) return
+    try {
+      await keepFromTemp(id)
+      notify(`Kept ${item.name} in My files`)
+      setSelectedIds((current) => current.filter((x) => x !== id))
+      await refresh()
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Could not keep')
+    }
+  }
+
+  async function applyTtl(hours: number) {
+    try {
+      const next = await setTempTtl(hours)
+      setTtlHours(next.ttlHours)
+      setCustomDays('')
+      notify(`Temp files now delete after ${formatTtl(next.ttlHours)}`)
+      await refresh()
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Could not set timer')
     }
   }
 
@@ -588,10 +666,12 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
                   <button
                     type="button"
                     className="hover:text-foreground"
-                    onClick={() => goSection(section === 'shared' ? 'shared' : 'my-drive')}
-                    {...(canMove ? dropDest('') : {})}
+                    onClick={() =>
+                      goSection(section === 'shared' ? 'shared' : section === 'temp' ? 'temp' : 'my-drive')
+                    }
+                    {...(canMove ? dropDest(section === 'temp' ? '.temp' : '') : {})}
                   >
-                    {section === 'shared' ? 'Shared with me' : 'My files'}
+                    {section === 'shared' ? 'Shared with me' : section === 'temp' ? 'Temp' : 'My files'}
                   </button>
                   {crumbs.map((crumb, i) => (
                     <span key={crumb.id} className="flex items-center gap-2">
@@ -621,6 +701,14 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
                       <span className="text-sm text-[#8d8d8d]">{selectedIds.length} selected</span>
                     ) : null}
                   </div>
+                  {section === 'temp' ? (
+                    <TempTtlBar
+                      ttlHours={ttlHours}
+                      customDays={customDays}
+                      onCustomDays={setCustomDays}
+                      onApply={applyTtl}
+                    />
+                  ) : null}
                   {section === 'trash' && items.length > 0 ? (
                     <Button
                       variant="ghost"
@@ -636,6 +724,15 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
 
             {loadError ? <p className="text-sm text-[#f28b82]">{loadError}</p> : null}
 
+            {section === 'temp' && folderPath && !search.trim() ? (
+              <TempTtlBar
+                ttlHours={ttlHours}
+                customDays={customDays}
+                onCustomDays={setCustomDays}
+                onApply={applyTtl}
+              />
+            ) : null}
+
             {loading && items.length === 0 && !computerItem ? (
               <p className="text-sm text-[#8d8d8d]">Loading your files…</p>
             ) : (
@@ -648,7 +745,11 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
                 sort={sort}
                 onSort={setSort}
                 onView={setView}
-                canCreate={!search.trim() && (section === 'my-drive' || section === 'home') && !folderPath.startsWith('share:')}
+                canCreate={
+                  !search.trim() &&
+                  (section === 'my-drive' || section === 'home' || section === 'temp') &&
+                  !folderPath.startsWith('share:')
+                }
                 canMove={canMove}
                 onNewFolder={() => {
                   setNameDraft('')
@@ -678,6 +779,8 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
                 onUnzip={(id) => void unzip(id)}
                 onMove={(paths, dest) => void moveTo(paths, dest)}
                 onDropFiles={(files, dest) => void onUpload(files, dest)}
+                onMoveToTemp={(id) => void sendToTemp(id)}
+                onKeep={(id) => void keepItem(id)}
               />
             )}
           </div>
@@ -808,6 +911,62 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
           {toast}
         </div>
       ) : null}
+    </div>
+  )
+}
+
+function TempTtlBar({
+  ttlHours,
+  customDays,
+  onCustomDays,
+  onApply,
+}: {
+  ttlHours: number
+  customDays: string
+  onCustomDays: (value: string) => void
+  onApply: (hours: number) => void
+}) {
+  const preset = TTL_PRESETS.some((item) => item.hours === ttlHours)
+  return (
+    <div className="flex flex-wrap items-center gap-2" onClick={(e) => e.stopPropagation()}>
+      <span className="text-xs text-[#8d8d8d]">Delete after</span>
+      {TTL_PRESETS.map((item) => (
+        <button
+          key={item.hours}
+          type="button"
+          onClick={() => void onApply(item.hours)}
+          className={
+            item.hours === ttlHours
+              ? 'h-8 rounded-full bg-white px-3 text-xs font-medium text-[#1a1a1a]'
+              : 'h-8 rounded-full bg-white/10 px-3 text-xs font-medium text-[#e8e8e8] hover:bg-white/15'
+          }
+        >
+          {item.label}
+        </button>
+      ))}
+      <form
+        className="flex items-center gap-1"
+        onSubmit={(e) => {
+          e.preventDefault()
+          const days = Number(customDays)
+          if (!Number.isFinite(days) || days <= 0) return
+          void onApply(Math.round(days * 24))
+        }}
+      >
+        <Input
+          type="number"
+          min={1}
+          max={365}
+          inputMode="numeric"
+          value={customDays}
+          placeholder={preset ? 'Days' : String(ttlHours / 24)}
+          className="h-8 w-16 rounded-full border-white/15 bg-[#242424] px-3 text-xs text-white placeholder:text-[#8d8d8d] focus-visible:ring-0"
+          onChange={(e) => onCustomDays(e.target.value)}
+        />
+        <Button type="submit" variant="ghost" className="h-8 rounded-full px-3 text-xs text-white hover:bg-white/10">
+          Set
+        </Button>
+      </form>
     </div>
   )
 }

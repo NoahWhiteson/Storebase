@@ -16,6 +16,7 @@ export type SectionId =
   | 'shared'
   | 'recent'
   | 'starred'
+  | 'temp'
   | 'spam'
   | 'trash'
 
@@ -35,6 +36,7 @@ export type DriveItem = {
   computer: boolean
   owned?: boolean
   daysLeft?: number
+  expiresAt?: string
   shareId?: string
   shareName?: string
 }

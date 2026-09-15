@@ -109,7 +109,7 @@ export function VideoPlayer({ src, title }: { src: string; title: string }) {
   return (
     <div
       ref={wrapRef}
-      className="relative mx-auto flex h-full w-full max-w-6xl items-center justify-center bg-black"
+      className="relative h-full min-h-0 w-full bg-black"
       onMouseMove={bumpChrome}
       onMouseLeave={() => {
         if (playing) setChrome(false)
@@ -121,7 +121,7 @@ export function VideoPlayer({ src, title }: { src: string; title: string }) {
         poster={poster ?? undefined}
         playsInline
         preload="metadata"
-        className="max-h-full max-w-full"
+        className="absolute inset-0 h-full w-full object-contain"
         onClick={toggle}
         onPlay={() => setPlaying(true)}
         onPause={() => {

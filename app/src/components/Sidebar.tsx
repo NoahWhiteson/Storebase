@@ -23,6 +23,7 @@ import {
   Settings,
   SquareTerminal,
   Star,
+  Timer,
   Trash2,
   Upload,
   Users,
@@ -39,6 +40,7 @@ const nav: { id: SectionId; label: string; icon: typeof Home }[] = [
   { id: 'shared', label: 'Shared with me', icon: Users },
   { id: 'recent', label: 'Recent', icon: Clock },
   { id: 'starred', label: 'Starred', icon: Star },
+  { id: 'temp', label: 'Temp', icon: Timer },
   { id: 'spam', label: 'Spam', icon: AlertTriangle },
   { id: 'trash', label: 'Trash', icon: Trash2 },
 ]
