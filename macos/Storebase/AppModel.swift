@@ -1,7 +1,21 @@
 import AppKit
 import Combine
 import Foundation
+import Network
 import SwiftUI
+
+struct TransferItem: Identifiable, Equatable {
+  let id: UUID
+  var name: String
+  var done: Int64
+  var total: Int64
+  var uploading: Bool
+
+  var fraction: Double {
+    guard total > 0 else { return 0 }
+    return min(1, Double(done) / Double(total))
+  }
+}
 
 @MainActor
 final class AppModel: ObservableObject {
@@ -13,9 +27,12 @@ final class AppModel: ObservableObject {
   @Published var pairingError: String?
   @Published var pairCodeDraft = ""
   @Published var nodeURLDraft = ""
+  @Published var onWifi = true
+  @Published var transfers: [TransferItem] = []
 
   private var engine: IngestEngine?
   private var cancellable: AnyCancellable?
+  private let pathMonitor = NWPathMonitor()
 
   var settings: AppSettings {
     get { store.settings }
@@ -35,6 +52,50 @@ final class AppModel: ObservableObject {
     return min(1, Double(usedBytes) / Double(reservedBytes))
   }
 
+  var remainingBytes: Int64 { max(0, reservedBytes - usedBytes) }
+
+  var remainingLabel: String {
+    "\(byteText(remainingBytes)) left"
+  }
+
+  var transferLabel: String {
+    guard let first = transfers.first else { return "" }
+    let pct = Int((first.fraction * 100).rounded())
+    if transfers.count == 1 {
+      return "\(pct)%"
+    }
+    return "\(transfers.count) files"
+  }
+
+  func byteText(_ value: Int64) -> String {
+    let f = ByteCountFormatter()
+    f.countStyle = .file
+    return f.string(fromByteCount: value)
+  }
+
+  func beginTransfer(name: String, total: Int64, uploading: Bool) -> UUID {
+    let id = UUID()
+    transfers.append(TransferItem(id: id, name: name, done: 0, total: total, uploading: uploading))
+    return id
+  }
+
+  func updateTransfer(id: UUID, done: Int64, total: Int64) {
+    guard let index = transfers.firstIndex(where: { $0.id == id }) else { return }
+    transfers[index].done = done
+    if total > 0 { transfers[index].total = total }
+  }
+
+  func endTransfer(id: UUID) {
+    transfers.removeAll { $0.id == id }
+  }
+
+  func client() -> APIClient? {
+    guard paired, let base = URL(string: settings.nodeURL) else { return nil }
+    let client = APIClient(baseURL: base, token: settings.token)
+    client.limitBytesPerSecond = settings.limitBytesPerSecond(onWifi: onWifi)
+    return client
+  }
+
   init() {
     nodeURLDraft = settings.nodeURL
     cancellable = store.objectWillChange.sink { [weak self] _ in
@@ -42,6 +103,14 @@ final class AppModel: ObservableObject {
     }
     Notifier.request()
     AppRuntime.model = self
+    pathMonitor.pathUpdateHandler = { [weak self] path in
+      let wifi = path.usesInterfaceType(.wifi)
+      let wired = path.usesInterfaceType(.wiredEthernet)
+      Task { @MainActor in
+        self?.onWifi = wifi && !wired
+      }
+    }
+    pathMonitor.start(queue: DispatchQueue.main)
     restartEngine()
     Task { await CloudStub.flushPending() }
   }

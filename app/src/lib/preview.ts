@@ -1,6 +1,6 @@
 export type PreviewKind = 'image' | 'video' | 'audio' | 'pdf' | 'markdown' | 'text' | 'sheet' | 'none'
 
-const IMAGE = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico'])
+const IMAGE = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico', 'heic', 'heif', 'avif'])
 const VIDEO = new Set(['mp4', 'm4v', 'webm', 'mov', 'ogv', 'mkv', 'avi', 'mpeg', 'mpg', '3gp'])
 const AUDIO = new Set(['mp3', 'wav', 'aac', 'flac', 'ogg', 'oga', 'm4a'])
 const MARKDOWN = new Set(['md', 'markdown'])

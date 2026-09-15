@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 enum SettingsPane: String, CaseIterable, Identifiable {
-  case general, connection, folders, routing, notifications, storage, advanced
+  case general, connection, folders, routing, notifications, storage, transfer, advanced
   var id: String { rawValue }
   var title: String {
     switch self {
@@ -12,6 +12,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
     case .routing: return "Temp & routing"
     case .notifications: return "Notifications"
     case .storage: return "Storage"
+    case .transfer: return "Transfer"
     case .advanced: return "Advanced"
     }
   }
@@ -50,6 +51,7 @@ struct SettingsRootView: View {
         case .routing: RoutingPane()
         case .notifications: NotificationsPane()
         case .storage: StoragePane()
+        case .transfer: TransferPane()
         case .advanced: AdvancedPane()
         }
       }
@@ -298,6 +300,116 @@ struct StoragePane: View {
     let f = ByteCountFormatter()
     f.countStyle = .file
     return f.string(fromByteCount: value)
+  }
+}
+
+struct TransferPane: View {
+  @EnvironmentObject var model: AppModel
+
+  var body: some View {
+    Form {
+      Section("Speed") {
+        Picker("Cap", selection: speedBind) {
+          ForEach(AppSettings.TransferSpeed.allCases) { mode in
+            Text(mode.title).tag(mode)
+          }
+        }
+        Text(speedHelp)
+          .font(.caption)
+          .foregroundStyle(.secondary)
+        if model.settings.speed == .wifi {
+          capSlider(title: "Wi-Fi cap", kbps: wifiBind)
+        }
+        if model.settings.speed == .custom {
+          capSlider(title: "Cap", kbps: customBind)
+        }
+        LabeledContent("This Mac") {
+          Text(model.onWifi ? "Wi-Fi" : "Ethernet or other")
+        }
+      }
+      Section("Menu bar") {
+        Toggle("Show storage left next to the clock", isOn: storageChip)
+        Toggle("Show a transfer chip while files move", isOn: transferChip)
+        Text("These sit with battery and Wi-Fi. Storage shows what’s left on the node. The transfer chip appears only while a file is moving.")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+      }
+    }
+  }
+
+  private var speedHelp: String {
+    switch model.settings.speed {
+    case .unlimited:
+      return "Use the full link. Fine on Ethernet; can saturate a shared Wi-Fi radio."
+    case .wifi:
+      return "On Wi-Fi, hold to the cap below so calls and browsing still work. Ethernet stays unlimited."
+    case .custom:
+      return "Always hold to this cap, Wi-Fi or not."
+    }
+  }
+
+  private var speedBind: Binding<AppSettings.TransferSpeed> {
+    Binding(
+      get: { model.settings.speed },
+      set: { model.settings.speed = $0 }
+    )
+  }
+
+  private var wifiBind: Binding<Int> {
+    Binding(
+      get: { model.settings.wifiCapKBps },
+      set: { model.settings.wifiCapKBps = $0 }
+    )
+  }
+
+  private var customBind: Binding<Int> {
+    Binding(
+      get: { model.settings.customCapKBps },
+      set: { model.settings.customCapKBps = $0 }
+    )
+  }
+
+  private var storageChip: Binding<Bool> {
+    Binding(
+      get: { model.settings.showsMenuBarStorage },
+      set: { model.settings.showsMenuBarStorage = $0 }
+    )
+  }
+
+  private var transferChip: Binding<Bool> {
+    Binding(
+      get: { model.settings.showsMenuBarTransfers },
+      set: { model.settings.showsMenuBarTransfers = $0 }
+    )
+  }
+
+  @ViewBuilder
+  private func capSlider(title: String, kbps: Binding<Int>) -> some View {
+    VStack(alignment: .leading, spacing: 6) {
+      HStack {
+        Text(title)
+        Spacer()
+        Text(rateLabel(kbps.wrappedValue))
+          .monospacedDigit()
+          .foregroundStyle(.secondary)
+      }
+      Slider(
+        value: Binding(
+          get: { Double(kbps.wrappedValue) },
+          set: { kbps.wrappedValue = Int($0) }
+        ),
+        in: 64 ... 32768,
+        step: 64
+      )
+    }
+  }
+
+  private func rateLabel(_ kbps: Int) -> String {
+    if kbps >= 1024 {
+      let mb = Double(kbps) / 1024
+      return String(format: mb >= 10 ? "%.0f MB/s" : "%.1f MB/s", mb)
+    }
+    return "\(kbps) KB/s"
   }
 }
 

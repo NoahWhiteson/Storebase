@@ -2,6 +2,7 @@ import { StorebaseLogo } from '@/components/StorebaseLogo'
 import { Button } from '@/components/ui/button'
 import { VideoPlayer } from '@/components/VideoPlayer'
 import { delimiterFor, parseCsv, serializeCsv } from '@/lib/csv'
+import { saveOriginalFromUrl } from '@/lib/api'
 import { previewKind, renderMarkdown } from '@/lib/preview'
 import { Download, Eye, Pencil, Plus, Save, X } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
@@ -124,7 +125,7 @@ export function FilePreview({
         ) : null}
         <Button
           className="h-9 rounded-full bg-white px-4 text-[#1a1a1a] hover:bg-[#f2f2f2]"
-          onClick={() => window.open(downloadUrl, '_blank')}
+          onClick={() => void saveOriginalFromUrl(downloadUrl, name)}
         >
           <Download className="size-4" />
           Download
@@ -132,7 +133,16 @@ export function FilePreview({
       </header>
       <div className={kind === 'video' ? 'relative flex min-h-0 flex-1 overflow-hidden bg-black' : 'min-h-0 flex-1 overflow-auto p-4 md:p-8'}>
         {kind === 'image' ? (
-          <img src={url} alt={name} className="mx-auto max-h-full max-w-full object-contain" />
+          <img
+            src={url}
+            alt={name}
+            draggable={false}
+            className="mx-auto max-h-full max-w-full object-contain"
+            onContextMenu={(e) => {
+              e.preventDefault()
+              void saveOriginalFromUrl(downloadUrl, name)
+            }}
+          />
         ) : null}
         {kind === 'video' ? <VideoPlayer src={url} title={name} /> : null}
         {kind === 'audio' ? (
@@ -193,7 +203,7 @@ export function FilePreview({
             <p className="mt-2 max-w-sm text-sm text-[#8d8d8d]">Download it and open it locally.</p>
             <Button
               className="mt-6 h-11 rounded-full bg-white text-[#1a1a1a] hover:bg-[#f2f2f2]"
-              onClick={() => window.open(downloadUrl, '_blank')}
+              onClick={() => void saveOriginalFromUrl(downloadUrl, name)}
             >
               Download
             </Button>

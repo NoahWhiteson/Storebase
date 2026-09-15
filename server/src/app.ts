@@ -176,13 +176,15 @@ function sendFile(
     const stream = createReadStream(file.full, { start: range.start, end: range.end })
     return new Response(Readable.toWeb(stream) as unknown as ReadableStream, {
       status: 206,
-      headers: {
-        'content-type': mime,
-        'content-disposition': disposition,
-        'accept-ranges': 'bytes',
-        'content-range': `bytes ${range.start}-${range.end}/${file.size}`,
-        'content-length': String(range.end - range.start + 1),
-      },
+        headers: {
+          'content-type': mime,
+          'content-disposition': disposition,
+          'accept-ranges': 'bytes',
+          'content-range': `bytes ${range.start}-${range.end}/${file.size}`,
+          'content-length': String(range.end - range.start + 1),
+          'cache-control': 'private, no-transform',
+          'x-content-type-options': 'nosniff',
+        },
     })
   }
   const stream = createReadStream(file.full)
@@ -192,6 +194,8 @@ function sendFile(
       'content-disposition': disposition,
       'accept-ranges': 'bytes',
       'content-length': String(file.size),
+      'cache-control': 'private, no-transform',
+      'x-content-type-options': 'nosniff',
     },
   })
 }

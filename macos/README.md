@@ -16,7 +16,7 @@ chmod +x make-dmg.sh
 
 The script quits any old Storebase process (same bundle id as the first agent build), rebuilds, writes `macos/dist/Storebase.dmg`, and replaces `/Applications/Storebase.app`.
 
-You should see **1.9** under the title and the cube icon. A hard-drive glyph means the old copy is still running — `killall Storebase` then open `/Applications/Storebase.app`. HTTP to a public IP (no domain) is supposed to work — if ATS still complains, you are on an old binary.
+You should see **1.10** under the title and the cube icon. A hard-drive glyph means the old copy is still running — `killall Storebase` then open `/Applications/Storebase.app`. HTTP to a public IP (no domain) is supposed to work — if ATS still complains, you are on an old binary.
 
 - First time in Xcode: open `Storebase.xcodeproj`, pick your Team under Signing, then re-run the script.
 - No Apple Developer team: `UNSIGNED=1 ./make-dmg.sh` then right-click → Open the first launch (Gatekeeper).
@@ -43,4 +43,5 @@ Browsers still drop the file into Downloads first. The app waits until the downl
 - **Temp & routing** — which extensions (and large files) go to Temp vs My files
 - **Notifications** — out of storage, errors, optional per-file
 - **Storage** — quota bar; cloud copies; mirror local deletes onto the node; capture can pause when the node is full
+- **Transfer** — progress while a file moves; menu-bar chips for space left and active transfers (next to battery); speed cap (unlimited, Wi-Fi-aware, or custom so uploads don’t eat the radio)
 - **Advanced** — settle delay, concurrent uploads, skip incomplete `.crdownload` files

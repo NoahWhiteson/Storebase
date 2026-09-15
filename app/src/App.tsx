@@ -36,6 +36,7 @@ import {
   renameFile,
   restoreFile,
   saveContent,
+  saveOriginal,
   setTempTtl,
   starFile,
   toDriveItem,
@@ -875,15 +876,11 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
                 }}
                 onRemoveShare={(id) => void removeShare(id)}
                 onDownload={(batch) => {
-                  for (const item of batch) {
-                    const link = document.createElement('a')
-                    link.href = downloadUrl(item.id)
-                    link.download = item.name
-                    link.rel = 'noreferrer'
-                    document.body.appendChild(link)
-                    link.click()
-                    link.remove()
-                  }
+                  void (async () => {
+                    for (const item of batch) {
+                      await saveOriginal(item.id, item.name)
+                    }
+                  })()
                 }}
                 onUnzip={(ids) => void unzip(ids)}
                 onMove={(paths, dest) => void moveTo(paths, dest)}

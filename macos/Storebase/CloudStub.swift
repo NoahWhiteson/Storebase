@@ -171,6 +171,8 @@ enum CloudStub {
     }
     let size = info?.size ?? 0
     let client = APIClient(baseURL: base, token: model.settings.token)
+    client.limitBytesPerSecond = model.settings.limitBytesPerSecond(onWifi: model.onWifi)
+    let transferId = model.beginTransfer(name: url.lastPathComponent, total: size, uploading: false)
     do {
       try FileManager.default.createDirectory(at: cacheRoot(), withIntermediateDirectories: true)
       let dir = cacheRoot().appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -178,7 +180,10 @@ enum CloudStub {
       let cache = dir.appendingPathComponent(
         cacheName(url, info: info ?? Meta(path: remote, size: size, state: "evicted", name: url.lastPathComponent), remote: remote)
       )
-      try await client.download(path: remote, to: cache)
+      try await client.download(path: remote, to: cache) { done, total in
+        Task { @MainActor in AppRuntime.model?.updateTransfer(id: transferId, done: done, total: total) }
+      }
+      model.endTransfer(id: transferId)
       let values = try? cache.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
       openInDefaultApp(cache)
       gate.sync {
@@ -195,6 +200,7 @@ enum CloudStub {
         )
       }
     } catch {
+      model.endTransfer(id: transferId)
       Notifier.send(title: "Couldn’t open from Storebase", body: "\(displayName(url, remote: remote)): \(error.localizedDescription)")
     }
   }
@@ -262,7 +268,23 @@ enum CloudStub {
     if dirty {
       let dest = parentPath(session.remote)
       do {
-        _ = try await client.upload(fileURL: session.cache, destDir: dest)
+        let wifi = await MainActor.run { AppRuntime.model?.onWifi ?? true }
+        client.limitBytesPerSecond = await MainActor.run {
+          AppRuntime.model?.settings.limitBytesPerSecond(onWifi: wifi) ?? 0
+        }
+        let transferId = await MainActor.run {
+          AppRuntime.model?.beginTransfer(name: session.stub.lastPathComponent, total: size, uploading: true)
+        }
+        defer {
+          if let transferId {
+            Task { @MainActor in AppRuntime.model?.endTransfer(id: transferId) }
+          }
+        }
+        _ = try await client.upload(fileURL: session.cache, destDir: dest) { done, total in
+          if let transferId {
+            Task { @MainActor in AppRuntime.model?.updateTransfer(id: transferId, done: done, total: total) }
+          }
+        }
       } catch {
         Notifier.send(title: "Couldn’t save back to Storebase", body: session.stub.lastPathComponent)
         return

@@ -74,15 +74,70 @@ struct AppSettings: Codable, Equatable {
   var cloudPlaceholders: Bool? = true
   var mirrorDeletes: Bool? = true
   var lastFingerprint: [String] = []
+  var transferMode: String? = nil
+  var wifiKBps: Int? = nil
+  var customKBps: Int? = nil
+  var menuBarStorage: Bool? = nil
+  var menuBarTransfers: Bool? = nil
 
   enum Destination: String, Codable, CaseIterable {
     case myFiles
     case temp
   }
 
+  enum TransferSpeed: String, CaseIterable, Identifiable {
+    case unlimited
+    case wifi
+    case custom
+    var id: String { rawValue }
+    var title: String {
+      switch self {
+      case .unlimited: return "Unlimited"
+      case .wifi: return "Match Wi-Fi"
+      case .custom: return "Custom cap"
+      }
+    }
+  }
+
   var usesPlaceholders: Bool { cloudPlaceholders ?? true }
 
   var usesMirrorDeletes: Bool { mirrorDeletes ?? true }
+
+  var speed: TransferSpeed {
+    get { TransferSpeed(rawValue: transferMode ?? TransferSpeed.wifi.rawValue) ?? .wifi }
+    set { transferMode = newValue.rawValue }
+  }
+
+  var wifiCapKBps: Int {
+    get { max(64, wifiKBps ?? 4096) }
+    set { wifiKBps = max(64, newValue) }
+  }
+
+  var customCapKBps: Int {
+    get { max(64, customKBps ?? 8192) }
+    set { customKBps = max(64, newValue) }
+  }
+
+  var showsMenuBarStorage: Bool {
+    get { menuBarStorage ?? true }
+    set { menuBarStorage = newValue }
+  }
+
+  var showsMenuBarTransfers: Bool {
+    get { menuBarTransfers ?? true }
+    set { menuBarTransfers = newValue }
+  }
+
+  func limitBytesPerSecond(onWifi: Bool) -> Int {
+    switch speed {
+    case .unlimited:
+      return 0
+    case .wifi:
+      return onWifi ? wifiCapKBps * 1024 : 0
+    case .custom:
+      return customCapKBps * 1024
+    }
+  }
 
   func tempExtSet() -> Set<String> {
     Self.splitExt(tempExtensions)

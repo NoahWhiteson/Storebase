@@ -66,7 +66,7 @@ export type Me = {
 
 function kindFromName(name: string): FileKind {
   const ext = name.split('.').pop()?.toLowerCase() ?? ''
-  if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'].includes(ext)) return 'image'
+  if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico', 'heic', 'heif', 'avif'].includes(ext)) return 'image'
   if (['mp4', 'm4v', 'webm', 'mov', 'ogv', 'mkv', 'avi', 'mpeg', 'mpg', '3gp'].includes(ext)) return 'video'
   if (['mp3', 'wav', 'aac', 'ogg', 'oga', 'flac', 'm4a'].includes(ext)) return 'audio'
   if (['xls', 'xlsx', 'csv'].includes(ext)) return 'sheet'
@@ -318,6 +318,24 @@ export async function keepFromTemp(path: string): Promise<FileEntry> {
 
 export function publicLinkUrl(token: string): string {
   return `${window.location.origin}/s/${token}`
+}
+
+export async function saveOriginal(path: string, name: string): Promise<void> {
+  await saveOriginalFromUrl(downloadUrl(path), name)
+}
+
+export async function saveOriginalFromUrl(url: string, name: string): Promise<void> {
+  const res = await fetch(url, { credentials: 'include' })
+  if (!res.ok) throw new Error('Could not download')
+  const blob = await res.blob()
+  const href = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = href
+  a.download = name
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  window.setTimeout(() => URL.revokeObjectURL(href), 2000)
 }
 
 export function downloadUrl(path: string): string {

@@ -29,7 +29,7 @@ struct MainWindow: View {
       VStack(alignment: .leading, spacing: 2) {
         Text("Storebase")
           .font(.system(size: 16, weight: .semibold))
-		Text(model.paired ? statusTitle : "1.9 — paste your pairing code")
+		Text(model.paired ? statusTitle : "1.10 — paste your pairing code")
           .font(.system(size: 12))
           .foregroundStyle(.secondary)
       }
@@ -118,6 +118,8 @@ struct MainWindow: View {
         .font(.system(size: 12))
         .foregroundStyle(.secondary)
         .lineLimit(3)
+
+      TransferList()
 
       Divider().overlay(Color.white.opacity(0.12))
 

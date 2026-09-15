@@ -51,6 +51,8 @@ struct MenuBarView: View {
         .foregroundStyle(.secondary)
         .lineLimit(2)
 
+      TransferList()
+
       Divider().overlay(Color.white.opacity(0.12))
 
       Button("Settings") { model.openSettings() }
@@ -86,6 +88,43 @@ struct MenuBarView: View {
     let f = ByteCountFormatter()
     f.countStyle = .file
     return f.string(fromByteCount: value)
+  }
+}
+
+struct TransferList: View {
+  @EnvironmentObject var model: AppModel
+
+  var body: some View {
+    if model.transfers.isEmpty {
+      EmptyView()
+    } else {
+      VStack(alignment: .leading, spacing: 10) {
+        ForEach(model.transfers) { item in
+          VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+              Text(item.uploading ? "Uploading" : "Downloading")
+                .foregroundStyle(.secondary)
+              Text(item.name)
+                .lineLimit(1)
+              Spacer()
+              Text("\(Int((item.fraction * 100).rounded()))%")
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+            }
+            .font(.system(size: 11))
+            GeometryReader { geo in
+              ZStack(alignment: .leading) {
+                Capsule().fill(Color.white.opacity(0.12))
+                Capsule()
+                  .fill(Color.white)
+                  .frame(width: geo.size.width * item.fraction)
+              }
+            }
+            .frame(height: 4)
+          }
+        }
+      }
+    }
   }
 }
 

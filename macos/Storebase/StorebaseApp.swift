@@ -30,6 +30,38 @@ struct StorebaseApp: App {
       Image("MenuBarIcon")
     }
     .menuBarExtraStyle(.window)
+
+    MenuBarExtra(isInserted: storageChip) {
+      MenuBarView()
+        .environmentObject(model)
+    } label: {
+      Text(model.remainingLabel)
+        .monospacedDigit()
+    }
+    .menuBarExtraStyle(.menu)
+
+    MenuBarExtra(isInserted: transferChip) {
+      MenuBarView()
+        .environmentObject(model)
+    } label: {
+      Text(model.transferLabel)
+        .monospacedDigit()
+    }
+    .menuBarExtraStyle(.menu)
+  }
+
+  private var storageChip: Binding<Bool> {
+    Binding(
+      get: { model.paired && model.settings.showsMenuBarStorage },
+      set: { model.settings.showsMenuBarStorage = $0 }
+    )
+  }
+
+  private var transferChip: Binding<Bool> {
+    Binding(
+      get: { model.paired && model.settings.showsMenuBarTransfers && !model.transfers.isEmpty },
+      set: { model.settings.showsMenuBarTransfers = $0 }
+    )
   }
 }
 

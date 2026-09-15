@@ -36,6 +36,7 @@ struct APIError: LocalizedError {
 final class APIClient: @unchecked Sendable {
   var baseURL: URL
   var token: String
+  var limitBytesPerSecond = 0
 
   init(baseURL: URL, token: String) {
     self.baseURL = baseURL
@@ -71,17 +72,22 @@ final class APIClient: @unchecked Sendable {
   }
 
   @discardableResult
-  func upload(fileURL: URL, destDir: String) async throws -> String {
+  func upload(fileURL: URL, destDir: String, onProgress: ((Int64, Int64) -> Void)? = nil) async throws -> String {
     var comps = URLComponents(url: baseURL.appendingPathComponent("api/files/upload"), resolvingAgainstBaseURL: false)!
     comps.queryItems = [URLQueryItem(name: "path", value: destDir)]
     var request = URLRequest(url: comps.url!)
     request.httpMethod = "POST"
-    request.timeoutInterval = 60 * 30
+    request.timeoutInterval = 60 * 60
     request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
     let boundary = "sb-\(UUID().uuidString)"
     request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
-    request.httpBody = try Self.multipart(fileURL: fileURL, boundary: boundary)
-    let (data, response) = try await NodeHTTP.data(for: request)
+    let (data, response) = try await NodeHTTP.upload(
+      request: request,
+      fileURL: fileURL,
+      boundary: boundary,
+      limitBps: limitBytesPerSecond,
+      onProgress: onProgress
+    )
     try Self.throwIfNeeded(data: data, response: response)
     struct Body: Decodable {
       struct Item: Decodable { let path: String }
@@ -102,13 +108,18 @@ final class APIClient: @unchecked Sendable {
     return Set(try JSONDecoder().decode(Body.self, from: data).paths)
   }
 
-  func download(path: String, to dest: URL) async throws {
+  func download(path: String, to dest: URL, onProgress: ((Int64, Int64) -> Void)? = nil) async throws {
     var comps = URLComponents(url: baseURL.appendingPathComponent("api/files/download"), resolvingAgainstBaseURL: false)!
     comps.queryItems = [URLQueryItem(name: "path", value: path)]
     var request = URLRequest(url: comps.url!)
-    request.timeoutInterval = 60 * 30
+    request.timeoutInterval = 60 * 60
     request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-    let (data, response) = try await NodeHTTP.data(for: request)
+    let (data, response) = try await NodeHTTP.download(
+      request: request,
+      to: dest,
+      limitBps: limitBytesPerSecond,
+      onProgress: onProgress
+    )
     try Self.throwIfNeeded(data: data, response: response)
     if let http = response as? HTTPURLResponse {
       let type = http.value(forHTTPHeaderField: "Content-Type") ?? ""
@@ -116,16 +127,9 @@ final class APIClient: @unchecked Sendable {
         throw APIError(status: http.statusCode, message: "Node sent an error instead of the file", code: nil)
       }
     }
-    if data.isEmpty {
+    if data.isEmpty, (try? dest.resourceValues(forKeys: [.fileSizeKey]).fileSize) == 0 {
       throw APIError(status: 0, message: "Empty download", code: nil)
     }
-    if Self.looksLikeJSONError(data), !path.lowercased().hasSuffix(".json") {
-      throw APIError(status: 0, message: "Node sent an error instead of the file", code: nil)
-    }
-    if FileManager.default.fileExists(atPath: dest.path) {
-      try FileManager.default.removeItem(at: dest)
-    }
-    try data.write(to: dest, options: .atomic)
   }
 
   private func postJSON(_ path: String, body: [String: Any]) async throws {
@@ -151,11 +155,6 @@ final class APIClient: @unchecked Sendable {
     return request
   }
 
-  private static func looksLikeJSONError(_ data: Data) -> Bool {
-    guard data.count < 2048, data.first == UInt8(ascii: "{") else { return false }
-    return String(data: data, encoding: .utf8)?.contains("\"error\"") == true
-  }
-
   fileprivate static func throwIfNeeded(data: Data, response: URLResponse) throws {
     guard let http = response as? HTTPURLResponse else {
       throw APIError(status: 0, message: "No response", code: nil)
@@ -169,18 +168,6 @@ final class APIClient: @unchecked Sendable {
       code: parsed?.code
     )
   }
-
-  private static func multipart(fileURL: URL, boundary: String) throws -> Data {
-    var data = Data()
-    let name = fileURL.lastPathComponent
-    let file = try Data(contentsOf: fileURL)
-    data.append("--\(boundary)\r\n".data(using: .utf8)!)
-    data.append("Content-Disposition: form-data; name=\"file\"; filename=\"\(name)\"\r\n".data(using: .utf8)!)
-    data.append("Content-Type: application/octet-stream\r\n\r\n".data(using: .utf8)!)
-    data.append(file)
-    data.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
-    return data
-  }
 }
 
 enum NodeHTTP {
@@ -190,6 +177,44 @@ enum NodeHTTP {
     }
     let timeout = request.timeoutInterval > 0 ? request.timeoutInterval : 20
     return try await NodeCall(request: request, url: url, host: host).run(timeout: timeout)
+  }
+
+  static func upload(
+    request: URLRequest,
+    fileURL: URL,
+    boundary: String,
+    limitBps: Int,
+    onProgress: ((Int64, Int64) -> Void)?
+  ) async throws -> (Data, URLResponse) {
+    guard let url = request.url, let host = url.host, !host.isEmpty else {
+      throw APIError(status: 0, message: "Bad node URL", code: nil)
+    }
+    let timeout = request.timeoutInterval > 0 ? request.timeoutInterval : 60 * 60
+    return try await NodeCall(request: request, url: url, host: host).uploadFile(
+      fileURL,
+      boundary: boundary,
+      limitBps: limitBps,
+      timeout: timeout,
+      onProgress: onProgress
+    )
+  }
+
+  static func download(
+    request: URLRequest,
+    to dest: URL,
+    limitBps: Int,
+    onProgress: ((Int64, Int64) -> Void)?
+  ) async throws -> (Data, URLResponse) {
+    guard let url = request.url, let host = url.host, !host.isEmpty else {
+      throw APIError(status: 0, message: "Bad node URL", code: nil)
+    }
+    let timeout = request.timeoutInterval > 0 ? request.timeoutInterval : 60 * 60
+    return try await NodeCall(request: request, url: url, host: host).downloadFile(
+      to: dest,
+      limitBps: limitBps,
+      timeout: timeout,
+      onProgress: onProgress
+    )
   }
 }
 
@@ -252,6 +277,266 @@ private final class NodeCall: @unchecked Sendable {
     }
     connection.start(queue: queue)
   }
+
+  func uploadFile(
+    _ fileURL: URL,
+    boundary: String,
+    limitBps: Int,
+    timeout: TimeInterval,
+    onProgress: ((Int64, Int64) -> Void)?
+  ) async throws -> (Data, URLResponse) {
+    try await open(timeout: timeout)
+    defer { closeStream() }
+    let name = fileURL.lastPathComponent.replacingOccurrences(of: "\"", with: "")
+    let prefix = Data(
+      "--\(boundary)\r\nContent-Disposition: form-data; name=\"file\"; filename=\"\(name)\"\r\nContent-Type: application/octet-stream\r\n\r\n".utf8
+    )
+    let suffix = Data("\r\n--\(boundary)--\r\n".utf8)
+    let total = Int64((try FileManager.default.attributesOfItem(atPath: fileURL.path)[.size] as? NSNumber)?.int64Value ?? 0)
+    let length = prefix.count + Int(total) + suffix.count
+    try await sendChunk(headerData(contentLength: length) + prefix, complete: false)
+    let handle = try FileHandle(forReadingFrom: fileURL)
+    defer { try? handle.close() }
+    var sent: Int64 = 0
+    let pacer = Pacer(bps: limitBps)
+    onProgress?(0, total)
+    while true {
+      let chunk = handle.readData(ofLength: 32 * 1024)
+      if chunk.isEmpty { break }
+      pacer.add(chunk.count)
+      try await sendChunk(chunk, complete: false)
+      sent += Int64(chunk.count)
+      onProgress?(sent, total)
+    }
+    try await sendChunk(suffix, complete: true)
+    let raw = try await readCompleteMessage()
+    return try parseHTTP(raw, url: url)
+  }
+
+  func downloadFile(
+    to dest: URL,
+    limitBps: Int,
+    timeout: TimeInterval,
+    onProgress: ((Int64, Int64) -> Void)?
+  ) async throws -> (Data, URLResponse) {
+    try await open(timeout: timeout)
+    defer { closeStream() }
+    try await sendChunk(headerData(contentLength: 0), complete: true)
+    let (head, firstBody) = try await readHeaders()
+    let parsedHead = try parseHTTPHead(head, url: url)
+    let headers = parsedHead.headers
+    let status = parsedHead.status
+    let response = parsedHead.response
+    if !(200 ..< 300).contains(status) {
+      var rest = firstBody
+      rest.append(try await readRemaining(after: rest, headers: headers))
+      if let len = Int(headers["content-length"] ?? ""), rest.count > len {
+        rest = Data(rest.prefix(len))
+      }
+      return (rest, response)
+    }
+    let type = headers["content-type"] ?? ""
+    if type.contains("json") {
+      var rest = firstBody
+      rest.append(try await readRemaining(after: rest, headers: headers))
+      return (rest, response)
+    }
+    let expected = Int64(headers["content-length"] ?? "") ?? -1
+    let tmp = dest.appendingPathExtension("part")
+    if FileManager.default.fileExists(atPath: tmp.path) {
+      try FileManager.default.removeItem(at: tmp)
+    }
+    FileManager.default.createFile(atPath: tmp.path, contents: nil)
+    let out = try FileHandle(forWritingTo: tmp)
+    defer { try? out.close() }
+    var written = firstBody
+    let pacer = Pacer(bps: limitBps)
+    if !firstBody.isEmpty {
+      pacer.add(firstBody.count)
+      try out.write(contentsOf: firstBody)
+    }
+    onProgress?(Int64(written.count), expected > 0 ? expected : Int64(written.count))
+    while expected < 0 || written.count < expected {
+      let (chunk, eof) = try await receiveOnce()
+      if !chunk.isEmpty {
+        pacer.add(chunk.count)
+        try out.write(contentsOf: chunk)
+        written.append(chunk)
+        let total = expected > 0 ? expected : Int64(written.count)
+        onProgress?(Int64(written.count), total)
+      }
+      if eof { break }
+      if expected >= 0, written.count >= expected { break }
+    }
+    if expected >= 0, written.count > expected {
+      try out.truncate(atOffset: UInt64(expected))
+    }
+    try? out.close()
+    if FileManager.default.fileExists(atPath: dest.path) {
+      try FileManager.default.removeItem(at: dest)
+    }
+    try FileManager.default.moveItem(at: tmp, to: dest)
+    return (Data(), response)
+  }
+
+  private func open(timeout: TimeInterval) async throws {
+    try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
+      queue.async {
+        self.readyCont = cont
+        let item = DispatchWorkItem { [weak self] in
+          self?.failReady(APIError(status: 0, message: "Timed out talking to the node", code: nil))
+        }
+        self.timeoutItem = item
+        self.queue.asyncAfter(deadline: .now() + timeout, execute: item)
+        self.startReady()
+      }
+    }
+  }
+
+  private func startReady() {
+    let useTLS = url.scheme?.lowercased() == "https"
+    let portValue = url.port ?? (useTLS ? 443 : 80)
+    guard let port = NWEndpoint.Port(rawValue: UInt16(truncatingIfNeeded: portValue)) else {
+      failReady(APIError(status: 0, message: "Bad port", code: nil))
+      return
+    }
+    let params: NWParameters = useTLS ? NWParameters(tls: NWProtocolTLS.Options()) : .tcp
+    let connection = NWConnection(host: NWEndpoint.Host(host), port: port, using: params)
+    self.connection = connection
+    connection.stateUpdateHandler = { [self] state in
+      switch state {
+      case .ready:
+        self.timeoutItem?.cancel()
+        self.timeoutItem = nil
+        if let readyCont {
+          self.readyCont = nil
+          readyCont.resume()
+        } else {
+          self.sendRequest()
+        }
+      case .failed(let error):
+        self.failReady(mapNWError(error))
+        self.fail(mapNWError(error))
+      default:
+        break
+      }
+    }
+    connection.start(queue: queue)
+  }
+
+  private func sendChunk(_ data: Data, complete: Bool) async throws {
+    try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
+      queue.async {
+        guard let connection = self.connection else {
+          cont.resume(throwing: APIError(status: 0, message: "Connection dropped", code: nil))
+          return
+        }
+        connection.send(
+          content: data.isEmpty ? nil : data,
+          contentContext: .defaultMessage,
+          isComplete: complete,
+          completion: .contentProcessed { error in
+            if let error {
+              cont.resume(throwing: mapNWError(error))
+            } else {
+              cont.resume()
+            }
+          }
+        )
+      }
+    }
+  }
+
+  private func receiveOnce() async throws -> (Data, Bool) {
+    try await withCheckedThrowingContinuation { (cont: CheckedContinuation<(Data, Bool), Error>) in
+      self.queue.async {
+        guard let connection = self.connection else {
+          cont.resume(throwing: APIError(status: 0, message: "Connection dropped", code: nil))
+          return
+        }
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 256 * 1024) { data, _, isComplete, error in
+          if let error {
+            cont.resume(throwing: mapNWError(error))
+            return
+          }
+          cont.resume(returning: (data ?? Data(), isComplete))
+        }
+      }
+    }
+  }
+
+  private func readHeaders() async throws -> (Data, Data) {
+    var buf = Data()
+    let sep = Data("\r\n\r\n".utf8)
+    while true {
+      let (chunk, eof) = try await receiveOnce()
+      buf.append(chunk)
+      if let range = buf.range(of: sep) {
+        let head = buf.subdata(in: buf.startIndex ..< range.lowerBound)
+        let body = buf.subdata(in: range.upperBound ..< buf.endIndex)
+        return (head, body)
+      }
+      if eof {
+        throw APIError(status: 0, message: "Empty response from node", code: nil)
+      }
+    }
+  }
+
+  private func readCompleteMessage() async throws -> Data {
+    var buf = Data()
+    while true {
+      let (chunk, eof) = try await receiveOnce()
+      buf.append(chunk)
+      if let message = httpMessageIfComplete(buf, eof: eof) {
+        return message
+      }
+      if eof {
+        throw APIError(status: 0, message: "Node closed the connection before answering", code: nil)
+      }
+    }
+  }
+
+  private func readRemaining(after existing: Data, headers: [String: String]) async throws -> Data {
+    if let rawLen = headers["content-length"], let len = Int(rawLen) {
+      var buf = Data()
+      while existing.count + buf.count < len {
+        let (chunk, eof) = try await receiveOnce()
+        buf.append(chunk)
+        if eof { break }
+      }
+      return buf
+    }
+    var buf = Data()
+    while true {
+      let (chunk, eof) = try await receiveOnce()
+      buf.append(chunk)
+      if eof { break }
+    }
+    return buf
+  }
+
+  private func headerData(contentLength: Int) -> Data {
+    encodeHeaders(request, url: url, host: host, contentLength: contentLength)
+  }
+
+  private func closeStream() {
+    timeoutItem?.cancel()
+    timeoutItem = nil
+    connection?.stateUpdateHandler = nil
+    connection?.cancel()
+    connection = nil
+  }
+
+  private func failReady(_ error: Error) {
+    timeoutItem?.cancel()
+    timeoutItem = nil
+    if let readyCont {
+      self.readyCont = nil
+      readyCont.resume(throwing: error)
+    }
+  }
+
+  private var readyCont: CheckedContinuation<Void, Error>?
 
   private func sendRequest() {
     guard let connection else { return }
@@ -339,6 +624,86 @@ private func encodeRequest(_ request: URLRequest, url: URL, host: String) -> Dat
   var data = Data((lines.joined(separator: "\r\n") + "\r\n\r\n").utf8)
   data.append(body)
   return data
+}
+
+private func encodeHeaders(_ request: URLRequest, url: URL, host: String, contentLength: Int) -> Data {
+  let method = request.httpMethod ?? "GET"
+  var path = url.path.isEmpty ? "/" : url.path
+  if let query = url.query, !query.isEmpty { path += "?\(query)" }
+  let useTLS = url.scheme?.lowercased() == "https"
+  let port = url.port ?? (useTLS ? 443 : 80)
+  let defaultPort = useTLS ? 443 : 80
+  let hostHeader = port == defaultPort ? host : "\(host):\(port)"
+  var lines = [
+    "\(method) \(path) HTTP/1.1",
+    "Host: \(hostHeader)",
+    "Accept: */*",
+    "Connection: close",
+  ]
+  if let headers = request.allHTTPHeaderFields {
+    for (key, value) in headers {
+      if key.caseInsensitiveCompare("Host") == .orderedSame { continue }
+      if key.caseInsensitiveCompare("Content-Length") == .orderedSame { continue }
+      if key.caseInsensitiveCompare("Connection") == .orderedSame { continue }
+      lines.append("\(key): \(value)")
+    }
+  }
+  if contentLength > 0 || !["GET", "HEAD"].contains((request.httpMethod ?? "GET").uppercased()) {
+    lines.append("Content-Length: \(contentLength)")
+  }
+  return Data((lines.joined(separator: "\r\n") + "\r\n\r\n").utf8)
+}
+
+private struct ParsedHead {
+  var status: Int
+  var headers: [String: String]
+  var response: HTTPURLResponse
+}
+
+private func parseHTTPHead(_ head: Data, url: URL) throws -> ParsedHead {
+  guard let headText = String(data: head, encoding: .isoLatin1) else {
+    throw APIError(status: 0, message: "Garbled response from node", code: nil)
+  }
+  let lines = headText.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+  guard let statusLine = lines.first else {
+    throw APIError(status: 0, message: "Empty response from node", code: nil)
+  }
+  let statusParts = statusLine.split(separator: " ")
+  guard statusParts.count >= 2, let code = Int(statusParts[1]) else {
+    throw APIError(status: 0, message: "Bad HTTP status from node", code: nil)
+  }
+  let headers = headerMap(headText)
+  guard let response = HTTPURLResponse(url: url, statusCode: code, httpVersion: "HTTP/1.1", headerFields: headers) else {
+    throw APIError(status: 0, message: "Bad HTTP status from node", code: nil)
+  }
+  return ParsedHead(status: code, headers: headers, response: response)
+}
+
+private final class Pacer {
+  let bps: Int
+  private var start = DispatchTime.now()
+  private var bytes = 0
+
+  init(bps: Int) {
+    self.bps = bps
+  }
+
+  func add(_ n: Int) {
+    guard bps > 0, n > 0 else { return }
+    bytes += n
+    let elapsed = Double(DispatchTime.now().uptimeNanoseconds - start.uptimeNanoseconds) / 1_000_000_000
+    let allowed = Double(bps) * max(elapsed, 0.001)
+    if Double(bytes) > allowed {
+      let wait = (Double(bytes) / Double(bps)) - elapsed
+      if wait > 0.004 {
+        Thread.sleep(forTimeInterval: min(wait, 2))
+      }
+    }
+    if elapsed > 2 {
+      start = DispatchTime.now()
+      bytes = 0
+    }
+  }
 }
 
 private func httpMessageIfComplete(_ data: Data, eof: Bool) -> Data? {

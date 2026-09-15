@@ -117,12 +117,26 @@ final class IngestEngine: @unchecked Sendable {
     let dest = destination(for: url, size: size, settings: settings)
     Task {
       defer { Task { @MainActor in self.inflight -= 1 } }
+      let transferId = await MainActor.run {
+        AppRuntime.model?.beginTransfer(name: name, total: size, uploading: true)
+      }
+      defer {
+        if let transferId {
+          Task { @MainActor in AppRuntime.model?.endTransfer(id: transferId) }
+        }
+      }
       do {
         let client = APIClient(baseURL: base, token: settings.token)
+        let wifi = await MainActor.run { AppRuntime.model?.onWifi ?? true }
+        client.limitBytesPerSecond = settings.limitBytesPerSecond(onWifi: wifi)
         if dest != ".temp", !settings.destFolder.isEmpty {
           try? await client.mkdir(settings.destFolder)
         }
-        let remote = try await client.upload(fileURL: url, destDir: dest)
+        let remote = try await client.upload(fileURL: url, destDir: dest) { done, total in
+          if let transferId {
+            Task { @MainActor in AppRuntime.model?.updateTransfer(id: transferId, done: done, total: total) }
+          }
+        }
         await MainActor.run {
           self.onStatus?("Captured \(name)")
           if settings.notifyUploads {
