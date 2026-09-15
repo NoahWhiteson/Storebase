@@ -1,3 +1,4 @@
+import { createReadStream } from 'node:fs'
 import { hostname } from 'node:os'
 import { Readable } from 'node:stream'
 import { Hono } from 'hono'
@@ -100,14 +101,63 @@ function publicPath(path: string): boolean {
   )
 }
 
+function parseRange(header: string | undefined, size: number): { start: number; end: number } | null {
+  if (!header) return null
+  const match = header.match(/^bytes=(\d*)-(\d*)$/i)
+  if (!match) return null
+  const [, startRaw, endRaw] = match
+  let start: number
+  let end: number
+  if (startRaw === '') {
+    const suffix = Number(endRaw)
+    if (!Number.isFinite(suffix) || suffix <= 0) return null
+    start = Math.max(0, size - suffix)
+    end = size - 1
+  } else {
+    start = Number(startRaw)
+    end = endRaw === '' ? size - 1 : Number(endRaw)
+  }
+  if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || start >= size || end < start) return null
+  return { start, end: Math.min(end, size - 1) }
+}
+
 function sendFile(
-  file: { name: string; size: number; stream: import('node:fs').ReadStream },
+  file: { name: string; size: number; full: string },
   inline: boolean,
+  rangeHeader?: string | null,
 ) {
-  return new Response(Readable.toWeb(file.stream) as unknown as ReadableStream, {
+  const mime = mimeFor(file.name)
+  const disposition = `${inline ? 'inline' : 'attachment'}; filename="${file.name.replaceAll('"', '')}"`
+  if (rangeHeader) {
+    const range = parseRange(rangeHeader, file.size)
+    if (!range) {
+      return new Response(null, {
+        status: 416,
+        headers: {
+          'content-type': mime,
+          'accept-ranges': 'bytes',
+          'content-range': `bytes */${file.size}`,
+        },
+      })
+    }
+    const stream = createReadStream(file.full, { start: range.start, end: range.end })
+    return new Response(Readable.toWeb(stream) as unknown as ReadableStream, {
+      status: 206,
+      headers: {
+        'content-type': mime,
+        'content-disposition': disposition,
+        'accept-ranges': 'bytes',
+        'content-range': `bytes ${range.start}-${range.end}/${file.size}`,
+        'content-length': String(range.end - range.start + 1),
+      },
+    })
+  }
+  const stream = createReadStream(file.full)
+  return new Response(Readable.toWeb(stream) as unknown as ReadableStream, {
     headers: {
-      'content-type': mimeFor(file.name),
-      'content-disposition': `${inline ? 'inline' : 'attachment'}; filename="${file.name.replaceAll('"', '')}"`,
+      'content-type': mime,
+      'content-disposition': disposition,
+      'accept-ranges': 'bytes',
       'content-length': String(file.size),
     },
   })
@@ -205,7 +255,7 @@ export function createApp(config: ServerConfig) {
   app.get('/api/public/:token/raw', async (c) => {
     try {
       const file = await openPublicFile(config, c.req.param('token'), c.req.query('path') ?? '')
-      return sendFile(file, true)
+      return sendFile(file, true, c.req.header('range'))
     } catch (err) {
       if (err instanceof LinkError) return c.json({ error: err.message }, err.status)
       throw err
@@ -215,7 +265,7 @@ export function createApp(config: ServerConfig) {
   app.get('/api/public/:token/download', async (c) => {
     try {
       const file = await openPublicFile(config, c.req.param('token'), c.req.query('path') ?? '')
-      return sendFile(file, false)
+      return sendFile(file, false, c.req.header('range'))
     } catch (err) {
       if (err instanceof LinkError) return c.json({ error: err.message }, err.status)
       throw err
@@ -638,7 +688,7 @@ export function createApp(config: ServerConfig) {
       return file
     }
     try {
-      return sendFile(await openOwned(), inline)
+      return sendFile(await openOwned(), inline, c.req.header('range'))
     } catch (err) {
       if (err instanceof ShareError) return c.json({ error: err.message }, err.status)
       throw err
@@ -650,14 +700,15 @@ export function createApp(config: ServerConfig) {
     const root = c.get('root')
     const shareId = c.req.query('share')
     const path = c.req.query('path') ?? ''
+    const range = c.req.header('range')
     try {
       if (shareId) {
-        return sendFile(await openSharedDownload(config, user, shareId, path), true)
+        return sendFile(await openSharedDownload(config, user, shareId, path), true, range)
       }
       if (!path) return c.json({ error: 'path required' }, 400)
       const parsed = parseSharePath(path)
-      if (parsed) return sendFile(await openSharedDownload(config, user, parsed.shareId, parsed.sub), true)
-      return sendFile(await openDownload(root, path), true)
+      if (parsed) return sendFile(await openSharedDownload(config, user, parsed.shareId, parsed.sub), true, range)
+      return sendFile(await openDownload(root, path), true, range)
     } catch (err) {
       if (err instanceof ShareError) return c.json({ error: err.message }, err.status)
       throw err

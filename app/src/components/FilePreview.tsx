@@ -134,7 +134,18 @@ export function FilePreview({
           <img src={url} alt={name} className="mx-auto max-h-full max-w-full object-contain" />
         ) : null}
         {kind === 'video' ? (
-          <video src={url} controls className="mx-auto max-h-full max-w-full" />
+          <div className="flex h-full min-h-0 items-center justify-center">
+            <video
+              key={url}
+              src={url}
+              controls
+              playsInline
+              preload="metadata"
+              className="max-h-full w-full max-w-5xl bg-black"
+            >
+              This browser can’t play this video. Download it instead.
+            </video>
+          </div>
         ) : null}
         {kind === 'audio' ? (
           <div className="flex h-full items-center justify-center">

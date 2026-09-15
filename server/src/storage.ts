@@ -1,4 +1,3 @@
-import { createReadStream } from 'node:fs'
 import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname, join, relative, resolve, sep } from 'node:path'
 import { assertWriteFits, folderSize } from './quota.ts'
@@ -310,7 +309,7 @@ export async function openDownload(root: string, relPath: string) {
   return {
     name: basename(full),
     size: info.size,
-    stream: createReadStream(full),
+    full,
   }
 }
 

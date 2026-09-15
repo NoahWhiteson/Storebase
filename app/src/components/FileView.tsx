@@ -140,67 +140,82 @@ export function FileView(props: FileViewProps) {
     canMove: props.canMove,
   }
 
-  return (
-    <ContextMenu>
-      <ContextMenuTrigger asChild>
-        <div className="min-h-[320px]">
-          {empty ? (
+  const blankMenu = (
+    <ContextMenuContent className="w-56">
+      {props.canCreate ? (
+        <>
+          <ContextMenuItem onSelect={props.onNewFolder}>
+            <FolderPlus />
+            New folder
+          </ContextMenuItem>
+          <ContextMenuItem onSelect={props.onNewFile}>
+            <FilePlus />
+            New file
+          </ContextMenuItem>
+          <ContextMenuItem onSelect={props.onUpload}>
+            <Upload />
+            Upload
+          </ContextMenuItem>
+          <ContextMenuSeparator />
+        </>
+      ) : null}
+      <ContextMenuRadioGroup value={props.sort} onValueChange={(value) => props.onSort(value as SortKey)}>
+        <ContextMenuRadioItem value="name">
+          <ArrowDownAz />
+          Sort by name
+        </ContextMenuRadioItem>
+        <ContextMenuRadioItem value="modified">
+          <Calendar />
+          Sort by date
+        </ContextMenuRadioItem>
+        <ContextMenuRadioItem value="size">
+          <HardDrive />
+          Sort by size
+        </ContextMenuRadioItem>
+      </ContextMenuRadioGroup>
+      <ContextMenuSeparator />
+      <ContextMenuRadioGroup value={props.view} onValueChange={(value) => props.onView(value as 'grid' | 'list')}>
+        <ContextMenuRadioItem value="grid">
+          <LayoutGrid />
+          Grid
+        </ContextMenuRadioItem>
+        <ContextMenuRadioItem value="list">
+          <List />
+          List
+        </ContextMenuRadioItem>
+      </ContextMenuRadioGroup>
+    </ContextMenuContent>
+  )
+
+  if (empty) {
+    return (
+      <ContextMenu>
+        <ContextMenuTrigger asChild>
+          <div className="min-h-[320px]">
             <EmptyState section={props.section} search={props.search} />
-          ) : props.view === 'list' ? (
-            <ListView {...props} items={ordered} drag={drag} />
-          ) : (
-            <GridView {...props} folders={folders} files={files} showSplit={showSplit} drag={drag} />
-          )}
-        </div>
-      </ContextMenuTrigger>
-      <ContextMenuContent className="w-56">
-        {props.canCreate ? (
-          <>
-            <ContextMenuItem onSelect={props.onNewFolder}>
-              <FolderPlus />
-              New folder
-            </ContextMenuItem>
-            <ContextMenuItem onSelect={props.onNewFile}>
-              <FilePlus />
-              New file
-            </ContextMenuItem>
-            <ContextMenuItem onSelect={props.onUpload}>
-              <Upload />
-              Upload
-            </ContextMenuItem>
-            <ContextMenuSeparator />
-          </>
-        ) : null}
-        <ContextMenuRadioGroup value={props.sort} onValueChange={(value) => props.onSort(value as SortKey)}>
-          <ContextMenuRadioItem value="name">
-            <ArrowDownAz />
-            Sort by name
-          </ContextMenuRadioItem>
-          <ContextMenuRadioItem value="modified">
-            <Calendar />
-            Sort by date
-          </ContextMenuRadioItem>
-          <ContextMenuRadioItem value="size">
-            <HardDrive />
-            Sort by size
-          </ContextMenuRadioItem>
-        </ContextMenuRadioGroup>
-        <ContextMenuSeparator />
-        <ContextMenuRadioGroup
-          value={props.view}
-          onValueChange={(value) => props.onView(value as 'grid' | 'list')}
-        >
-          <ContextMenuRadioItem value="grid">
-            <LayoutGrid />
-            Grid
-          </ContextMenuRadioItem>
-          <ContextMenuRadioItem value="list">
-            <List />
-            List
-          </ContextMenuRadioItem>
-        </ContextMenuRadioGroup>
-      </ContextMenuContent>
-    </ContextMenu>
+          </div>
+        </ContextMenuTrigger>
+        {blankMenu}
+      </ContextMenu>
+    )
+  }
+
+  return (
+    <div className="relative min-h-[320px]">
+      <ContextMenu>
+        <ContextMenuTrigger asChild>
+          <div className="absolute inset-0" />
+        </ContextMenuTrigger>
+        {blankMenu}
+      </ContextMenu>
+      <div className="relative z-10 pointer-events-none [&_[data-drive-item]]:pointer-events-auto">
+        {props.view === 'list' ? (
+          <ListView {...props} items={ordered} drag={drag} />
+        ) : (
+          <GridView {...props} folders={folders} files={files} showSplit={showSplit} drag={drag} />
+        )}
+      </div>
+    </div>
   )
 }
 
@@ -353,7 +368,11 @@ function Tile({
   return (
     <button
       type="button"
-      draggable={drag.canMove && movable(item)}
+      data-drive-item
+      draggable={false}
+      onMouseDown={(e) => {
+        e.currentTarget.draggable = drag.canMove && movable(item) && e.button === 0
+      }}
       onClick={(e) => {
         e.stopPropagation()
         if (drag.draggingRef.current) return
@@ -361,7 +380,10 @@ function Tile({
       }}
       onDoubleClick={() => onOpen(item)}
       onDragStart={(e) => drag.beginDrag(item, e)}
-      onDragEnd={drag.endDrag}
+      onDragEnd={(e) => {
+        e.currentTarget.draggable = false
+        drag.endDrag()
+      }}
       onDragOver={(e) => {
         if (!canDrop && !(e.dataTransfer.types.includes('Files') && item.kind === 'folder' && movable(item))) return
         e.preventDefault()

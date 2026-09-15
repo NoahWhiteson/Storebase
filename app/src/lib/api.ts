@@ -67,8 +67,8 @@ export type Me = {
 function kindFromName(name: string): FileKind {
   const ext = name.split('.').pop()?.toLowerCase() ?? ''
   if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'].includes(ext)) return 'image'
-  if (['mp4', 'mov', 'webm'].includes(ext)) return 'video'
-  if (['mp3', 'wav', 'aac'].includes(ext)) return 'audio'
+  if (['mp4', 'm4v', 'webm', 'mov', 'ogv', 'mkv', 'avi', 'mpeg', 'mpg', '3gp'].includes(ext)) return 'video'
+  if (['mp3', 'wav', 'aac', 'ogg', 'oga', 'flac', 'm4a'].includes(ext)) return 'audio'
   if (['xls', 'xlsx', 'csv'].includes(ext)) return 'sheet'
   if (['ppt', 'pptx'].includes(ext)) return 'slide'
   if (ext === 'pdf') return 'pdf'
