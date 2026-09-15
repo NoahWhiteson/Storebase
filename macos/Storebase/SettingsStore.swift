@@ -7,6 +7,7 @@ final class SettingsStore: ObservableObject, @unchecked Sendable {
   }
 
   private let key = "storebase.settings.v1"
+  private var syncedLaunchAtLogin: Bool
 
   init() {
     if let data = UserDefaults.standard.data(forKey: key),
@@ -16,18 +17,21 @@ final class SettingsStore: ObservableObject, @unchecked Sendable {
     } else {
       settings = AppSettings()
     }
+    syncedLaunchAtLogin = settings.launchAtLogin
   }
 
   func persist() {
     if let data = try? JSONEncoder().encode(settings) {
       UserDefaults.standard.set(data, forKey: key)
     }
-    syncLoginItem()
+    syncLoginItemIfNeeded()
   }
 
-  private func syncLoginItem() {
+  private func syncLoginItemIfNeeded() {
     let launch = settings.launchAtLogin
-    Task { @MainActor in
+    guard launch != syncedLaunchAtLogin else { return }
+    syncedLaunchAtLogin = launch
+    Task.detached {
       do {
         if launch {
           try SMAppService.mainApp.register()

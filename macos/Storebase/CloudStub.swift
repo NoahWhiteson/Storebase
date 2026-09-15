@@ -101,18 +101,10 @@ enum CloudStub {
           evict(url: url, remotePath: info.path, size: info.size)
           continue
         }
-        if let info = meta(at: url), !info.path.isEmpty {
-          let bytes = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
-          if bytes > 4096 {
-            evict(url: url, remotePath: info.path, size: info.size)
-            continue
-          }
-          if hasStorebaseTag(url), hasOpenWith(url), extensionVisible(url) { continue }
-          stampCloud(url, remotePath: info.path, size: info.size, display: info.name ?? url.lastPathComponent)
-          continue
-        }
-        if hasStorebaseTag(url) {
-          bindOpener(url)
+        guard let info = readXattr(url), !info.path.isEmpty else { continue }
+        let bytes = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+        if bytes > 4096 {
+          evict(url: url, remotePath: info.path, size: info.size)
         }
       }
     }
@@ -334,18 +326,6 @@ enum CloudStub {
     stampCloud(url, remotePath: remotePath, size: size, display: display)
   }
 
-  private static func stampCloud(_ url: URL, remotePath: String, size: Int64, display: String) {
-    let payload = Meta(path: remotePath, size: size, state: "evicted", name: display)
-    writeMeta(url, payload)
-    bindOpener(url)
-    applyFinderTag(url)
-    applyComment(url)
-    applyWhereFrom(url, remote: remotePath)
-    showExt(url)
-    clearIcon(url)
-    TrackedClouds.remember(local: url.path, remote: remotePath)
-  }
-
   static func hasStorebaseTag(_ url: URL) -> Bool {
     let tags = readStringListXattr(url, userTagsKey) ?? []
     if tags.contains(where: { tagBase($0).caseInsensitiveCompare(tagLabel) == .orderedSame }) {
@@ -355,6 +335,17 @@ enum CloudStub {
       return true
     }
     return false
+  }
+
+  private static func stampCloud(_ url: URL, remotePath: String, size: Int64, display: String) {
+    let payload = Meta(path: remotePath, size: size, state: "evicted", name: display)
+    writeMeta(url, payload)
+    bindOpener(url)
+    applyFinderTag(url)
+    applyComment(url)
+    applyWhereFrom(url, remote: remotePath)
+    showExt(url)
+    TrackedClouds.remember(local: url.path, remote: remotePath)
   }
 
   private static func tagBase(_ raw: String) -> String {
@@ -383,19 +374,6 @@ enum CloudStub {
     var values = URLResourceValues()
     values.hasHiddenExtension = false
     try? file.setResourceValues(values)
-  }
-
-  private static func extensionVisible(_ url: URL) -> Bool {
-    (try? url.resourceValues(forKeys: [.hasHiddenExtensionKey]).hasHiddenExtension) != true
-  }
-
-  private static func hasOpenWith(_ url: URL) -> Bool {
-    let needed = url.path.withCString { pth in
-      openWithKey.withCString { key in
-        getxattr(pth, key, nil, 0, 0, 0)
-      }
-    }
-    return needed > 0
   }
 
   private static func appURL() -> URL {
@@ -464,28 +442,27 @@ enum CloudStub {
     return try? PropertyListSerialization.propertyList(from: Data(data.prefix(Int(read))), options: [], format: nil)
   }
 
-  private static func clearIcon(_ url: URL) {
-    let path = url.path
-    Task { @MainActor in
-      NSWorkspace.shared.setIcon(nil, forFile: path, options: [])
-      NSWorkspace.shared.noteFileSystemChanged(path)
-    }
-  }
-
   private static func isOpen(_ url: URL) -> Bool {
     let proc = Process()
     proc.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
-    proc.arguments = ["-t", "--", url.path]
+    proc.arguments = ["-t", "-n", "-P", "--", url.path]
     let out = Pipe()
     proc.standardOutput = out
-    proc.standardError = Pipe()
+    proc.standardError = FileHandle.nullDevice
     do {
       try proc.run()
-      proc.waitUntilExit()
-      return !(out.fileHandleForReading.readDataToEndOfFile().isEmpty)
     } catch {
       return true
     }
+    let deadline = Date().addingTimeInterval(0.25)
+    while proc.isRunning, Date() < deadline {
+      Thread.sleep(forTimeInterval: 0.01)
+    }
+    if proc.isRunning {
+      proc.terminate()
+      return true
+    }
+    return !out.fileHandleForReading.readDataToEndOfFile().isEmpty
   }
 
   @MainActor

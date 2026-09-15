@@ -176,7 +176,9 @@ enum NodeHTTP {
       throw APIError(status: 0, message: "Bad node URL", code: nil)
     }
     let timeout = request.timeoutInterval > 0 ? request.timeoutInterval : 20
-    return try await NodeCall(request: request, url: url, host: host).run(timeout: timeout)
+    return try await Task.detached {
+      try await NodeCall(request: request, url: url, host: host).run(timeout: timeout)
+    }.value
   }
 
   static func upload(

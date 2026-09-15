@@ -10,6 +10,8 @@ final class IngestEngine: @unchecked Sendable {
   private var lastQuotaWarnBucket = 0
   private var ticking = false
   private var lastMigrate = Date.distantPast
+  private var seenDirty = false
+  private var ticks = 0
   var onStatus: ((String) -> Void)?
   var onStorage: ((StatusResponse) -> Void)?
   var onQuotaFull: (() -> Void)?
@@ -22,7 +24,7 @@ final class IngestEngine: @unchecked Sendable {
   func start() {
     stop()
     let timer = DispatchSource.makeTimerSource(queue: queue)
-    timer.schedule(deadline: .now() + 2.5, repeating: 2.5, leeway: .milliseconds(500))
+    timer.schedule(deadline: .now() + 5, repeating: 2.5, leeway: .milliseconds(500))
     timer.setEventHandler { [weak self] in
       self?.tick()
     }
@@ -39,25 +41,31 @@ final class IngestEngine: @unchecked Sendable {
   private func tick() {
     if ticking { return }
     ticking = true
-    defer { ticking = false }
+    defer {
+      flushSeen()
+      ticking = false
+    }
     let settings = store.settings
     guard !settings.token.isEmpty, let base = URL(string: settings.nodeURL) else { return }
     let folders = watchFolders(settings)
-    if settings.usesPlaceholders, Date().timeIntervalSince(lastMigrate) > 30 {
+    ticks += 1
+    if settings.usesPlaceholders, ticks >= 3, Date().timeIntervalSince(lastMigrate) > 30 {
       lastMigrate = Date()
       CloudStub.migrate(in: folders)
       CloudStub.reclaimHydrated(in: folders)
     }
-    if settings.usesPlaceholders {
+    if settings.usesPlaceholders, ticks >= 2 {
       Task { await CloudStub.sweep(base: base, token: settings.token) }
     }
-    Task {
-      await TrackedClouds.reconcile(
-        base: base,
-        token: settings.token,
-        folders: folders,
-        mirrorLocal: settings.usesMirrorDeletes
-      )
+    if ticks >= 2 {
+      Task {
+        await TrackedClouds.reconcile(
+          base: base,
+          token: settings.token,
+          folders: folders,
+          mirrorLocal: settings.usesMirrorDeletes
+        )
+      }
     }
     guard settings.captureEnabled else { return }
     refreshStatus(base: base, token: settings.token, settings: settings)
@@ -124,7 +132,7 @@ final class IngestEngine: @unchecked Sendable {
     if seen.contains(fingerprint) { return }
     guard inflight < max(1, settings.maxConcurrent) else { return }
     seen.insert(fingerprint)
-    persistSeen()
+    seenDirty = true
     inflight += 1
     let dest = destination(for: url, size: size, settings: settings)
     Task.detached { [self] in
@@ -159,7 +167,7 @@ final class IngestEngine: @unchecked Sendable {
       } catch let err as APIError where err.isQuota {
         self.queue.async {
           self.seen.remove(fingerprint)
-          self.persistSeen()
+          self.seenDirty = true
         }
         await MainActor.run {
           if settings.notifyQuota { Notifier.quotaFull(file: name) }
@@ -169,7 +177,7 @@ final class IngestEngine: @unchecked Sendable {
       } catch {
         self.queue.async {
           self.seen.remove(fingerprint)
-          self.persistSeen()
+          self.seenDirty = true
         }
         await MainActor.run {
           if settings.notifyErrors {
@@ -226,7 +234,9 @@ final class IngestEngine: @unchecked Sendable {
     return urls.filter { FileManager.default.fileExists(atPath: $0.path) }
   }
 
-  private func persistSeen() {
+  private func flushSeen() {
+    guard seenDirty else { return }
+    seenDirty = false
     let trimmed = Array(seen.suffix(4000))
     seen = Set(trimmed)
     let fingerprints = trimmed

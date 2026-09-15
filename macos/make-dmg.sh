@@ -24,7 +24,7 @@ fi
 # Same bundle id as the first agent build — if that process is still alive,
 # launching Storebase.app just foregrounds the old faceless copy.
 osascript -e 'tell application "Storebase" to quit' >/dev/null 2>&1 || true
-killall Storebase >/dev/null 2>&1 || true
+killall -9 Storebase >/dev/null 2>&1 || true
 sleep 1
 
 mkdir -p "$OUT"
@@ -88,8 +88,8 @@ if [[ "$INSTALL" == "1" ]]; then
 fi
 
 echo
-echo "Storebase 1.10 → $DMG"
-echo "You should see a cube icon, a Dock icon, and a window that says 1.10."
+echo "Storebase 1.11 → $DMG"
+echo "You should see a cube icon, a Dock icon, and a window that says 1.11."
 echo "If you still see a hard-drive glyph, Spotlight is opening the old copy — quit Storebase and open /Applications/Storebase.app"
 if [[ "${UNSIGNED:-}" == "1" ]]; then
   echo "Unsigned: right-click Storebase.app → Open the first time, or xattr -cr /Applications/Storebase.app"

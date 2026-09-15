@@ -34,6 +34,7 @@ final class AppModel: ObservableObject {
   private var engine: IngestEngine?
   private var cancellable: AnyCancellable?
   private let pathMonitor = NWPathMonitor()
+  private var runtimeStarted = false
 
   var settings: AppSettings {
     get { store.settings }
@@ -117,8 +118,12 @@ final class AppModel: ObservableObject {
     cancellable = store.objectWillChange.sink { [weak self] _ in
       self?.objectWillChange.send()
     }
-    Notifier.request()
     AppRuntime.model = self
+  }
+
+  func startRuntime() {
+    guard !runtimeStarted else { return }
+    runtimeStarted = true
     pathMonitor.pathUpdateHandler = { [weak self] path in
       let wifi = path.usesInterfaceType(.wifi)
       let wired = path.usesInterfaceType(.wiredEthernet)
@@ -129,6 +134,10 @@ final class AppModel: ObservableObject {
     pathMonitor.start(queue: DispatchQueue(label: "app.storebase.path"))
     restartEngine()
     Task { await CloudStub.flushPending() }
+    Task {
+      try? await Task.sleep(nanoseconds: 2_000_000_000)
+      Notifier.request()
+    }
   }
 
   func toggleCapture() {
@@ -171,7 +180,7 @@ final class AppModel: ObservableObject {
       return
     }
     var name = settings.deviceName.trimmingCharacters(in: .whitespacesAndNewlines)
-    if name.isEmpty { name = Host.current().localizedName ?? "Mac" }
+    if name.isEmpty { name = "Mac" }
     do {
       let result = try await APIClient.pair(baseURL: url, code: pairCodeDraft, deviceName: name)
       settings.nodeURL = raw

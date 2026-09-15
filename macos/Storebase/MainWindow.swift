@@ -17,6 +17,7 @@ struct MainWindow: View {
     .frame(width: 400)
     .background(Color(red: 26 / 255, green: 26 / 255, blue: 26 / 255))
     .preferredColorScheme(.dark)
+    .onAppear { model.startRuntime() }
   }
 
   private var header: some View {
@@ -29,7 +30,7 @@ struct MainWindow: View {
       VStack(alignment: .leading, spacing: 2) {
         Text("Storebase")
           .font(.system(size: 16, weight: .semibold))
-		Text(model.paired ? statusTitle : "1.10 — paste your pairing code")
+        Text(model.paired ? statusTitle : "1.11 — paste your pairing code")
           .font(.system(size: 12))
           .foregroundStyle(.secondary)
       }
