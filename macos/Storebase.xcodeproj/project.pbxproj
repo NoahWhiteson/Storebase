@@ -10,6 +10,7 @@
 		B8A82B20D65E578E8A32ECE5 /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E8EED10C9D15AB5BA18F0E0 /* APIClient.swift */; };
 		D193492CEE0D52A691668D96 /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D762D4CC97CA5C62BA3C6E86 /* AppModel.swift */; };
 		320B85A19EA3531BA9ACE4C7 /* IngestEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1862B92C454D51F9B597D1D7 /* IngestEngine.swift */; };
+		C8D41E70B2A94F6E8C1D3A57 /* CloudStub.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7B19F24C3D84E5A9F0E1B62 /* CloudStub.swift */; };
 		5A4E15BB02C856A0AB2FF6D1 /* MenuBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C004CF1E5F05CFDAAD902D7 /* MenuBarView.swift */; };
 		9212F9A28A515910AA8ED7D5 /* Notifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3215E82BF72251DF80D22118 /* Notifier.swift */; };
 		E7B96D9449B2514ABB7D65C5 /* SettingsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB5F1930DD2B5794A08081EB /* SettingsStore.swift */; };
@@ -25,6 +26,7 @@
 		3E8EED10C9D15AB5BA18F0E0 /* APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClient.swift; sourceTree = "<group>"; };
 		D762D4CC97CA5C62BA3C6E86 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
 		1862B92C454D51F9B597D1D7 /* IngestEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IngestEngine.swift; sourceTree = "<group>"; };
+		A7B19F24C3D84E5A9F0E1B62 /* CloudStub.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudStub.swift; sourceTree = "<group>"; };
 		1C004CF1E5F05CFDAAD902D7 /* MenuBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarView.swift; sourceTree = "<group>"; };
 		3215E82BF72251DF80D22118 /* Notifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Notifier.swift; sourceTree = "<group>"; };
 		FB5F1930DD2B5794A08081EB /* SettingsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsStore.swift; sourceTree = "<group>"; };
@@ -72,6 +74,7 @@
 				3E8EED10C9D15AB5BA18F0E0 /* APIClient.swift */,
 				D762D4CC97CA5C62BA3C6E86 /* AppModel.swift */,
 				1862B92C454D51F9B597D1D7 /* IngestEngine.swift */,
+				A7B19F24C3D84E5A9F0E1B62 /* CloudStub.swift */,
 				1C004CF1E5F05CFDAAD902D7 /* MenuBarView.swift */,
 				3215E82BF72251DF80D22118 /* Notifier.swift */,
 				FB5F1930DD2B5794A08081EB /* SettingsStore.swift */,
@@ -156,6 +159,7 @@
 				B8A82B20D65E578E8A32ECE5 /* APIClient.swift in Sources */,
 				D193492CEE0D52A691668D96 /* AppModel.swift in Sources */,
 				320B85A19EA3531BA9ACE4C7 /* IngestEngine.swift in Sources */,
+				C8D41E70B2A94F6E8C1D3A57 /* CloudStub.swift in Sources */,
 				5A4E15BB02C856A0AB2FF6D1 /* MenuBarView.swift in Sources */,
 				9212F9A28A515910AA8ED7D5 /* Notifier.swift in Sources */,
 				E7B96D9449B2514ABB7D65C5 /* SettingsStore.swift in Sources */,
@@ -208,13 +212,13 @@
 				CODE_SIGN_ENTITLEMENTS = Storebase/Storebase.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 4;
+				CURRENT_PROJECT_VERSION = 5;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Storebase/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 1.3;
+				MARKETING_VERSION = 1.4;
 				PRODUCT_BUNDLE_IDENTIFIER = app.storebase.mac;
 				PRODUCT_NAME = Storebase;
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -232,13 +236,13 @@
 				CODE_SIGN_ENTITLEMENTS = Storebase/Storebase.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 4;
+				CURRENT_PROJECT_VERSION = 5;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Storebase/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 1.3;
+				MARKETING_VERSION = 1.4;
 				PRODUCT_BUNDLE_IDENTIFIER = app.storebase.mac;
 				PRODUCT_NAME = Storebase;
 				SWIFT_EMIT_LOC_STRINGS = YES;

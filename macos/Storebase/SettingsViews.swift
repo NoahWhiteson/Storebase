@@ -22,12 +22,26 @@ struct SettingsRootView: View {
   @State private var pane: SettingsPane = .connection
 
   var body: some View {
-    NavigationSplitView {
-      List(SettingsPane.allCases, selection: $pane) { item in
-        Text(item.title).tag(item)
+    HStack(spacing: 0) {
+      VStack(alignment: .leading, spacing: 2) {
+        ForEach(SettingsPane.allCases) { item in
+          Button {
+            pane = item
+          } label: {
+            Text(item.title)
+              .frame(maxWidth: .infinity, alignment: .leading)
+              .padding(.horizontal, 10)
+              .padding(.vertical, 7)
+              .background(pane == item ? Color.primary.opacity(0.08) : Color.clear)
+              .clipShape(RoundedRectangle(cornerRadius: 6))
+          }
+          .buttonStyle(.plain)
+        }
+        Spacer()
       }
-      .navigationSplitViewColumnWidth(180)
-    } detail: {
+      .padding(12)
+      .frame(width: 180)
+      Divider()
       Group {
         switch pane {
         case .general: GeneralPane()
@@ -133,7 +147,7 @@ struct FoldersPane: View {
         Button("Add folder…") { pickFolder() }
       }
       Section {
-        Text("New files in these folders are uploaded, then removed locally if that’s enabled — so a Chrome download lands in Storebase instead of staying on disk.")
+        Text("New files in these folders are uploaded to Storebase. With cloud copies on, they stay in the folder with the same name but take no disk until you open them.")
           .font(.caption)
           .foregroundStyle(.secondary)
       }
@@ -243,9 +257,14 @@ struct StoragePane: View {
           .foregroundStyle(.secondary)
       }
       Section("After upload") {
+        Toggle("Keep files in the folder as cloud copies", isOn: placeholdersBind)
+        Text("Same names in Downloads. Bytes live on the node, so they don’t count against this Mac’s disk. Opening a file downloads it, then it stays local.")
+          .font(.caption)
+          .foregroundStyle(.secondary)
         Toggle("Remove the local file after it’s on Storebase", isOn: bind(\.removeLocalAfterUpload))
+          .disabled(model.settings.usesPlaceholders)
         Toggle("Move to Trash instead of deleting forever", isOn: bind(\.trashInsteadOfDelete))
-          .disabled(!model.settings.removeLocalAfterUpload)
+          .disabled(model.settings.usesPlaceholders || !model.settings.removeLocalAfterUpload)
       }
     }
   }
@@ -254,6 +273,13 @@ struct StoragePane: View {
     Binding(
       get: { model.settings[keyPath: key] },
       set: { model.settings[keyPath: key] = $0 }
+    )
+  }
+
+  private var placeholdersBind: Binding<Bool> {
+    Binding(
+      get: { model.settings.usesPlaceholders },
+      set: { model.settings.cloudPlaceholders = $0 }
     )
   }
 
@@ -295,5 +321,33 @@ struct AdvancedPane: View {
       get: { model.settings[keyPath: key] },
       set: { model.settings[keyPath: key] = $0 }
     )
+  }
+}
+
+@MainActor
+enum SettingsWindow {
+  private static var window: NSWindow?
+
+  static func show(model: AppModel) {
+    NSApp.setActivationPolicy(.regular)
+    NSApp.activate(ignoringOtherApps: true)
+    if let window {
+      window.makeKeyAndOrderFront(nil)
+      window.orderFrontRegardless()
+      NSApp.activate(ignoringOtherApps: true)
+      return
+    }
+    let host = NSHostingController(rootView: SettingsRootView().environmentObject(model))
+    let window = NSWindow(contentViewController: host)
+    window.title = "Settings"
+    window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+    window.setContentSize(NSSize(width: 760, height: 560))
+    window.minSize = NSSize(width: 640, height: 420)
+    window.center()
+    window.isReleasedWhenClosed = false
+    window.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
+    window.makeKeyAndOrderFront(nil)
+    window.orderFrontRegardless()
+    Self.window = window
   }
 }

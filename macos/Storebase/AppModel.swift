@@ -41,6 +41,7 @@ final class AppModel: ObservableObject {
       self?.objectWillChange.send()
     }
     Notifier.request()
+    AppRuntime.model = self
     restartEngine()
   }
 
@@ -114,7 +115,6 @@ final class AppModel: ObservableObject {
   }
 
   func openSettings() {
-    NSApp.activate(ignoringOtherApps: true)
-    NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+    SettingsWindow.show(model: self)
   }
 }

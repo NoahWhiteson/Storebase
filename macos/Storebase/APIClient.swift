@@ -71,7 +71,8 @@ final class APIClient {
     try Self.throwIfNeeded(data: data, response: response)
   }
 
-  func upload(fileURL: URL, destDir: String) async throws {
+  @discardableResult
+  func upload(fileURL: URL, destDir: String) async throws -> String {
     var comps = URLComponents(url: baseURL.appendingPathComponent("api/files/upload"), resolvingAgainstBaseURL: false)!
     comps.queryItems = [URLQueryItem(name: "path", value: destDir)]
     var request = URLRequest(url: comps.url!)
@@ -83,6 +84,25 @@ final class APIClient {
     request.httpBody = try Self.multipart(fileURL: fileURL, boundary: boundary)
     let (data, response) = try await NodeHTTP.data(for: request)
     try Self.throwIfNeeded(data: data, response: response)
+    struct Body: Decodable {
+      struct Item: Decodable { let path: String }
+      let item: Item
+    }
+    return try JSONDecoder().decode(Body.self, from: data).item.path
+  }
+
+  func download(path: String, to dest: URL) async throws {
+    var comps = URLComponents(url: baseURL.appendingPathComponent("api/files/download"), resolvingAgainstBaseURL: false)!
+    comps.queryItems = [URLQueryItem(name: "path", value: path)]
+    var request = URLRequest(url: comps.url!)
+    request.timeoutInterval = 60 * 30
+    request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+    let (data, response) = try await NodeHTTP.data(for: request)
+    try Self.throwIfNeeded(data: data, response: response)
+    if FileManager.default.fileExists(atPath: dest.path) {
+      try FileManager.default.removeItem(at: dest)
+    }
+    try data.write(to: dest, options: .atomic)
   }
 
   private func get<T: Decodable>(_ path: String, as: T.Type) async throws -> T {

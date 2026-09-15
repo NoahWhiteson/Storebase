@@ -87,8 +87,11 @@ final class IngestEngine {
     if settings.skipIncomplete, Self.incomplete(name) { return }
     var isDir: ObjCBool = false
     guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir), !isDir.boolValue else { return }
-    guard let info = try? url.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey, .fileResourceIdentifierKey]) else { return }
+    guard let info = try? url.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey, .fileResourceIdentifierKey, .totalFileAllocatedSizeKey]) else { return }
     let size = Int64(info.fileSize ?? 0)
+    let allocated = info.totalFileAllocatedSize
+    if CloudStub.isEvicted(url, allocated: allocated) { return }
+    if CloudStub.meta(at: url)?.state == "hydrated" { return }
     guard size > 0 else { return }
     if let modified = info.contentModificationDate, Date().timeIntervalSince(modified) < settings.settleSeconds { return }
     let fingerprint = "\(url.path)|\(size)|\(info.contentModificationDate?.timeIntervalSince1970 ?? 0)"
@@ -105,14 +108,14 @@ final class IngestEngine {
         if dest != ".temp", !settings.destFolder.isEmpty {
           try? await client.mkdir(settings.destFolder)
         }
-        try await client.upload(fileURL: url, destDir: dest)
+        let remote = try await client.upload(fileURL: url, destDir: dest)
         await MainActor.run {
           self.onStatus?("Captured \(name)")
           if settings.notifyUploads {
             Notifier.send(title: "Saved to Storebase", body: name)
           }
         }
-        self.removeLocal(url, settings: settings)
+        self.afterUpload(url, remotePath: remote, size: size, settings: settings)
       } catch let err as APIError where err.isQuota {
         await MainActor.run {
           if settings.notifyQuota { Notifier.quotaFull(file: name) }
@@ -144,6 +147,14 @@ final class IngestEngine {
       toTemp = true
     }
     return toTemp ? ".temp" : settings.destFolder
+  }
+
+  private func afterUpload(_ url: URL, remotePath: String, size: Int64, settings: AppSettings) {
+    if settings.usesPlaceholders {
+      CloudStub.evict(url: url, remotePath: remotePath, size: size)
+      return
+    }
+    removeLocal(url, settings: settings)
   }
 
   private func removeLocal(_ url: URL, settings: AppSettings) {

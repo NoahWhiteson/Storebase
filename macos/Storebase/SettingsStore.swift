@@ -68,12 +68,15 @@ struct AppSettings: Codable, Equatable {
   var maxConcurrent = 2
   var pauseWhenFull = true
   var captureScreenshots = false
+  var cloudPlaceholders: Bool? = true
   var lastFingerprint: [String] = []
 
   enum Destination: String, Codable, CaseIterable {
     case myFiles
     case temp
   }
+
+  var usesPlaceholders: Bool { cloudPlaceholders ?? true }
 
   func tempExtSet() -> Set<String> {
     Self.splitExt(tempExtensions)

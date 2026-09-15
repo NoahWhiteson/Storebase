@@ -14,6 +14,12 @@ struct StorebaseApp: App {
     .windowResizability(.contentSize)
     .defaultSize(width: 400, height: 540)
     .commands {
+      CommandGroup(replacing: .appSettings) {
+        Button("Settings…") {
+          model.openSettings()
+        }
+        .keyboardShortcut(",", modifiers: .command)
+      }
       CommandGroup(replacing: .newItem) {}
     }
 
@@ -24,12 +30,6 @@ struct StorebaseApp: App {
       Image("MenuBarIcon")
     }
     .menuBarExtraStyle(.window)
-
-    Settings {
-      SettingsRootView()
-        .environmentObject(model)
-        .frame(minWidth: 680, minHeight: 520)
-    }
   }
 }
 
@@ -37,6 +37,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   func applicationDidFinishLaunching(_ notification: Notification) {
     NSApp.setActivationPolicy(.regular)
     NSApp.activate(ignoringOtherApps: true)
+  }
+
+  func application(_ application: NSApplication, open urls: [URL]) {
+    Task { await CloudStub.open(urls: urls) }
   }
 
   func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
