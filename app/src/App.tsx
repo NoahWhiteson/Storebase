@@ -1,4 +1,3 @@
-import { FileGlyph } from '@/components/FileGlyph'
 import { FilePreview } from '@/components/FilePreview'
 import { FileView, sortItems, type SortKey } from '@/components/FileView'
 import { Settings, type SettingsSection } from '@/components/Settings'
@@ -46,7 +45,7 @@ import { ChevronRight } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
 
 const titles: Record<SectionId, string> = {
-  home: 'Welcome to Storebase',
+  home: 'Home',
   'my-drive': 'My files',
   computers: 'Computers',
   shared: 'Shared with me',
@@ -76,7 +75,6 @@ function joinPath(dir: string, name: string): string {
 export default function App({ account, onSignedOut }: { account: Account; onSignedOut: () => void }) {
   const quota = account.reservedBytes > 0 ? account.reservedBytes : 100 * 1024 ** 3
   const [items, setItems] = useState<DriveItem[]>([])
-  const [suggested, setSuggested] = useState<DriveItem[]>([])
   const [usedBytes, setUsedBytes] = useState(account.usedBytes)
   const [host, setHost] = useState(account.host)
   const [profile, setProfile] = useState({ name: account.name, email: account.email })
@@ -146,8 +144,10 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
         entries = await listFiles({ view: 'trash' })
       } else if (section === 'starred') {
         entries = await listFiles({ view: 'starred' })
-      } else if (section === 'recent' || section === 'home') {
+      } else if (section === 'recent') {
         entries = await listFiles({ view: 'recent' })
+      } else if (section === 'home') {
+        entries = await listFiles({ path: '' })
       } else if (section === 'shared') {
         const shared = parseSharePath(folderPath)
         if (shared) {
@@ -164,18 +164,6 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
         entries = await listFiles({ path: folderPath })
       }
       setItems(entries.map((entry) => toDriveItem(entry, { name: profile.name })))
-      if (section === 'home' && !q) {
-        const root = await listFiles({ path: '' })
-        setSuggested(
-          root.filter((entry) => entry.type === 'folder').slice(0, 8).map((entry) => toDriveItem(entry, { name: profile.name })),
-        )
-        if (entries.length === 0) {
-          const files = root.filter((entry) => entry.type === 'file')
-          setItems(files.map((entry) => toDriveItem(entry, { name: profile.name })))
-        }
-      } else {
-        setSuggested([])
-      }
       const status = await fetch('/api/status', { credentials: 'include' }).then(
         (res) => res.json() as Promise<{ usedBytes?: number; host?: string }>,
       )
@@ -647,30 +635,6 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
             </div>
 
             {loadError ? <p className="text-sm text-[#f28b82]">{loadError}</p> : null}
-
-            {section === 'home' && !search.trim() && suggested.length > 0 ? (
-              <section>
-                <h2 className="mb-3 text-sm font-medium text-muted-foreground">Suggested folders</h2>
-                <div className="flex gap-3 overflow-x-auto pb-1">
-                  {suggested.map((folder) => (
-                    <button
-                      key={folder.id}
-                      type="button"
-                      onClick={() => openItem(folder)}
-                      className="flex min-w-[200px] items-center gap-3 rounded-xl px-3 py-3 text-left hover:bg-white/5"
-                      {...(canMove ? dropDest(folder.id) : {})}
-                    >
-                      <FileGlyph kind="folder" size="sm" />
-                      <span className="truncate text-sm">{folder.name}</span>
-                    </button>
-                  ))}
-                </div>
-              </section>
-            ) : null}
-
-            {section === 'home' && !search.trim() ? (
-              <h2 className="text-sm font-medium text-muted-foreground">Files</h2>
-            ) : null}
 
             {loading && items.length === 0 && !computerItem ? (
               <p className="text-sm text-[#8d8d8d]">Loading your files…</p>
