@@ -67,6 +67,7 @@ import {
   renameEntry,
   saveFile,
   unzipArchive,
+  walkLiveFilePaths,
   walkVisible,
   writeFileContent,
 } from './storage.ts'
@@ -579,6 +580,9 @@ export function createApp(config: ServerConfig) {
       }))
     }
 
+    if (view === 'index') {
+      return c.json({ paths: await walkLiveFilePaths(root) })
+    }
     if (view === 'shared') {
       try {
         if (shareId) {

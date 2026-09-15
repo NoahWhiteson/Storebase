@@ -90,6 +90,18 @@ final class APIClient: @unchecked Sendable {
     return try JSONDecoder().decode(Body.self, from: data).item.path
   }
 
+  func livePaths() async throws -> Set<String> {
+    var comps = URLComponents(url: baseURL.appendingPathComponent("api/files"), resolvingAgainstBaseURL: false)!
+    comps.queryItems = [URLQueryItem(name: "view", value: "index")]
+    var request = URLRequest(url: comps.url!)
+    request.timeoutInterval = 30
+    request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+    let (data, response) = try await NodeHTTP.data(for: request)
+    try Self.throwIfNeeded(data: data, response: response)
+    struct Body: Decodable { let paths: [String] }
+    return Set(try JSONDecoder().decode(Body.self, from: data).paths)
+  }
+
   func download(path: String, to dest: URL) async throws {
     var comps = URLComponents(url: baseURL.appendingPathComponent("api/files/download"), resolvingAgainstBaseURL: false)!
     comps.queryItems = [URLQueryItem(name: "path", value: path)]

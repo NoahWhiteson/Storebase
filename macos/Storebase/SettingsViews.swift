@@ -258,11 +258,11 @@ struct StoragePane: View {
       }
       Section("After upload") {
         Toggle("Keep files in the folder as cloud copies", isOn: placeholdersBind)
-        Text("Same names in Downloads (Storebase cloud files). Double-click opens Preview or the real app for that type. Close it and the Downloads entry goes back to a cloud copy.")
+        Text("Keeps the real name and icon (photo.jpg stays a JPEG in Finder). Double-click downloads from Storebase and opens Preview or whatever owns that type. Close it and the local bytes disappear.")
           .font(.caption)
           .foregroundStyle(.secondary)
-        Toggle("If I delete a file here, delete it on Storebase too", isOn: mirrorDeletesBind)
-        Text("Trash on the node when a captured file leaves Downloads or another watched folder. Off = local delete only.")
+        Toggle("Keep deletes in sync", isOn: mirrorDeletesBind)
+        Text("Delete a captured file here → trash on Storebase. Delete it on the site → it leaves this Mac too.")
           .font(.caption)
           .foregroundStyle(.secondary)
         Toggle("Remove the local file after it’s on Storebase", isOn: bind(\.removeLocalAfterUpload))

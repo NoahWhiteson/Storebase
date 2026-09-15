@@ -1,3 +1,4 @@
+import type { Dirent } from 'node:fs'
 import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname, join, relative, resolve, sep } from 'node:path'
 import { assertWriteFits, folderSize } from './quota.ts'
@@ -77,6 +78,32 @@ export async function walkVisible(root: string): Promise<DriveEntry[]> {
     for (const item of items) {
       out.push(item)
       if (item.type === 'folder') await walk(item.path)
+    }
+  }
+  await walk('')
+  return out
+}
+
+const INDEX_SKIP = new Set(['.trash', '.storebase-meta.json', '.temp-index.json', '.trash-index.json'])
+
+export async function walkLiveFilePaths(root: string): Promise<string[]> {
+  const out: string[] = []
+  async function walk(rel: string) {
+    const dir = rel ? resolveSafe(root, rel) : resolve(root)
+    let entries: Dirent[]
+    try {
+      entries = await readdir(dir, { withFileTypes: true })
+    } catch {
+      return
+    }
+    for (const entry of entries) {
+      if (INDEX_SKIP.has(entry.name)) continue
+      const child = rel ? `${rel}/${entry.name}` : entry.name
+      if (entry.isDirectory()) {
+        await walk(child)
+      } else if (entry.isFile() && !entry.name.startsWith('.')) {
+        out.push(child.replaceAll('\\', '/'))
+      }
     }
   }
   await walk('')

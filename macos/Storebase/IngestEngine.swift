@@ -39,8 +39,13 @@ final class IngestEngine: @unchecked Sendable {
       CloudStub.reclaimHydrated(in: folders)
       Task { await CloudStub.sweep(base: base, token: settings.token) }
     }
-    if settings.usesMirrorDeletes {
-      Task { await TrackedClouds.reconcile(base: base, token: settings.token, folders: folders) }
+    Task {
+      await TrackedClouds.reconcile(
+        base: base,
+        token: settings.token,
+        folders: folders,
+        mirrorLocal: settings.usesMirrorDeletes
+      )
     }
     guard settings.captureEnabled else { return }
     refreshStatus(base: base, token: settings.token, settings: settings)

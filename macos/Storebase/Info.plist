@@ -17,9 +17,9 @@
   <key>CFBundleIconName</key>
   <string>AppIcon</string>
   <key>CFBundleShortVersionString</key>
-  <string>1.7</string>
+  <string>1.8</string>
   <key>CFBundleVersion</key>
-  <string>12</string>
+  <string>13</string>
   <key>LSApplicationCategoryType</key>
   <string>public.app-category.utilities</string>
   <key>LSMinimumSystemVersion</key>
@@ -47,6 +47,18 @@
       <key>CFBundleTypeExtensions</key>
       <array>
         <string>storebase</string>
+      </array>
+    </dict>
+    <dict>
+      <key>CFBundleTypeName</key>
+      <string>All files</string>
+      <key>CFBundleTypeRole</key>
+      <string>Viewer</string>
+      <key>LSHandlerRank</key>
+      <string>Alternate</string>
+      <key>LSItemContentTypes</key>
+      <array>
+        <string>public.data</string>
       </array>
     </dict>
   </array>
