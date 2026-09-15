@@ -17,9 +17,9 @@
   <key>CFBundleIconName</key>
   <string>AppIcon</string>
   <key>CFBundleShortVersionString</key>
-  <string>1.5</string>
+  <string>1.6</string>
   <key>CFBundleVersion</key>
-  <string>6</string>
+  <string>7</string>
   <key>LSApplicationCategoryType</key>
   <string>public.app-category.utilities</string>
   <key>LSMinimumSystemVersion</key>
@@ -33,8 +33,10 @@
     <key>NSAllowsLocalNetworking</key>
     <true/>
   </dict>
+  <key>NSAppleEventsUsageDescription</key>
+  <string>Storebase tells Finder to open cloud copies with this app, then hands the real file to Preview or the default app.</string>
   <key>LSSupportsOpeningDocumentsInPlace</key>
-  <true/>
+  <false/>
   <key>CFBundleDocumentTypes</key>
   <array>
     <dict>
@@ -46,7 +48,6 @@
       <string>Alternate</string>
       <key>LSItemContentTypes</key>
       <array>
-        <string>public.item</string>
         <string>public.data</string>
       </array>
     </dict>

@@ -63,12 +63,11 @@ final class APIClient {
   }
 
   func mkdir(_ path: String) async throws {
-    var request = authorized(path: "/api/files/mkdir")
-    request.httpMethod = "POST"
-    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-    request.httpBody = try JSONSerialization.data(withJSONObject: ["path": path])
-    let (data, response) = try await NodeHTTP.data(for: request)
-    try Self.throwIfNeeded(data: data, response: response)
+    try await postJSON("/api/files/mkdir", body: ["path": path])
+  }
+
+  func trash(_ path: String) async throws {
+    try await postJSON("/api/files/trash", body: ["path": path])
   }
 
   @discardableResult
@@ -99,10 +98,31 @@ final class APIClient {
     request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
     let (data, response) = try await NodeHTTP.data(for: request)
     try Self.throwIfNeeded(data: data, response: response)
+    if let http = response as? HTTPURLResponse {
+      let type = http.value(forHTTPHeaderField: "Content-Type") ?? ""
+      if type.contains("json"), !path.lowercased().hasSuffix(".json") {
+        throw APIError(status: http.statusCode, message: "Node sent an error instead of the file", code: nil)
+      }
+    }
+    if data.isEmpty {
+      throw APIError(status: 0, message: "Empty download", code: nil)
+    }
+    if Self.looksLikeJSONError(data), !path.lowercased().hasSuffix(".json") {
+      throw APIError(status: 0, message: "Node sent an error instead of the file", code: nil)
+    }
     if FileManager.default.fileExists(atPath: dest.path) {
       try FileManager.default.removeItem(at: dest)
     }
     try data.write(to: dest, options: .atomic)
+  }
+
+  private func postJSON(_ path: String, body: [String: Any]) async throws {
+    var request = authorized(path: path)
+    request.httpMethod = "POST"
+    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    request.httpBody = try JSONSerialization.data(withJSONObject: body)
+    let (data, response) = try await NodeHTTP.data(for: request)
+    try Self.throwIfNeeded(data: data, response: response)
   }
 
   private func get<T: Decodable>(_ path: String, as: T.Type) async throws -> T {
@@ -117,6 +137,11 @@ final class APIClient {
     request.timeoutInterval = 20
     request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
     return request
+  }
+
+  private static func looksLikeJSONError(_ data: Data) -> Bool {
+    guard data.count < 2048, data.first == UInt8(ascii: "{") else { return false }
+    return String(data: data, encoding: .utf8)?.contains("\"error\"") == true
   }
 
   fileprivate static func throwIfNeeded(data: Data, response: URLResponse) throws {

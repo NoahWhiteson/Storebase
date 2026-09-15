@@ -258,7 +258,11 @@ struct StoragePane: View {
       }
       Section("After upload") {
         Toggle("Keep files in the folder as cloud copies", isOn: placeholdersBind)
-        Text("Same names in Downloads. Bytes stay on the node. Opening a file uses a temporary copy, then it goes back to the cloud when you close it.")
+        Text("Same names in Downloads. Bytes stay on the node. Opening a file downloads a real copy into Preview (or the default app), then it goes back to the cloud when you close it.")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+        Toggle("If I delete a file here, delete it on Storebase too", isOn: mirrorDeletesBind)
+        Text("Trash on the node when a captured file leaves Downloads or another watched folder. Off = local delete only.")
           .font(.caption)
           .foregroundStyle(.secondary)
         Toggle("Remove the local file after it’s on Storebase", isOn: bind(\.removeLocalAfterUpload))
@@ -280,6 +284,13 @@ struct StoragePane: View {
     Binding(
       get: { model.settings.usesPlaceholders },
       set: { model.settings.cloudPlaceholders = $0 }
+    )
+  }
+
+  private var mirrorDeletesBind: Binding<Bool> {
+    Binding(
+      get: { model.settings.usesMirrorDeletes },
+      set: { model.settings.mirrorDeletes = $0 }
     )
   }
 

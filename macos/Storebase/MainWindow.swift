@@ -29,7 +29,7 @@ struct MainWindow: View {
       VStack(alignment: .leading, spacing: 2) {
         Text("Storebase")
           .font(.system(size: 16, weight: .semibold))
-		Text(model.paired ? statusTitle : "1.5 — paste your pairing code")
+		Text(model.paired ? statusTitle : "1.6 — paste your pairing code")
           .font(.system(size: 12))
           .foregroundStyle(.secondary)
       }

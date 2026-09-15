@@ -160,9 +160,12 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
     }))
   }, [folderPath, shareLabel])
 
-  const refresh = useCallback(async () => {
-    setLoadError(null)
-    setLoading(true)
+  const refresh = useCallback(async (opts?: { silent?: boolean }) => {
+    const silent = Boolean(opts?.silent)
+    if (!silent) {
+      setLoadError(null)
+      setLoading(true)
+    }
     try {
       const q = search.trim()
       let entries: FileEntry[]
@@ -200,14 +203,30 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
       )
       if (typeof status.usedBytes === 'number') setUsedBytes(status.usedBytes)
     } catch (err) {
-      setLoadError(err instanceof Error ? err.message : 'Could not load files')
+      if (!silent) setLoadError(err instanceof Error ? err.message : 'Could not load files')
     } finally {
-      setLoading(false)
+      if (!silent) setLoading(false)
     }
   }, [folderPath, profile.name, search, section])
 
   useEffect(() => {
     void refresh()
+  }, [refresh])
+
+  useEffect(() => {
+    const src = new EventSource('/api/drive/events')
+    let timer = 0
+    const bump = () => {
+      window.clearTimeout(timer)
+      timer = window.setTimeout(() => {
+        void refresh({ silent: true })
+      }, 120)
+    }
+    src.addEventListener('drive', bump)
+    return () => {
+      window.clearTimeout(timer)
+      src.close()
+    }
   }, [refresh])
 
   function notify(message: string) {

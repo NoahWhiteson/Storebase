@@ -197,7 +197,10 @@ export function proxyConfigs(config: ServerConfig, hostname: string): ProxyConfi
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";`
+        proxy_set_header Connection $http_connection;
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 24h;`
   return {
     nginx: `# /etc/nginx/sites-available/storebase  then: ln -s .../storebase sites-enabled && nginx -t && nginx -s reload
 server {

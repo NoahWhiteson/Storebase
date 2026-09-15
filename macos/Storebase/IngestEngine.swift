@@ -38,6 +38,9 @@ final class IngestEngine {
       CloudStub.reclaimHydrated(in: folders)
       Task { await CloudStub.sweep(base: base, token: settings.token) }
     }
+    if settings.usesMirrorDeletes {
+      Task { await TrackedClouds.reconcile(base: base, token: settings.token, folders: folders) }
+    }
     guard settings.captureEnabled else { return }
     refreshStatus(base: base, token: settings.token, settings: settings)
     guard inflight < max(1, settings.maxConcurrent) else { return }
@@ -158,6 +161,9 @@ final class IngestEngine {
     if settings.usesPlaceholders {
       CloudStub.evict(url: url, remotePath: remotePath, size: size)
       return
+    }
+    if !settings.removeLocalAfterUpload {
+      TrackedClouds.remember(local: url.path, remote: remotePath)
     }
     removeLocal(url, settings: settings)
   }

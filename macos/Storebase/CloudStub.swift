@@ -51,47 +51,72 @@ enum CloudStub {
     return true
   }
 
+  static func isBusy(local path: String) -> Bool {
+    lock.lock()
+    defer { lock.unlock() }
+    return sessions.contains { $0.stub.path == path }
+  }
+
   static func evict(url: URL, remotePath: String, size: Int64) {
     makeSparse(url, size: size)
     writeMeta(url, Meta(path: remotePath, size: size, state: "evicted"))
     setOpenWith(url)
+    TrackedClouds.remember(local: url.path, remote: remotePath)
   }
 
   @MainActor
   static func open(urls: [URL]) async {
-    guard let model = AppRuntime.model, model.paired, let base = URL(string: model.settings.nodeURL) else { return }
-    let client = APIClient(baseURL: base, token: model.settings.token)
     for url in urls {
-      let info = meta(at: url)
-      let remote = info?.path
-      let size = info?.size ?? Int64((try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
-      guard let remote, !remote.isEmpty else { continue }
-      if info?.state == "hydrated" {
-        NSWorkspace.shared.open(url)
+      if url.standardizedFileURL.path.hasPrefix(cacheRoot().path) {
+        openInDefaultApp(url)
         continue
       }
-      do {
-        try FileManager.default.createDirectory(at: cacheRoot(), withIntermediateDirectories: true)
-        let cache = cacheRoot().appendingPathComponent("\(UUID().uuidString)-\(url.lastPathComponent)")
-        try await client.download(path: remote, to: cache)
-        let values = try? cache.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
-        NSWorkspace.shared.open(cache)
-        lock.lock()
-        sessions.append(
-          Session(
-            stub: url,
-            cache: cache,
-            remote: remote,
-            size: size,
-            snapshotSize: Int64(values?.fileSize ?? 0),
-            snapshotMtime: values?.contentModificationDate,
-            quietTicks: 0
-          )
-        )
-        lock.unlock()
-      } catch {
-        Notifier.send(title: "Couldn’t open from Storebase", body: "\(url.lastPathComponent): \(error.localizedDescription)")
+      await openOne(url)
+    }
+  }
+
+  @MainActor
+  private static func openOne(_ url: URL) async {
+    guard let model = AppRuntime.model, model.paired, let base = URL(string: model.settings.nodeURL) else {
+      Notifier.send(title: "Storebase isn’t paired", body: "Connect the Mac app before opening a cloud copy.")
+      return
+    }
+    let info = meta(at: url)
+    let remote = info?.path
+    let size = info?.size ?? Int64((try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
+    guard let remote, !remote.isEmpty else {
+      Notifier.send(title: "Not a Storebase cloud copy", body: url.lastPathComponent)
+      return
+    }
+    let client = APIClient(baseURL: base, token: model.settings.token)
+    do {
+      try FileManager.default.createDirectory(at: cacheRoot(), withIntermediateDirectories: true)
+      let dir = cacheRoot().appendingPathComponent(UUID().uuidString, isDirectory: true)
+      try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+      var name = url.lastPathComponent
+      if (name as NSString).pathExtension.isEmpty {
+        let ext = (remote as NSString).pathExtension
+        if !ext.isEmpty { name = "\(name).\(ext)" }
       }
+      let cache = dir.appendingPathComponent(name)
+      try await client.download(path: remote, to: cache)
+      let values = try? cache.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
+      openInDefaultApp(cache)
+      lock.lock()
+      sessions.append(
+        Session(
+          stub: url,
+          cache: cache,
+          remote: remote,
+          size: size,
+          snapshotSize: Int64(values?.fileSize ?? 0),
+          snapshotMtime: values?.contentModificationDate,
+          quietTicks: 0
+        )
+      )
+      lock.unlock()
+    } catch {
+      Notifier.send(title: "Couldn’t open from Storebase", body: "\(url.lastPathComponent): \(error.localizedDescription)")
     }
   }
 
@@ -148,6 +173,11 @@ enum CloudStub {
   }
 
   private static func close(_ session: Session, client: APIClient) async {
+    if !FileManager.default.fileExists(atPath: session.stub.path) {
+      try? FileManager.default.removeItem(at: session.cache)
+      try? FileManager.default.removeItem(at: session.cache.deletingLastPathComponent())
+      return
+    }
     let values = try? session.cache.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
     let size = Int64(values?.fileSize ?? 0)
     let mtime = values?.contentModificationDate
@@ -164,6 +194,7 @@ enum CloudStub {
       }
     }
     try? FileManager.default.removeItem(at: session.cache)
+    try? FileManager.default.removeItem(at: session.cache.deletingLastPathComponent())
     if FileManager.default.fileExists(atPath: session.stub.path) {
       evict(url: session.stub, remotePath: session.remote, size: dirty ? size : session.size)
     }
@@ -174,7 +205,7 @@ enum CloudStub {
     return String(remote[..<slash])
   }
 
-  private static func cacheRoot() -> URL {
+  static func cacheRoot() -> URL {
     FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
       .appendingPathComponent("app.storebase.mac/open", isDirectory: true)
   }
@@ -193,6 +224,25 @@ enum CloudStub {
     } catch {
       return true
     }
+  }
+
+  private static func openInDefaultApp(_ url: URL) {
+    let ours = Bundle.main.bundleURL.standardizedFileURL
+    let apps = NSWorkspace.shared.urlsForApplications(toOpen: url).filter {
+      $0.standardizedFileURL != ours
+    }
+    let fallbacks = [
+      URL(fileURLWithPath: "/System/Applications/Preview.app"),
+      URL(fileURLWithPath: "/System/Applications/QuickTime Player.app"),
+      URL(fileURLWithPath: "/System/Applications/TextEdit.app"),
+    ]
+    let target =
+      apps.first { FileManager.default.fileExists(atPath: $0.path) }
+      ?? fallbacks.first { FileManager.default.fileExists(atPath: $0.path) }
+    guard let target else { return }
+    let config = NSWorkspace.OpenConfiguration()
+    config.activates = true
+    NSWorkspace.shared.open([url], withApplicationAt: target, configuration: config)
   }
 
   private static func writeMeta(_ url: URL, _ meta: Meta) {
@@ -228,6 +278,122 @@ enum CloudStub {
         }
       }
     }
+    bindFinder(url)
+  }
+
+  private static func bindFinder(_ url: URL) {
+    let filePath = url.path
+    let appPath = Bundle.main.bundlePath
+    DispatchQueue.main.async {
+      let file = escapeApple(filePath)
+      let app = escapeApple(appPath)
+      let source = """
+      tell application "Finder"
+        try
+          set theFile to POSIX file "\(file)" as alias
+          set theApp to POSIX file "\(app)" as alias
+          set default application of theFile to theApp
+        end try
+      end tell
+      """
+      var err: NSDictionary?
+      NSAppleScript(source: source)?.executeAndReturnError(&err)
+    }
+  }
+
+  private static func escapeApple(_ value: String) -> String {
+    value.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
+  }
+}
+
+enum TrackedClouds {
+  private static let lock = NSLock()
+  private static var reconciling = false
+
+  struct Item: Codable, Equatable {
+    var local: String
+    var remote: String
+  }
+
+  static func remember(local: String, remote: String) {
+    lock.lock()
+    defer { lock.unlock() }
+    var items = loadLocked()
+    items.removeAll { $0.local == local }
+    items.append(Item(local: local, remote: remote))
+    saveLocked(items)
+  }
+
+  static func reconcile(base: URL, token: String, folders: [URL]) async {
+    lock.lock()
+    if reconciling {
+      lock.unlock()
+      return
+    }
+    reconciling = true
+    let snapshot = loadLocked()
+    lock.unlock()
+    let client = APIClient(baseURL: base, token: token)
+    var keep: [Item] = []
+    for item in snapshot {
+      if CloudStub.isBusy(local: item.local) {
+        keep.append(item)
+        continue
+      }
+      if FileManager.default.fileExists(atPath: item.local) {
+        keep.append(item)
+        continue
+      }
+      if let moved = locate(remote: item.remote, folders: folders) {
+        keep.append(Item(local: moved.path, remote: item.remote))
+        continue
+      }
+      do {
+        try await client.trash(item.remote)
+      } catch let err as APIError where err.status == 404 {
+        continue
+      } catch let err as APIError where err.status == 409 {
+        Notifier.send(
+          title: "Couldn’t remove from Storebase",
+          body: "\(URL(fileURLWithPath: item.local).lastPathComponent) is over 20 GB — delete it on the site."
+        )
+      } catch {
+        keep.append(item)
+      }
+    }
+    lock.lock()
+    let extra = loadLocked().filter { live in !snapshot.contains(where: { $0.local == live.local }) }
+    saveLocked(keep + extra)
+    reconciling = false
+    lock.unlock()
+  }
+
+  private static func locate(remote: String, folders: [URL]) -> URL? {
+    for folder in folders {
+      guard let names = try? FileManager.default.contentsOfDirectory(atPath: folder.path) else { continue }
+      for name in names {
+        let url = folder.appendingPathComponent(name)
+        if CloudStub.meta(at: url)?.path == remote { return url }
+      }
+    }
+    return nil
+  }
+
+  private static func fileURL() -> URL {
+    let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+      .appendingPathComponent("app.storebase.mac", isDirectory: true)
+    try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    return dir.appendingPathComponent("tracked-cloud.json")
+  }
+
+  private static func loadLocked() -> [Item] {
+    guard let data = try? Data(contentsOf: fileURL()) else { return [] }
+    return (try? JSONDecoder().decode([Item].self, from: data)) ?? []
+  }
+
+  private static func saveLocked(_ items: [Item]) {
+    guard let data = try? JSONEncoder().encode(items) else { return }
+    try? data.write(to: fileURL(), options: .atomic)
   }
 }
 

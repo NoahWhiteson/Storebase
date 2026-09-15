@@ -18,6 +18,8 @@ export default defineConfig({
       '/api': {
         target: 'http://127.0.0.1:4780',
         ws: true,
+        timeout: 0,
+        proxyTimeout: 0,
       },
     },
   },

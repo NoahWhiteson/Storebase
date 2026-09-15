@@ -69,6 +69,7 @@ struct AppSettings: Codable, Equatable {
   var pauseWhenFull = true
   var captureScreenshots = false
   var cloudPlaceholders: Bool? = true
+  var mirrorDeletes: Bool? = true
   var lastFingerprint: [String] = []
 
   enum Destination: String, Codable, CaseIterable {
@@ -77,6 +78,8 @@ struct AppSettings: Codable, Equatable {
   }
 
   var usesPlaceholders: Bool { cloudPlaceholders ?? true }
+
+  var usesMirrorDeletes: Bool { mirrorDeletes ?? true }
 
   func tempExtSet() -> Set<String> {
     Self.splitExt(tempExtensions)

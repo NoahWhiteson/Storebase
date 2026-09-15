@@ -3,6 +3,7 @@ import { hostname } from 'node:os'
 import { Readable } from 'node:stream'
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
+import { streamSSE } from 'hono/streaming'
 import { mountAdmin } from './admin.ts'
 import { bytesToGb, type ServerConfig } from './config.ts'
 import {
@@ -36,6 +37,7 @@ import { requirePool } from './pool.ts'
 import { QuotaError, folderSize } from './quota.ts'
 import { clearSession, issueSession, readSessionUserId } from './session.ts'
 import { completeSetup, getSetupState, SetupError } from './setup.ts'
+import { pingDrive, startDriveWatch, subscribeDrive } from './drive-events.ts'
 import {
   createShare,
   deleteShare,
@@ -365,6 +367,37 @@ export function createApp(config: ServerConfig) {
     c.set('user', user)
     c.set('root', root)
     return next()
+  })
+
+  app.use('/api/*', async (c, next) => {
+    await next()
+    if (c.req.method === 'GET' || c.req.method === 'HEAD') return
+    const user = c.var.user
+    if (user) pingDrive(user.id)
+  })
+
+  app.get('/api/drive/events', (c) => {
+    const userId = c.get('user').id
+    c.header('X-Accel-Buffering', 'no')
+    c.header('Cache-Control', 'no-cache')
+    c.header('Connection', 'keep-alive')
+    return streamSSE(c, async (stream) => {
+      const unsub = subscribeDrive(userId, () => {
+        if (stream.aborted) return
+        void stream.writeSSE({ event: 'drive', data: String(Date.now()) })
+      })
+      stream.onAbort(() => unsub())
+      try {
+        await stream.writeSSE({ event: 'hello', data: 'ok' })
+        while (!stream.aborted) {
+          await stream.sleep(25000)
+          if (stream.aborted) break
+          await stream.writeSSE({ event: 'ping', data: '1' })
+        }
+      } finally {
+        unsub()
+      }
+    })
   })
 
   app.get('/api/me', async (c) => {
@@ -944,6 +977,7 @@ export function createApp(config: ServerConfig) {
   mountAdmin(app, config, terminals)
   mountTerminals(app, terminals)
   mountApp(app, config.appDist)
+  startDriveWatch(config)
   return {
     fetch: app.fetch.bind(app),
     attach: (server: ServerType) => attachTerminalWs(server, config, terminals),
