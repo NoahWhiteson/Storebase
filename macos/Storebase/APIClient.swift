@@ -242,9 +242,9 @@ private final class NodeCall: @unchecked Sendable {
 
   func run(timeout: TimeInterval) async throws -> (Data, URLResponse) {
     try await withCheckedThrowingContinuation { cont in
-      queue.async {
+      queue.async { [self] in
         self.continuation = cont
-        let item = DispatchWorkItem { [weak self] in
+        let item = DispatchWorkItem { [weak self = self] in
           self?.fail(APIError(status: 0, message: "Timed out talking to the node", code: nil))
         }
         self.timeoutItem = item
@@ -387,9 +387,9 @@ private final class NodeCall: @unchecked Sendable {
 
   private func open(timeout: TimeInterval) async throws {
     try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
-      queue.async {
+      queue.async { [self] in
         self.readyCont = cont
-        let item = DispatchWorkItem { [weak self] in
+        let item = DispatchWorkItem { [weak self = self] in
           self?.failReady(APIError(status: 0, message: "Timed out talking to the node", code: nil))
         }
         self.timeoutItem = item

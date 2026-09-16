@@ -30,6 +30,7 @@ struct StorebaseApp: App {
   }
 }
 
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
   static var shared: AppDelegate?
 
@@ -39,15 +40,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   private var cancellable: AnyCancellable?
   private var lastTitle = ""
 
-  override init() {
-    super.init()
-    AppDelegate.shared = self
-  }
-
   func applicationDidFinishLaunching(_ notification: Notification) {
+    AppDelegate.shared = self
     NSApp.setActivationPolicy(.regular)
-    DispatchQueue.main.async { [weak self] in
-      self?.installStatusItem()
+    Task { @MainActor in
+      self.installStatusItem()
     }
   }
 
@@ -55,7 +52,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     self.model = model
     installStatusItem()
     cancellable = model.objectWillChange.sink { [weak self] _ in
-      DispatchQueue.main.async { self?.refreshTitle() }
+      Task { @MainActor in
+        self?.refreshTitle()
+      }
     }
     refreshTitle()
   }
