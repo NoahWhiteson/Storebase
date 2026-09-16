@@ -96,7 +96,7 @@ export default function Landing() {
           />
           <Feature
             title="Mac capture"
-            body="Pair with a link and code. The Mac app watches Downloads, uploads, then leaves a cloud copy with the real name and icon. Double-click downloads from the node. Close it and the local bytes go away."
+            body="Pair with a link and code. The Mac app watches Downloads, uploads, then leaves a cloud copy with the real name and icon. Click it so the node can fill the file, then drag — a drop of a stub is empty. Close the file and the local bytes go away."
           />
           <Feature
             title="Share on your terms"
@@ -160,8 +160,8 @@ export default function Landing() {
             </div>
           </div>
           <p className="mt-4 text-sm text-[#8d8d8d]">
-            Mac client: on a Mac run <code className="text-[#e8e8e8]">macos/make-dmg.sh</code>, then pair from Settings
-            → Mac app.
+            Mac client: on a Mac run <code className="text-[#e8e8e8]">macos/make-dmg.sh</code> (1.13+), then pair from
+            Settings → Mac app. Click a cloud copy before dragging it out of Finder.
           </p>
         </section>
       </main>

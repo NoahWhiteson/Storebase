@@ -677,9 +677,9 @@ function SettingsPane({
         ) : section === 'devices' ? (
           <div className="max-w-lg">
             <h1 className="text-2xl font-medium tracking-tight text-white">Mac app</h1>
-            <p className="mt-2 mb-6 text-sm text-[#8d8d8d]">
-              Install Storebase on a Mac, then paste this node’s link and pairing code. Cloud copies keep the real name
-              and icon, tagged Storebase in Finder.
+            <p className="mt-2 mb-6 text-sm leading-6 text-[#8d8d8d]">
+              Pairing only. On the Mac run make-dmg.sh, paste this link and code, turn Capture on. Click a cloud copy
+              before you drag it or Finder copies an empty stub.
             </p>
             <p className="mb-2 text-sm text-[#8d8d8d]">Node link</p>
             <Input readOnly className={fieldClass} value="http://72.61.3.42:4780" />

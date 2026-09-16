@@ -326,13 +326,30 @@ function DevicesPanel({ onToast }: { onToast: (message: string) => void }) {
     <div className="max-w-lg">
       <Heading
         title="Mac app"
-        hint="Install Storebase on a Mac, then paste this node’s link and pairing code. Off-LAN (Mac → VPS) that has to be the public IP or a domain — not 10.x / 192.168.x on the server. Never 0.0.0.0. Cloud copies keep the real name and icon, tagged Storebase in Finder; deleting a file here or on the site removes both."
+        hint="This page is only pairing. Capture, menu-bar chips, and drag-download all live in the Mac app."
       />
       {error ? <p className="mb-4 text-sm text-[#f28b82]">{error}</p> : null}
       {!info ? (
         <p className="text-sm text-[#8d8d8d]">Loading pairing…</p>
       ) : (
         <>
+          <ol className="mb-6 list-decimal space-y-2 pl-5 text-sm leading-6 text-[#8d8d8d]">
+            <li>
+              On the Mac: <code className="text-[#e8e8e8]">cd macos && ./make-dmg.sh</code> from{' '}
+              <a
+                href="https://github.com/NoahWhiteson/Storebase/tree/main/macos"
+                className="text-white underline decoration-white/20 underline-offset-2 hover:decoration-white"
+                target="_blank"
+                rel="noreferrer"
+              >
+                the repo
+              </a>
+              . Window should say 1.13.
+            </li>
+            <li>Paste the node link and pairing code below. Off-LAN use the public IP or a domain — never 0.0.0.0, and not a 10.x / 192.168.x the Mac can’t route.</li>
+            <li>Turn Capture on. New Downloads go to this drive, then the local file becomes a tagged cloud copy (real name, almost no disk).</li>
+            <li>To drag a cloud copy into Mail, Messages, or Desktop: click it first, wait for the menu-bar percent, then drag. Otherwise Finder copies the empty stub.</li>
+          </ol>
           <p className="mb-2 text-sm text-[#8d8d8d]">Node link</p>
           <div className="mb-4 flex gap-2">
             <Input readOnly className={fieldClass} value={url} />
