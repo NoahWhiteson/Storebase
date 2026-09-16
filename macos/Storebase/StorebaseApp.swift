@@ -8,7 +8,7 @@ struct StorebaseApp: App {
   @StateObject private var model = AppModel()
 
   var body: some Scene {
-    WindowGroup("Storebase") {
+    Window("Storebase", id: "main") {
       MainWindow()
         .environmentObject(model)
         .onAppear {
@@ -18,6 +18,7 @@ struct StorebaseApp: App {
     }
     .windowResizability(.contentSize)
     .defaultSize(width: 400, height: 540)
+    .handlesExternalEvents(matching: [])
     .commands {
       CommandGroup(replacing: .appSettings) {
         Button("Settings…") {

@@ -171,6 +171,7 @@ enum CloudStub {
       }
       model.endTransfer(id: transferId)
       let values = try? cache.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
+      stripOpener(cache)
       openInDefaultApp(cache)
       gate.sync {
         sessions.append(
@@ -467,20 +468,30 @@ enum CloudStub {
 
   @MainActor
   private static func openInDefaultApp(_ url: URL) {
-    let apps = NSWorkspace.shared.urlsForApplications(toOpen: url)
-    let chosen = apps.first {
-      $0.lastPathComponent.caseInsensitiveCompare("Storebase.app") != .orderedSame
+    stripOpener(url)
+    let ours = Bundle.main.bundleIdentifier ?? "app.storebase.mac"
+    let apps = NSWorkspace.shared.urlsForApplications(toOpen: url).filter { app in
+      let id = Bundle(url: app)?.bundleIdentifier
+      return id != ours && app.lastPathComponent.caseInsensitiveCompare("Storebase.app") != .orderedSame
     }
-    let proc = Process()
-    proc.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-    if let chosen {
-      proc.arguments = ["-a", chosen.path, "--", url.path]
-    } else {
-      proc.arguments = ["--", url.path]
+    let config = NSWorkspace.OpenConfiguration()
+    config.activates = true
+    if let chosen = apps.first {
+      NSWorkspace.shared.open([url], withApplicationAt: chosen, configuration: config, completionHandler: nil)
+      return
     }
-    proc.standardOutput = FileHandle.nullDevice
-    proc.standardError = FileHandle.nullDevice
-    try? proc.run()
+    let preview = URL(fileURLWithPath: "/System/Applications/Preview.app")
+    if FileManager.default.fileExists(atPath: preview.path) {
+      NSWorkspace.shared.open([url], withApplicationAt: preview, configuration: config, completionHandler: nil)
+    }
+  }
+
+  private static func stripOpener(_ url: URL) {
+    _ = url.path.withCString { pth in
+      openWithKey.withCString { key in
+        removexattr(pth, key, 0)
+      }
+    }
   }
 
   private static func readXattr(_ url: URL) -> Meta? {
