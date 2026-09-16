@@ -10,14 +10,16 @@ final class SettingsStore: ObservableObject, @unchecked Sendable {
   private var syncedLaunchAtLogin: Bool
 
   init() {
+    let loaded: AppSettings
     if let data = UserDefaults.standard.data(forKey: key),
        let decoded = try? JSONDecoder().decode(AppSettings.self, from: data)
     {
-      settings = decoded
+      loaded = decoded
     } else {
-      settings = AppSettings()
+      loaded = AppSettings()
     }
-    syncedLaunchAtLogin = settings.launchAtLogin
+    settings = loaded
+    syncedLaunchAtLogin = loaded.launchAtLogin
   }
 
   func persist() {
