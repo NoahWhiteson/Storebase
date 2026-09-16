@@ -1,5 +1,5 @@
 import type { Dirent } from 'node:fs'
-import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { cp, mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname, join, relative, resolve, sep } from 'node:path'
 import { assertWriteFits, folderSize } from './quota.ts'
 
@@ -84,7 +84,7 @@ export async function walkVisible(root: string): Promise<DriveEntry[]> {
   return out
 }
 
-const INDEX_SKIP = new Set(['.trash', '.storebase-meta.json', '.temp-index.json', '.trash-index.json'])
+const INDEX_SKIP = new Set(['.trash', '.versions', '.storebase-meta.json', '.temp-index.json', '.trash-index.json'])
 
 export async function walkLiveFilePaths(root: string): Promise<string[]> {
   const out: string[] = []
@@ -215,6 +215,64 @@ export async function moveEntries(root: string, relPaths: string[], destDir: str
     moved.push({ from: rel, to: item.path, item })
   }
   return moved
+}
+
+function parentRel(rel: string): string {
+  const dir = dirname(rel).replaceAll('\\', '/')
+  return !dir || dir === '.' ? '' : dir
+}
+
+export async function copyEntries(
+  root: string,
+  relPaths: string[],
+  destDir: string | null,
+  quota: QuotaGate,
+): Promise<MovedEntry[]> {
+  if (destDir && isTrashPath(destDir)) throw new Error('Cannot copy into trash')
+  const unique = [...new Set(relPaths.filter(Boolean))]
+  const top = unique.filter(
+    (path) => !unique.some((other) => other !== path && (path === other || path.startsWith(`${other}/`))),
+  )
+  if (!top.length) throw new Error('Nothing to copy')
+
+  let incoming = 0
+  for (const rel of top) {
+    if (isTrashPath(rel)) throw new Error('Cannot copy trash')
+    incoming += await entrySize(root, rel)
+  }
+  await assertWriteFits({
+    userRoot: root,
+    poolRoot: quota.poolRoot,
+    incoming,
+    nodeReserved: quota.nodeReserved,
+    userQuota: quota.userQuota,
+  })
+
+  if (destDir != null) {
+    const destFull = resolveSafe(root, destDir)
+    const destInfo = await stat(destFull)
+    if (!destInfo.isDirectory()) throw new Error('Destination is not a folder')
+    for (const rel of top) {
+      const full = resolveSafe(root, rel)
+      if (full === destFull) throw new Error('Cannot copy a folder into itself')
+      if (destFull.startsWith(`${full}${sep}`)) throw new Error('Cannot copy a folder into itself')
+    }
+  }
+
+  const copied: MovedEntry[] = []
+  for (const rel of top) {
+    const full = resolveSafe(root, rel)
+    const parent = destDir == null ? parentRel(rel) : destDir
+    const destParent = resolveSafe(root, parent)
+    await mkdir(destParent, { recursive: true })
+    const name = await uniqueIn(destParent, basename(full))
+    const dest = join(destParent, name)
+    await cp(full, dest, { recursive: true, errorOnExist: true })
+    const info = await stat(dest)
+    const item = toEntry(root, dest, info)
+    copied.push({ from: rel, to: item.path, item })
+  }
+  return copied
 }
 
 export async function renameEntry(root: string, relPath: string, nextName: string): Promise<DriveEntry> {

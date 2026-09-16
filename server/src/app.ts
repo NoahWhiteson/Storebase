@@ -27,23 +27,27 @@ import {
   listLinks,
   listPublicFolder,
   openPublicFile,
+  publicLink,
   resolveLink,
   rewriteLinks,
+  unlockLink,
 } from './links.ts'
 import { mimeFor } from './mime.ts'
 import { dropPath, loadMeta, rewritePath, setStarred, touchRecent } from './meta.ts'
 import { loadPlatform, terminalsAllowed } from './platform.ts'
 import { requirePool } from './pool.ts'
 import { QuotaError, folderSize } from './quota.ts'
-import { clearSession, issueSession, readSessionUserId } from './session.ts'
+import { clearSession, issueLinkUnlock, issueSession, linkUnlocked, readSessionUserId } from './session.ts'
 import { completeSetup, getSetupState, SetupError } from './setup.ts'
 import { pingDrive, startDriveWatch, subscribeDrive } from './drive-events.ts'
 import {
+  acceptShare,
   createShare,
   deleteShare,
   dropSharesForPath,
   listIncoming,
   listOutgoing,
+  listPendingIncoming,
   listSharedFolder,
   listSharesForPath,
   openSharedDownload,
@@ -54,6 +58,7 @@ import {
 } from './shares.ts'
 import {
   TEMP_DIR,
+  copyEntries,
   ensureDir,
   entryAt,
   entrySize,
@@ -110,6 +115,13 @@ import {
 import { loadDomain } from './domain.ts'
 import { acmeKeyAuthorization } from './gateway.ts'
 import { mountApp } from './web.ts'
+import {
+  dropVersionsForPath,
+  listVersions,
+  restoreVersion,
+  rewriteVersions,
+  snapshotExisting,
+} from './versions.ts'
 
 import type { ServerType } from '@hono/node-server'
 
@@ -306,7 +318,15 @@ export function createApp(config: ServerConfig) {
 
   app.get('/api/public/:token', async (c) => {
     try {
-      const { owner, item, link } = await resolveLink(config, c.req.param('token'))
+      const token = c.req.param('token')
+      const { owner, item, link } = await resolveLink(config, token)
+      const unlocked = await linkUnlocked(c, config, token)
+      if (link.expiresAt && Date.parse(link.expiresAt) <= Date.now()) {
+        return c.json({ error: 'This link has expired', code: 'EXPIRED' }, 401)
+      }
+      if (link.passwordHash && !unlocked) {
+        return c.json({ error: 'Password required', code: 'PASSWORD' }, 401)
+      }
       return c.json({
         token: link.token,
         name: item.name,
@@ -314,39 +334,72 @@ export function createApp(config: ServerConfig) {
         size: item.size,
         modifiedAt: item.modifiedAt,
         ownerName: owner.name,
+        expiresAt: link.expiresAt ?? null,
+        passwordProtected: Boolean(link.passwordHash),
       })
     } catch (err) {
-      if (err instanceof LinkError) return c.json({ error: err.message }, err.status)
+      if (err instanceof LinkError) return c.json({ error: err.message, code: err.code }, err.status)
+      throw err
+    }
+  })
+
+  app.post('/api/public/:token/unlock', async (c) => {
+    try {
+      const token = c.req.param('token')
+      const body = await c.req.json<{ password?: string }>().catch(() => ({ password: '' }))
+      await unlockLink(config, token, body.password ?? '')
+      await issueLinkUnlock(c, config, token)
+      return c.json({ ok: true })
+    } catch (err) {
+      if (err instanceof LinkError) return c.json({ error: err.message, code: err.code }, err.status)
       throw err
     }
   })
 
   app.get('/api/public/:token/items', async (c) => {
     try {
-      const listed = await listPublicFolder(config, c.req.param('token'), c.req.query('path') ?? '')
+      const token = c.req.param('token')
+      const listed = await listPublicFolder(
+        config,
+        token,
+        c.req.query('path') ?? '',
+        await linkUnlocked(c, config, token),
+      )
       return c.json(listed)
     } catch (err) {
-      if (err instanceof LinkError) return c.json({ error: err.message }, err.status)
+      if (err instanceof LinkError) return c.json({ error: err.message, code: err.code }, err.status)
       throw err
     }
   })
 
   app.get('/api/public/:token/raw', async (c) => {
     try {
-      const file = await openPublicFile(config, c.req.param('token'), c.req.query('path') ?? '')
+      const token = c.req.param('token')
+      const file = await openPublicFile(
+        config,
+        token,
+        c.req.query('path') ?? '',
+        await linkUnlocked(c, config, token),
+      )
       return sendFile(file, true, c.req.header('range'))
     } catch (err) {
-      if (err instanceof LinkError) return c.json({ error: err.message }, err.status)
+      if (err instanceof LinkError) return c.json({ error: err.message, code: err.code }, err.status)
       throw err
     }
   })
 
   app.get('/api/public/:token/download', async (c) => {
     try {
-      const file = await openPublicFile(config, c.req.param('token'), c.req.query('path') ?? '')
+      const token = c.req.param('token')
+      const file = await openPublicFile(
+        config,
+        token,
+        c.req.query('path') ?? '',
+        await linkUnlocked(c, config, token),
+      )
       return sendFile(file, false, c.req.header('range'))
     } catch (err) {
-      if (err instanceof LinkError) return c.json({ error: err.message }, err.status)
+      if (err instanceof LinkError) return c.json({ error: err.message, code: err.code }, err.status)
       throw err
     }
   })
@@ -505,9 +558,10 @@ export function createApp(config: ServerConfig) {
     const user = c.get('user')
     const path = c.req.query('path') ?? ''
     if (!path) return c.json({ error: 'path required' }, 400)
+    const found = (await listLinks(config, user.id, path))[0] ?? null
     return c.json({
       shares: await listSharesForPath(config, user, path),
-      link: (await listLinks(config, user.id, path))[0] ?? null,
+      link: found ? publicLink(found) : null,
     })
   })
 
@@ -536,15 +590,29 @@ export function createApp(config: ServerConfig) {
     }
   })
 
+  app.post('/api/shares/:id/accept', async (c) => {
+    const user = c.get('user')
+    try {
+      const share = await acceptShare(config, user, c.req.param('id'))
+      return c.json({ share })
+    } catch (err) {
+      if (err instanceof ShareError) return c.json({ error: err.message }, err.status)
+      throw err
+    }
+  })
+
   app.post('/api/links', async (c) => {
     const user = c.get('user')
-    const body = await c.req.json<{ path?: string }>()
+    const body = await c.req.json<{ path?: string; expiresHours?: number | null; password?: string | null }>()
     if (!body.path) return c.json({ error: 'path required' }, 400)
     try {
-      const link = await ensureLink(config, user, body.path)
-      return c.json({ link }, 201)
+      const link = await ensureLink(config, user, body.path, {
+        expiresHours: body.expiresHours,
+        password: body.password,
+      })
+      return c.json({ link: publicLink(link) }, 201)
     } catch (err) {
-      if (err instanceof LinkError) return c.json({ error: err.message }, err.status)
+      if (err instanceof LinkError) return c.json({ error: err.message, code: err.code }, err.status)
       throw err
     }
   })
@@ -604,6 +672,13 @@ export function createApp(config: ServerConfig) {
         throw err
       }
     }
+    if (view === 'spam') {
+      const items = await listPendingIncoming(config, user)
+      return c.json({
+        path: '',
+        items: items.map((item) => ({ ...item, starred: false, trashed: false, spam: true })),
+      })
+    }
     if (view === 'trash') {
       const items = await listTrashItems(root)
       return c.json({
@@ -617,6 +692,7 @@ export function createApp(config: ServerConfig) {
         await dropPath(root, rel)
         await dropSharesForPath(config, user.id, rel)
         await dropLinksForPath(config, user.id, rel)
+        await dropVersionsForPath(root, rel)
       }
       const sub = !path || path === TEMP_DIR ? '' : path.replace(new RegExp(`^${TEMP_DIR}/`), '')
       const listed = await listTempItems(root, sub)
@@ -698,6 +774,7 @@ export function createApp(config: ServerConfig) {
         await rewritePath(root, entry.from, entry.to)
         await rewriteShares(config, user.id, entry.from, entry.to)
         await rewriteLinks(config, user.id, entry.from, entry.to)
+        await rewriteVersions(root, entry.from, entry.to)
       }
       const meta = await loadMeta(root)
       return c.json({
@@ -724,6 +801,7 @@ export function createApp(config: ServerConfig) {
       await rewritePath(root, body.path, item.path)
       await rewriteShares(config, user.id, body.path, item.path)
       await rewriteLinks(config, user.id, body.path, item.path)
+      await rewriteVersions(root, body.path, item.path)
       return c.json({
         item: {
           ...item,
@@ -760,7 +838,10 @@ export function createApp(config: ServerConfig) {
     if (!(file instanceof File)) return c.json({ error: 'file field required' }, 400)
     const buf = Buffer.from(await file.arrayBuffer())
     try {
-      const item = await saveFile(root, dir, file.name, buf, await quotaGate(config, c.get('user')))
+      const quota = await quotaGate(config, c.get('user'))
+      const rel = [dir.replaceAll('\\', '/').replace(/^\/+|\/+$/g, ''), file.name].filter(Boolean).join('/')
+      await snapshotExisting(root, rel, quota)
+      const item = await saveFile(root, dir, file.name, buf, quota)
       await touchRecent(root, item.path)
       if (isTempPath(item.path)) await trackTemp(root, item.path)
       return c.json({ item: { ...item, starred: false, trashed: false } }, 201)
@@ -775,7 +856,9 @@ export function createApp(config: ServerConfig) {
     const body = await c.req.json<{ path?: string; content?: string }>()
     if (!body.path || typeof body.content !== 'string') return c.json({ error: 'path and content required' }, 400)
     try {
-      const item = await writeFileContent(root, body.path, body.content, await quotaGate(config, c.get('user')))
+      const quota = await quotaGate(config, c.get('user'))
+      await snapshotExisting(root, body.path, quota)
+      const item = await writeFileContent(root, body.path, body.content, quota)
       await touchRecent(root, item.path)
       return c.json({
         item: {
@@ -805,6 +888,7 @@ export function createApp(config: ServerConfig) {
         await rewritePath(root, entry.from, entry.to)
         await rewriteShares(config, user.id, entry.from, entry.to)
         await rewriteLinks(config, user.id, entry.from, entry.to)
+        await rewriteVersions(root, entry.from, entry.to)
         await touchTempMove(root, entry.from, entry.to)
       }
       const meta = await loadMeta(root)
@@ -827,6 +911,69 @@ export function createApp(config: ServerConfig) {
     }
   })
 
+  app.post('/api/files/copy', async (c) => {
+    const root = c.get('root')
+    const body = await c.req.json<{ paths?: string[]; dest?: string | null }>()
+    const paths = (body.paths ?? []).filter((path) => typeof path === 'string' && path.length > 0)
+    if (!paths.length) return c.json({ error: 'paths required' }, 400)
+    try {
+      const dest = body.dest === undefined ? null : body.dest
+      if (dest === TEMP_DIR) await ensureTemp(root)
+      const copied = await copyEntries(root, paths, dest, await quotaGate(config, c.get('user')))
+      for (const entry of copied) {
+        await touchRecent(root, entry.to)
+        if (isTempPath(entry.to)) await trackTemp(root, entry.to)
+      }
+      return c.json({
+        items: copied.map((entry) => ({
+          ...entry.item,
+          starred: false,
+          trashed: false,
+          shared: false,
+        })),
+      }, 201)
+    } catch (err) {
+      if (err instanceof QuotaError) return c.json({ error: err.message, code: err.code }, 507)
+      const message = err instanceof Error ? err.message : 'Could not copy'
+      if (message.includes('itself') || message.includes('trash') || message.includes('Destination') || message.includes('Nothing')) {
+        return c.json({ error: message }, 400)
+      }
+      throw err
+    }
+  })
+
+  app.get('/api/files/versions', async (c) => {
+    const root = c.get('root')
+    const path = c.req.query('path') ?? ''
+    if (!path || path.startsWith('share:') || isTrashPath(path)) return c.json({ error: 'path required' }, 400)
+    return c.json({ versions: await listVersions(root, path) })
+  })
+
+  app.post('/api/files/versions/restore', async (c) => {
+    const root = c.get('root')
+    const body = await c.req.json<{ path?: string; id?: string }>()
+    if (!body.path || !body.id) return c.json({ error: 'path and id required' }, 400)
+    try {
+      const item = await restoreVersion(root, body.path, body.id, await quotaGate(config, c.get('user')))
+      await touchRecent(root, item.path)
+      return c.json({
+        item: {
+          ...item,
+          starred: (await loadMeta(root)).starred.includes(item.path),
+          trashed: false,
+          shared: await pathIsShared(config, c.get('user').id, item.path),
+        },
+      })
+    } catch (err) {
+      if (err instanceof QuotaError) return c.json({ error: err.message, code: err.code }, 507)
+      const message = err instanceof Error ? err.message : 'Could not restore'
+      if (message.includes('Version') || message.includes('folder') || message.includes('Cannot')) {
+        return c.json({ error: message }, 400)
+      }
+      throw err
+    }
+  })
+
   app.post('/api/files/rename', async (c) => {
     const root = c.get('root')
     const body = await c.req.json<{ path?: string; name?: string }>()
@@ -835,6 +982,7 @@ export function createApp(config: ServerConfig) {
     await rewritePath(root, body.path, item.path)
     await rewriteShares(config, c.get('user').id, body.path, item.path)
     await rewriteLinks(config, c.get('user').id, body.path, item.path)
+    await rewriteVersions(root, body.path, item.path)
     await touchTempMove(root, body.path, item.path)
     return c.json({
       item: {
@@ -877,11 +1025,13 @@ export function createApp(config: ServerConfig) {
       await dropTempPath(root, body.path)
       await dropSharesForPath(config, user.id, body.path)
       await dropLinksForPath(config, user.id, body.path)
+      await dropVersionsForPath(root, body.path)
       return c.json({ ok: true, permanent: true, size })
     }
     const { item, record } = await trashEntry(root, body.path)
     await dropPath(root, body.path)
     await dropTempPath(root, body.path)
+    await dropVersionsForPath(root, body.path)
     return c.json({
       item: { ...item, starred: false, trashed: true, shared: false, trashedAt: record.trashedAt, daysLeft: 30 },
       permanent: false,
@@ -905,6 +1055,7 @@ export function createApp(config: ServerConfig) {
       await dropPath(root, path)
       await dropSharesForPath(config, user.id, path)
       await dropLinksForPath(config, user.id, path)
+      await dropVersionsForPath(root, path)
     }
     return c.json({ ok: true })
   })
@@ -966,6 +1117,7 @@ export function createApp(config: ServerConfig) {
     if (original) {
       await dropSharesForPath(config, user.id, original)
       await dropLinksForPath(config, user.id, original)
+      await dropVersionsForPath(root, original)
     }
     return c.json({ ok: true })
   })

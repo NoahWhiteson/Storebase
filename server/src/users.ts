@@ -93,14 +93,18 @@ export function findById(users: UserRecord[], id: string): UserRecord | undefine
   return users.find((user) => user.id === id)
 }
 
-export async function verifyPassword(user: UserRecord, password: string): Promise<boolean> {
-  const [saltHex, hashHex] = user.password.split(':')
+export async function verifyPasswordHash(stored: string, password: string): Promise<boolean> {
+  const [saltHex, hashHex] = stored.split(':')
   if (!saltHex || !hashHex) return false
   const salt = Buffer.from(saltHex, 'hex')
   const expected = Buffer.from(hashHex, 'hex')
   const actual = (await scryptAsync(password, salt, 64)) as Buffer
   if (actual.length !== expected.length) return false
   return timingSafeEqual(actual, expected)
+}
+
+export async function verifyPassword(user: UserRecord, password: string): Promise<boolean> {
+  return verifyPasswordHash(user.password, password)
 }
 
 export async function ensureUserDrive(config: ServerConfig, userId: string): Promise<string> {

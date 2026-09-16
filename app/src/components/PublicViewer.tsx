@@ -1,6 +1,8 @@
 import { FileGlyph } from '@/components/FileGlyph'
 import { FilePreview } from '@/components/FilePreview'
 import { StorebaseLogo } from '@/components/StorebaseLogo'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { VideoThumb } from '@/components/VideoThumb'
 import { formatBytes } from '@/lib/format'
 import { previewKind } from '@/lib/preview'
@@ -27,21 +29,39 @@ type PublicItem = {
 export function PublicViewer({ token }: { token: string }) {
   const [meta, setMeta] = useState<PublicMeta | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [locked, setLocked] = useState(false)
+  const [password, setPassword] = useState('')
+  const [unlocking, setUnlocking] = useState(false)
   const [folderPath, setFolderPath] = useState('')
   const [items, setItems] = useState<PublicItem[]>([])
   const [preview, setPreview] = useState<PublicItem | null>(null)
 
+  async function loadMeta() {
+    const res = await fetch(`/api/public/${token}`, { credentials: 'include' })
+    const body = (await res.json()) as PublicMeta & { error?: string; code?: string }
+    if (res.status === 401 && body.code === 'PASSWORD') {
+      setLocked(true)
+      setMeta(null)
+      setError(null)
+      return
+    }
+    if (res.status === 401 && body.code === 'EXPIRED') {
+      setLocked(false)
+      setMeta(null)
+      setError('This link has expired')
+      return
+    }
+    if (!res.ok) throw new Error(body.error ?? 'Link not found')
+    setLocked(false)
+    setMeta(body)
+    setError(null)
+  }
+
   useEffect(() => {
     let gone = false
-    void fetch(`/api/public/${token}`)
-      .then(async (res) => {
-        const body = (await res.json()) as PublicMeta & { error?: string }
-        if (!res.ok) throw new Error(body.error ?? 'Link not found')
-        if (!gone) setMeta(body)
-      })
-      .catch((err: unknown) => {
-        if (!gone) setError(err instanceof Error ? err.message : 'Link not found')
-      })
+    void loadMeta().catch((err: unknown) => {
+      if (!gone) setError(err instanceof Error ? err.message : 'Link not found')
+    })
     return () => {
       gone = true
     }
@@ -51,7 +71,7 @@ export function PublicViewer({ token }: { token: string }) {
     if (!meta || meta.type !== 'folder') return
     let gone = false
     const qs = folderPath ? `?path=${encodeURIComponent(folderPath)}` : ''
-    void fetch(`/api/public/${token}/items${qs}`)
+    void fetch(`/api/public/${token}/items${qs}`, { credentials: 'include' })
       .then(async (res) => {
         const body = (await res.json()) as { items?: PublicItem[]; error?: string }
         if (!res.ok) throw new Error(body.error ?? 'Could not list folder')
@@ -65,6 +85,27 @@ export function PublicViewer({ token }: { token: string }) {
     }
   }, [folderPath, meta, token])
 
+  async function unlock() {
+    setUnlocking(true)
+    setError(null)
+    try {
+      const res = await fetch(`/api/public/${token}/unlock`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ password }),
+      })
+      const body = (await res.json()) as { error?: string; code?: string }
+      if (!res.ok) throw new Error(body.error ?? 'Wrong password')
+      setPassword('')
+      await loadMeta()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Wrong password')
+    } finally {
+      setUnlocking(false)
+    }
+  }
+
   function raw(path = '') {
     const qs = path ? `?path=${encodeURIComponent(path)}` : ''
     return `/api/public/${token}/raw${qs}`
@@ -74,7 +115,40 @@ export function PublicViewer({ token }: { token: string }) {
     return `/api/public/${token}/download${qs}`
   }
 
-  if (error) {
+  if (locked) {
+    return (
+      <Shell>
+        <h1 className="text-2xl font-medium">Password required</h1>
+        <p className="mt-2 max-w-sm text-sm text-[#8d8d8d]">This link is locked. Enter the password the owner set.</p>
+        {error ? <p className="mt-3 text-sm text-[#f28b82]">{error}</p> : null}
+        <form
+          className="mt-6 flex w-full max-w-sm flex-col gap-3"
+          onSubmit={(e) => {
+            e.preventDefault()
+            void unlock()
+          }}
+        >
+          <Input
+            type="password"
+            autoFocus
+            className="h-11 rounded-xl border-0 bg-[#242424] text-white"
+            placeholder="Password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+          />
+          <Button
+            className="h-11 rounded-full bg-white text-[#1a1a1a] hover:bg-[#f2f2f2]"
+            disabled={unlocking || !password}
+            type="submit"
+          >
+            {unlocking ? 'Unlocking…' : 'Unlock'}
+          </Button>
+        </form>
+      </Shell>
+    )
+  }
+
+  if (error && !meta) {
     return (
       <Shell>
         <h1 className="text-2xl font-medium">This link doesn’t work</h1>

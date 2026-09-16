@@ -17,6 +17,7 @@ export type FileEntry = {
   trashedAt?: string
   expiresAt?: string
   daysLeft?: number
+  spam?: boolean
 }
 
 export const HARD_DELETE_BYTES = 20 * 1024 ** 3
@@ -30,12 +31,21 @@ export type ShareInfo = {
   toName: string
   toEmail: string
   createdAt: string
+  status?: 'ok' | 'pending'
 }
 
 export type LinkInfo = {
   id: string
   token: string
   path: string
+  createdAt: string
+  expiresAt?: string | null
+  passwordProtected?: boolean
+}
+
+export type FileVersion = {
+  id: string
+  size: number
   createdAt: string
 }
 
@@ -103,7 +113,7 @@ export function toDriveItem(entry: FileEntry, owner: { name: string }): DriveIte
     starred: Boolean(entry.starred),
     shared: Boolean(entry.shared),
     trashed: Boolean(entry.trashed),
-    spam: false,
+    spam: Boolean(entry.spam),
     computer: false,
     owned: !entry.path.startsWith('share:'),
     daysLeft: entry.daysLeft,
@@ -276,16 +286,48 @@ export async function deleteShare(id: string): Promise<void> {
   await api(`/api/shares/${id}`, { method: 'DELETE' })
 }
 
-export async function createLink(path: string): Promise<LinkInfo> {
+export async function createLink(
+  path: string,
+  opts?: { expiresHours?: number | null; password?: string | null },
+): Promise<LinkInfo> {
   const body = await api<{ link: LinkInfo }>('/api/links', {
     method: 'POST',
-    body: JSON.stringify({ path }),
+    body: JSON.stringify({
+      path,
+      expiresHours: opts?.expiresHours,
+      password: opts?.password,
+    }),
   })
   return body.link
 }
 
 export async function deleteLink(id: string): Promise<void> {
   await api(`/api/links/${id}`, { method: 'DELETE' })
+}
+
+export async function copyFiles(paths: string[], dest?: string | null): Promise<FileEntry[]> {
+  const body = await api<{ items: FileEntry[] }>('/api/files/copy', {
+    method: 'POST',
+    body: JSON.stringify({ paths, dest: dest === undefined ? null : dest }),
+  })
+  return body.items
+}
+
+export async function listFileVersions(path: string): Promise<FileVersion[]> {
+  const body = await api<{ versions: FileVersion[] }>(`/api/files/versions?path=${encodeURIComponent(path)}`)
+  return body.versions
+}
+
+export async function restoreFileVersion(path: string, id: string): Promise<FileEntry> {
+  const body = await api<{ item: FileEntry }>('/api/files/versions/restore', {
+    method: 'POST',
+    body: JSON.stringify({ path, id }),
+  })
+  return body.item
+}
+
+export async function acceptShare(id: string): Promise<void> {
+  await api(`/api/shares/${id}/accept`, { method: 'POST' })
 }
 
 export async function unzipFile(path: string): Promise<void> {

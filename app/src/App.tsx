@@ -18,6 +18,8 @@ import { Input } from '@/components/ui/input'
 import {
   ApiError,
   HARD_DELETE_BYTES,
+  acceptShare,
+  copyFiles,
   deleteFile,
   deleteShare,
   downloadUrl,
@@ -85,7 +87,8 @@ function itemsMatch(a: DriveItem[], b: DriveItem[]): boolean {
       item.size === other.size &&
       item.starred === other.starred &&
       item.trashed === other.trashed &&
-      item.shared === other.shared
+      item.shared === other.shared &&
+      item.spam === other.spam
     )
   })
 }
@@ -214,7 +217,7 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
         const settings = await fetchTempSettings()
         setTtlHours(settings.ttlHours)
       } else if (section === 'spam') {
-        entries = []
+        entries = await listFiles({ view: 'spam' })
       } else {
         entries = await listFiles({ path: folderPath })
       }
@@ -320,6 +323,10 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
   }
 
   function openItem(item: DriveItem) {
+    if (item.spam) {
+      notify('Accept this share first')
+      return
+    }
     if (item.trashed) {
       notify('Restore this item to open it')
       return
@@ -434,11 +441,39 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
     if (!parsed) return
     try {
       await deleteShare(parsed.shareId)
-      notify('Removed from Shared with me')
+      notify(section === 'spam' ? 'Removed from Spam' : 'Removed from Shared with me')
       setFolderPath('')
       await refresh()
     } catch (err) {
       notify(err instanceof Error ? err.message : 'Could not remove')
+    }
+  }
+
+  async function duplicate(ids: string[]) {
+    const batch = ids
+      .map((id) => items.find((entry) => entry.id === id))
+      .filter((entry): entry is DriveItem => entry != null && entry.owned !== false && !entry.trashed && !entry.spam)
+    if (!batch.length) return
+    try {
+      const copied = await copyFiles(batch.map((item) => item.id))
+      notify(copied.length === 1 ? `Copied ${copied[0].name}` : `Copied ${copied.length} items`)
+      setSelectedIds(copied.map((item) => item.path))
+      await refresh()
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Could not copy')
+    }
+  }
+
+  async function acceptIncoming(id: string) {
+    const parsed = parseSharePath(id)
+    if (!parsed) return
+    try {
+      await acceptShare(parsed.shareId)
+      notify('Accepted. It’s in Shared with me.')
+      setSelectedIds([])
+      await refresh()
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Could not accept')
     }
   }
 
@@ -658,6 +693,11 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
       if (e.key === 'F2' && selectedIds.length === 1) {
         e.preventDefault()
         openRename(selectedIds[0])
+        return
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'd') {
+        e.preventDefault()
+        void duplicate(selectedIds)
       }
     }
     window.addEventListener('keydown', onKey)
@@ -887,6 +927,8 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
                 onDropFiles={(files, dest) => void onUpload(files, dest)}
                 onMoveToTemp={(ids) => void sendToTemp(ids)}
                 onKeep={(ids) => void keepItem(ids)}
+                onCopy={(ids) => void duplicate(ids)}
+                onAcceptShare={(id) => void acceptIncoming(id)}
               />
             )}
           </div>
@@ -946,6 +988,15 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
           url={rawUrl(preview.id)}
           downloadUrl={downloadUrl(preview.id)}
           editable={preview.owned !== false && !preview.trashed}
+          filePath={
+            preview.owned !== false && !preview.trashed && !preview.id.startsWith('share:') && !preview.spam
+              ? preview.id
+              : undefined
+          }
+          onRestored={async () => {
+            notify(`Restored ${preview.name}`)
+            await refresh()
+          }}
           onSave={
             preview.owned !== false && !preview.trashed
               ? async (content) => {

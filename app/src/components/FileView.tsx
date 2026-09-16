@@ -20,6 +20,8 @@ import {
   ArchiveRestore,
   ArrowDownAz,
   Calendar,
+  Check,
+  Copy,
   Download,
   FilePlus,
   FolderOpen,
@@ -79,6 +81,8 @@ type FileViewProps = {
   onDropFiles?: (files: FileList, dest: string) => void
   onMoveToTemp: (ids: string[]) => void
   onKeep: (ids: string[]) => void
+  onCopy: (ids: string[]) => void
+  onAcceptShare: (id: string) => void
 }
 
 export function FileView(props: FileViewProps) {
@@ -447,7 +451,10 @@ function handlers(props: FileViewProps) {
     onUnzip: props.onUnzip,
     onMoveToTemp: props.onMoveToTemp,
     onKeep: props.onKeep,
+    onCopy: props.onCopy,
+    onAcceptShare: props.onAcceptShare,
     onSelect: props.onSelect,
+    section: props.section,
   }
 }
 
@@ -486,7 +493,10 @@ function ItemMenu({
   onUnzip,
   onMoveToTemp,
   onKeep,
+  onCopy,
+  onAcceptShare,
   onSelect,
+  section,
 }: {
   item: DriveItem
   items: DriveItem[]
@@ -504,7 +514,10 @@ function ItemMenu({
   onUnzip: (ids: string[]) => void
   onMoveToTemp: (ids: string[]) => void
   onKeep: (ids: string[]) => void
+  onCopy: (ids: string[]) => void
+  onAcceptShare: (id: string) => void
   onSelect: (id: string, mods: SelectMods) => void
+  section: SectionId
 }) {
   const batch =
     selectedIds.includes(item.id) && selectedIds.length > 1
@@ -522,6 +535,8 @@ function ItemMenu({
   const canTemp = batch.every((entry) => !isTempId(entry.id) && entry.owned !== false && !entry.trashed && !entry.computer)
   const allStarred = batch.every((entry) => entry.starred)
   const huge = batch.some((entry) => entry.size != null && entry.size > 20 * 1024 ** 3)
+  const spam = section === 'spam' || batch.every((entry) => entry.spam)
+  const canCopy = batch.every((entry) => entry.owned !== false && !entry.trashed && !entry.spam && !entry.computer)
 
   return (
     <ContextMenu>
@@ -537,6 +552,21 @@ function ItemMenu({
         </div>
       </ContextMenuTrigger>
       <ContextMenuContent className="w-56">
+        {spam ? (
+          <>
+            {n === 1 ? (
+              <ContextMenuItem onSelect={() => onAcceptShare(item.id)}>
+                <Check />
+                Accept
+              </ContextMenuItem>
+            ) : null}
+            <ContextMenuItem variant="destructive" onSelect={() => onRemoveShare(item.id)}>
+              <UserMinus />
+              Remove
+            </ContextMenuItem>
+          </>
+        ) : (
+          <>
         {n === 1 ? (
           <ContextMenuItem onSelect={() => onOpen(item)}>
             <FolderOpen />
@@ -559,6 +589,12 @@ function ItemMenu({
           <ContextMenuItem onSelect={() => onRename(item.id)}>
             <Pencil />
             Rename
+          </ContextMenuItem>
+        ) : null}
+        {canCopy ? (
+          <ContextMenuItem onSelect={() => onCopy(ids)}>
+            <Copy />
+            {n > 1 ? `Make ${n} copies` : 'Make a copy'}
           </ContextMenuItem>
         ) : null}
         {zips.length ? (
@@ -613,6 +649,8 @@ function ItemMenu({
                 : 'Move to trash'}
           </ContextMenuItem>
         )}
+          </>
+        )}
       </ContextMenuContent>
     </ContextMenu>
   )
@@ -636,7 +674,7 @@ function EmptyState({ section, search }: { section: SectionId; search: string })
     body = 'When someone on this node shares a file, it lands here.'
   } else if (section === 'spam') {
     title = 'Spam is empty'
-    body = 'Suspicious shares get parked here.'
+    body = 'First-time shares from people you have not accepted yet land here. Accept to move them into Shared with me, or remove them.'
   } else if (section === 'recent') {
     title = 'No recent files'
     body = 'Open something and it will show up in this list.'

@@ -4,12 +4,16 @@ import type { ServerConfig } from './config.ts'
 import { entryAt, listPath, openDownload, resolveSafe, type DriveEntry } from './storage.ts'
 import { ensureUserDrive, findByEmail, findById, loadUsers, type UserRecord } from './users.ts'
 
+export type ShareStatus = 'ok' | 'pending'
+
 export type ShareRecord = {
   id: string
   ownerId: string
   path: string
   toUserId: string
   createdAt: string
+  status?: ShareStatus
+  acceptedAt?: string
 }
 
 export type SharePublic = ShareRecord & {
@@ -19,6 +23,19 @@ export type SharePublic = ShareRecord & {
   ownerEmail: string
   name: string
   type: 'file' | 'folder'
+  status: ShareStatus
+}
+
+export function shareStatus(share: ShareRecord): ShareStatus {
+  return share.status === 'pending' ? 'pending' : 'ok'
+}
+
+function trustedPair(shares: ShareRecord[], a: string, b: string): boolean {
+  return shares.some(
+    (share) =>
+      shareStatus(share) === 'ok' &&
+      ((share.ownerId === a && share.toUserId === b) || (share.ownerId === b && share.toUserId === a)),
+  )
 }
 
 function filePath(config: ServerConfig): string {
@@ -82,15 +99,33 @@ export async function createShare(config: ServerConfig, owner: UserRecord, path:
   if (shares.some((share) => share.ownerId === owner.id && share.toUserId === target.id && share.path === path)) {
     throw new ShareError('Already shared with them', 409)
   }
+  const known = trustedPair(shares, owner.id, target.id)
+  const now = new Date().toISOString()
   const next: ShareRecord = {
     id: crypto.randomUUID(),
     ownerId: owner.id,
     path,
     toUserId: target.id,
-    createdAt: new Date().toISOString(),
+    createdAt: now,
+    status: known ? 'ok' : 'pending',
+    acceptedAt: known ? now : undefined,
   }
   await writeShares(config, [...shares, next])
   return next
+}
+
+export async function acceptShare(config: ServerConfig, actor: UserRecord, id: string): Promise<ShareRecord> {
+  const shares = await loadAll(config)
+  const found = shares.find((share) => share.id === id)
+  if (!found) throw new ShareError('Share not found', 404)
+  if (found.toUserId !== actor.id) throw new ShareError('Not your share', 403)
+  if (shareStatus(found) === 'ok') return found
+  const now = new Date().toISOString()
+  const next = shares.map((share) =>
+    share.id === id ? { ...share, status: 'ok' as const, acceptedAt: now } : share,
+  )
+  await writeShares(config, next)
+  return next.find((share) => share.id === id) as ShareRecord
 }
 
 export async function deleteShare(config: ServerConfig, actor: UserRecord, id: string): Promise<void> {
@@ -148,6 +183,7 @@ export async function decorateShare(
     ownerEmail: owner.email,
     name: item?.name ?? share.path.split('/').pop() ?? share.path,
     type: item?.type ?? 'file',
+    status: shareStatus(share),
   }
 }
 
@@ -165,7 +201,9 @@ export async function listIncoming(
   config: ServerConfig,
   user: UserRecord,
 ): Promise<Array<DriveEntry & { shareId: string; shareName: string; owner: string; ownerId: string; shared: true }>> {
-  const shares = (await loadAll(config)).filter((share) => share.toUserId === user.id)
+  const shares = (await loadAll(config)).filter(
+    (share) => share.toUserId === user.id && shareStatus(share) === 'ok',
+  )
   const users = await loadUsers(config)
   const out: Array<DriveEntry & { shareId: string; shareName: string; owner: string; ownerId: string; shared: true }> = []
   for (const share of shares) {
@@ -187,6 +225,35 @@ export async function listIncoming(
   return out.sort((a, b) => a.name.localeCompare(b.name))
 }
 
+export async function listPendingIncoming(
+  config: ServerConfig,
+  user: UserRecord,
+): Promise<Array<DriveEntry & { shareId: string; shareName: string; owner: string; ownerId: string; shared: true; spam: true }>> {
+  const shares = (await loadAll(config)).filter(
+    (share) => share.toUserId === user.id && shareStatus(share) === 'pending',
+  )
+  const users = await loadUsers(config)
+  const out: Array<DriveEntry & { shareId: string; shareName: string; owner: string; ownerId: string; shared: true; spam: true }> = []
+  for (const share of shares) {
+    const owner = findById(users, share.ownerId)
+    if (!owner) continue
+    const root = await ensureUserDrive(config, owner.id)
+    const item = await entryAt(root, share.path)
+    if (!item) continue
+    out.push({
+      ...item,
+      path: virtualPath(share.id, item.path, share.path),
+      shareId: share.id,
+      shareName: item.name,
+      owner: owner.name,
+      ownerId: owner.id,
+      shared: true,
+      spam: true,
+    })
+  }
+  return out.sort((a, b) => a.name.localeCompare(b.name))
+}
+
 export async function listSharedFolder(
   config: ServerConfig,
   user: UserRecord,
@@ -194,7 +261,7 @@ export async function listSharedFolder(
   sub = '',
 ): Promise<{ shareName: string; items: Array<DriveEntry & { shareId: string; shareName: string; owner: string; ownerId: string; shared: true }> }> {
   const share = (await loadAll(config)).find((item) => item.id === shareId)
-  if (!share || share.toUserId !== user.id) throw new ShareError('Share not found', 404)
+  if (!share || share.toUserId !== user.id || shareStatus(share) !== 'ok') throw new ShareError('Share not found', 404)
   const users = await loadUsers(config)
   const owner = findById(users, share.ownerId)
   if (!owner) throw new ShareError('Share not found', 404)
@@ -227,7 +294,7 @@ export async function openSharedDownload(
   sub = '',
 ) {
   const share = (await loadAll(config)).find((item) => item.id === shareId)
-  if (!share || share.toUserId !== user.id) throw new ShareError('Share not found', 404)
+  if (!share || share.toUserId !== user.id || shareStatus(share) !== 'ok') throw new ShareError('Share not found', 404)
   const root = await ensureUserDrive(config, share.ownerId)
   const rel = sub ? `${share.path}/${sub.replace(/^\/+/, '')}` : share.path
   resolveSafe(root, rel)

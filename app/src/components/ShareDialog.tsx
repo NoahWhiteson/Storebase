@@ -19,7 +19,16 @@ import {
   type LinkInfo,
   type ShareInfo,
 } from '@/lib/api'
+import { formatRemaining } from '@/lib/format'
 import { useEffect, useRef, useState } from 'react'
+
+const EXPIRY_OPTIONS = [
+  { label: 'Never', hours: 0 },
+  { label: '1 hour', hours: 1 },
+  { label: '1 day', hours: 24 },
+  { label: '7 days', hours: 168 },
+  { label: '30 days', hours: 720 },
+]
 
 export function ShareDialog({
   path,
@@ -37,6 +46,9 @@ export function ShareDialog({
   const [email, setEmail] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [expiresHours, setExpiresHours] = useState(0)
+  const [password, setPassword] = useState('')
+  const [clearPassword, setClearPassword] = useState(false)
   const urlRef = useRef<HTMLInputElement>(null)
 
   async function reload() {
@@ -57,15 +69,10 @@ export function ShareDialog({
   async function copyUrl(value: string) {
     urlRef.current?.focus()
     urlRef.current?.select()
-    const ok = await copyText(value)
-    if (!ok && urlRef.current) {
-      urlRef.current.select()
-      try {
-        document.execCommand('copy')
-      } catch {
-        setError('Copy failed. Select the link and copy it yourself.')
-        return
-      }
+    const ok = await copyText(value, urlRef.current)
+    if (!ok) {
+      setError('Copy failed. Select the link and copy it yourself.')
+      return
     }
     onToast('Link copied')
   }
@@ -102,19 +109,48 @@ export function ShareDialog({
     }
   }
 
+  function linkOpts(create: boolean) {
+    const opts: { expiresHours?: number | null; password?: string | null } = {
+      expiresHours: expiresHours > 0 ? expiresHours : 0,
+    }
+    if (clearPassword) opts.password = ''
+    else if (password.trim()) opts.password = password.trim()
+    else if (create) opts.password = undefined
+    return opts
+  }
+
   async function toggleLink(on: boolean) {
     setBusy(true)
     try {
       if (on) {
-        const next = await createLink(path)
+        const next = await createLink(path, linkOpts(true))
         setLink(next)
+        setPassword('')
+        setClearPassword(false)
         await copyUrl(publicLinkUrl(next.token))
         onToast('Link copied. Anyone with it can view, not the rest of the app.')
       } else if (link) {
         await deleteLink(link.id)
         setLink(null)
+        setPassword('')
+        setClearPassword(false)
         onToast('Link turned off')
       }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not update link')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function applyLink() {
+    setBusy(true)
+    try {
+      const next = await createLink(path, linkOpts(false))
+      setLink(next)
+      setPassword('')
+      setClearPassword(false)
+      onToast('Link updated')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not update link')
     } finally {
@@ -156,24 +192,79 @@ export function ShareDialog({
               />
             </span>
           </button>
-          {link ? (
-            <div className="mt-3 flex gap-2">
-              <Input
-                ref={urlRef}
-                readOnly
-                className="h-10 rounded-xl border-0 bg-[#242424] text-xs text-white"
-                value={url}
-                onFocus={(e) => e.currentTarget.select()}
-              />
-              <Button
-                className="h-10 shrink-0 rounded-full bg-white px-3 text-[#1a1a1a] hover:bg-[#f2f2f2]"
-                onClick={() => void copyUrl(url)}
+          <div className="mt-3 grid gap-2 sm:grid-cols-2">
+            <label className="block">
+              <span className="mb-1 block text-[11px] text-[#8d8d8d]">Expires</span>
+              <select
+                className="h-10 w-full rounded-xl border-0 bg-[#242424] px-3 text-sm text-white outline-none"
+                value={expiresHours}
+                onChange={(e) => setExpiresHours(Number(e.target.value))}
               >
-                Copy
+                {EXPIRY_OPTIONS.map((option) => (
+                  <option key={option.hours} value={option.hours}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-[11px] text-[#8d8d8d]">Password</span>
+              <Input
+                type="password"
+                autoComplete="new-password"
+                className="h-10 rounded-xl border-0 bg-[#242424] text-sm text-white"
+                placeholder={link?.passwordProtected ? 'Keep current' : 'Optional'}
+                value={password}
+                onChange={(e) => {
+                  setPassword(e.target.value)
+                  if (e.target.value) setClearPassword(false)
+                }}
+              />
+            </label>
+          </div>
+          {link?.expiresAt ? (
+            <p className="mt-2 text-xs text-[#8d8d8d]">{formatRemaining(link.expiresAt)}</p>
+          ) : null}
+          {link?.passwordProtected ? (
+            <button
+              type="button"
+              className="mt-2 text-xs text-[#8d8d8d] underline-offset-2 hover:text-white hover:underline"
+              onClick={() => {
+                setClearPassword(true)
+                setPassword('')
+              }}
+            >
+              {clearPassword ? 'Password will be removed' : 'Remove password'}
+            </button>
+          ) : null}
+          {link ? (
+            <>
+              <div className="mt-3 flex gap-2">
+                <Input
+                  ref={urlRef}
+                  readOnly
+                  className="h-10 rounded-xl border-0 bg-[#242424] text-xs text-white"
+                  value={url}
+                  onFocus={(e) => e.currentTarget.select()}
+                />
+                <Button
+                  className="h-10 shrink-0 rounded-full bg-white px-3 text-[#1a1a1a] hover:bg-[#f2f2f2]"
+                  onClick={() => void copyUrl(url)}
+                >
+                  Copy
+                </Button>
+              </div>
+              <Button
+                variant="ghost"
+                className="mt-2 h-8 rounded-full px-3 text-xs"
+                disabled={busy}
+                onClick={() => void applyLink()}
+              >
+                Apply expiry / password
               </Button>
-            </div>
+            </>
           ) : (
-            <p className="mt-2 text-xs text-[#8d8d8d]">Off. They only see this file, not Storebase.</p>
+            <p className="mt-2 text-xs text-[#8d8d8d]">Off. They only see this file, not Storebase. Set expiry or a password before turning it on.</p>
           )}
         </div>
 
@@ -183,7 +274,10 @@ export function ShareDialog({
               <div key={share.id} className="flex items-center justify-between gap-3 rounded-xl bg-white/[0.04] px-3 py-2">
                 <div className="min-w-0">
                   <div className="truncate text-sm text-white">{share.toName}</div>
-                  <div className="truncate text-xs text-[#8d8d8d]">{share.toEmail}</div>
+                  <div className="truncate text-xs text-[#8d8d8d]">
+                    {share.toEmail}
+                    {share.status === 'pending' ? ' · waiting to accept' : ''}
+                  </div>
                 </div>
                 <Button variant="ghost" className="h-8 rounded-full text-[#f28b82]" disabled={busy} onClick={() => void remove(share)}>
                   Remove

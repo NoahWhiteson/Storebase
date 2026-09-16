@@ -2,9 +2,10 @@ import { StorebaseLogo } from '@/components/StorebaseLogo'
 import { Button } from '@/components/ui/button'
 import { VideoPlayer } from '@/components/VideoPlayer'
 import { delimiterFor, parseCsv, serializeCsv } from '@/lib/csv'
-import { saveOriginalFromUrl } from '@/lib/api'
+import { listFileVersions, restoreFileVersion, saveOriginalFromUrl, type FileVersion } from '@/lib/api'
+import { formatBytes, formatDateTime } from '@/lib/format'
 import { previewKind, renderMarkdown } from '@/lib/preview'
-import { Download, Eye, Pencil, Plus, Save, X } from 'lucide-react'
+import { Download, Eye, History, Pencil, Plus, Save, Undo2, X } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 
 const TEXT_CAP = 1_500_000
@@ -17,6 +18,8 @@ export function FilePreview({
   closable = true,
   editable = false,
   onSave,
+  filePath,
+  onRestored,
 }: {
   name: string
   url: string
@@ -25,6 +28,8 @@ export function FilePreview({
   closable?: boolean
   editable?: boolean
   onSave?: (content: string) => Promise<void>
+  filePath?: string
+  onRestored?: () => Promise<void> | void
 }) {
   const kind = previewKind(name)
   const canEdit = Boolean(editable && onSave && (kind === 'text' || kind === 'markdown' || kind === 'sheet'))
@@ -34,10 +39,23 @@ export function FilePreview({
   const [truncated, setTruncated] = useState(false)
   const [saving, setSaving] = useState(false)
   const [mode, setMode] = useState<'edit' | 'preview'>(canEdit ? 'edit' : 'preview')
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const [versions, setVersions] = useState<FileVersion[] | null>(null)
+  const [versionError, setVersionError] = useState<string | null>(null)
+  const [restoring, setRestoring] = useState<string | null>(null)
+  const [bust, setBust] = useState(0)
+  const src = bust ? `${url}${url.includes('?') ? '&' : '?'}v=${bust}` : url
+  const dl = bust ? `${downloadUrl}${downloadUrl.includes('?') ? '&' : '?'}v=${bust}` : downloadUrl
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape' && closable) onClose()
+      if (e.key === 'Escape') {
+        if (historyOpen) {
+          setHistoryOpen(false)
+          return
+        }
+        if (closable) onClose()
+      }
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's' && canEdit && !truncated) {
         e.preventDefault()
         void persist()
@@ -53,7 +71,7 @@ export function FilePreview({
     setText(null)
     setError(null)
     setTruncated(false)
-    void fetch(url, { credentials: 'include' })
+    void fetch(src, { credentials: 'include' })
       .then(async (res) => {
         if (!res.ok) throw new Error('Could not load file')
         const buf = await res.arrayBuffer()
@@ -70,7 +88,41 @@ export function FilePreview({
     return () => {
       gone = true
     }
-  }, [kind, url])
+  }, [kind, src])
+
+  useEffect(() => {
+    if (!filePath || !historyOpen) return
+    let gone = false
+    setVersionError(null)
+    void listFileVersions(filePath)
+      .then((next) => {
+        if (!gone) setVersions(next)
+      })
+      .catch((err: unknown) => {
+        if (!gone) setVersionError(err instanceof Error ? err.message : 'Could not load versions')
+      })
+    return () => {
+      gone = true
+    }
+  }, [filePath, historyOpen, bust])
+
+  async function restore(id: string) {
+    if (!filePath) return
+    setRestoring(id)
+    setVersionError(null)
+    try {
+      await restoreFileVersion(filePath, id)
+      setBust(Date.now())
+      setText(null)
+      await onRestored?.()
+      const next = await listFileVersions(filePath)
+      setVersions(next)
+    } catch (err) {
+      setVersionError(err instanceof Error ? err.message : 'Could not restore')
+    } finally {
+      setRestoring(null)
+    }
+  }
 
   const dirty = canEdit && !truncated && text != null && draft !== text
 
@@ -103,6 +155,16 @@ export function FilePreview({
           {name}
           {dirty ? <span className="ml-2 text-xs text-[#8d8d8d]">unsaved</span> : null}
         </div>
+        {filePath ? (
+          <Button
+            variant="ghost"
+            className="h-9 rounded-full"
+            onClick={() => setHistoryOpen((open) => !open)}
+          >
+            <History className="size-4" />
+            History
+          </Button>
+        ) : null}
         {canEdit && kind === 'markdown' && !truncated ? (
           <Button
             variant="ghost"
@@ -125,33 +187,34 @@ export function FilePreview({
         ) : null}
         <Button
           className="h-9 rounded-full bg-white px-4 text-[#1a1a1a] hover:bg-[#f2f2f2]"
-          onClick={() => void saveOriginalFromUrl(downloadUrl, name)}
+          onClick={() => void saveOriginalFromUrl(dl, name)}
         >
           <Download className="size-4" />
           Download
         </Button>
       </header>
+      <div className="flex min-h-0 flex-1">
       <div className={kind === 'video' ? 'relative flex min-h-0 flex-1 overflow-hidden bg-black' : 'min-h-0 flex-1 overflow-auto p-4 md:p-8'}>
         {kind === 'image' ? (
           <img
-            src={url}
+            src={src}
             alt={name}
             draggable={false}
             className="mx-auto max-h-full max-w-full object-contain"
             onContextMenu={(e) => {
               e.preventDefault()
-              void saveOriginalFromUrl(downloadUrl, name)
+              void saveOriginalFromUrl(dl, name)
             }}
           />
         ) : null}
-        {kind === 'video' ? <VideoPlayer src={url} title={name} /> : null}
+        {kind === 'video' ? <VideoPlayer src={src} title={name} /> : null}
         {kind === 'audio' ? (
           <div className="flex h-full items-center justify-center">
-            <audio src={url} controls className="w-full max-w-xl" />
+            <audio src={src} controls className="w-full max-w-xl" />
           </div>
         ) : null}
         {kind === 'pdf' ? (
-          <iframe title={name} src={url} className="h-full min-h-[70vh] w-full rounded-lg bg-white" />
+          <iframe title={name} src={src} className="h-full min-h-[70vh] w-full rounded-lg bg-white" />
         ) : null}
         {kind === 'text' || kind === 'markdown' || kind === 'sheet' ? (
           error && text == null ? (
@@ -203,12 +266,45 @@ export function FilePreview({
             <p className="mt-2 max-w-sm text-sm text-[#8d8d8d]">Download it and open it locally.</p>
             <Button
               className="mt-6 h-11 rounded-full bg-white text-[#1a1a1a] hover:bg-[#f2f2f2]"
-              onClick={() => void saveOriginalFromUrl(downloadUrl, name)}
+              onClick={() => void saveOriginalFromUrl(dl, name)}
             >
               Download
             </Button>
           </div>
         ) : null}
+      </div>
+      {historyOpen && filePath ? (
+        <aside className="flex w-full max-w-sm shrink-0 flex-col border-l border-white/10 bg-[#1a1a1a] p-4">
+          <div className="mb-3 text-sm font-medium">Versions</div>
+          <p className="mb-4 text-xs text-[#8d8d8d]">
+            Storebase keeps the last 8 overwrites under 80 MB. Restore puts the current file back on the stack first.
+          </p>
+          {versionError ? <p className="mb-3 text-sm text-[#f28b82]">{versionError}</p> : null}
+          {versions == null ? (
+            <p className="text-sm text-[#8d8d8d]">Loading history…</p>
+          ) : versions.length === 0 ? (
+            <p className="text-sm text-[#8d8d8d]">No older versions yet. Save or re-upload this file to start a history.</p>
+          ) : (
+            <div className="flex flex-col gap-2 overflow-auto">
+              {versions.map((version) => (
+                <div key={version.id} className="rounded-xl bg-white/[0.04] px-3 py-2.5">
+                  <div className="text-sm text-white">{formatDateTime(version.createdAt)}</div>
+                  <div className="mt-0.5 text-xs text-[#8d8d8d]">{formatBytes(version.size)}</div>
+                  <Button
+                    variant="ghost"
+                    className="mt-2 h-8 rounded-full px-3"
+                    disabled={restoring != null}
+                    onClick={() => void restore(version.id)}
+                  >
+                    <Undo2 className="size-4" />
+                    {restoring === version.id ? 'Restoring…' : 'Restore'}
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+        </aside>
+      ) : null}
       </div>
     </div>
   )
