@@ -133,6 +133,7 @@ final class AppModel: ObservableObject {
     }
     pathMonitor.start(queue: DispatchQueue(label: "app.storebase.path"))
     restartEngine()
+    StubAccess.start()
     Task { await CloudStub.flushPending() }
     Task {
       try? await Task.sleep(nanoseconds: 2_000_000_000)

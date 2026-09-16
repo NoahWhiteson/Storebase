@@ -46,7 +46,7 @@ elif [[ "${UNSIGNED:-}" == "1" ]]; then
 fi
 
 ARCH="$(uname -m)"
-echo "Building Storebase 1.12 for ${ARCH}…"
+echo "Building Storebase 1.13 for ${ARCH}…"
 XCODE_LOG="$OUT/xcodebuild.log"
 mkdir -p "$OUT"
 XCODEBUILD=(
@@ -111,8 +111,8 @@ if [[ "$INSTALL" == "1" ]]; then
 fi
 
 echo
-echo "Storebase 1.12 → $DMG"
-echo "You should see a cube icon, a Dock icon, and a window that says 1.12."
+echo "Storebase 1.13 → $DMG"
+echo "You should see a cube icon, a Dock icon, and a window that says 1.13."
 echo "If you still see a hard-drive glyph, Spotlight is opening the old copy — quit Storebase and open /Applications/Storebase.app"
 if [[ "${UNSIGNED:-}" == "1" ]]; then
   echo "Unsigned: right-click Storebase.app → Open the first time, or xattr -cr /Applications/Storebase.app"

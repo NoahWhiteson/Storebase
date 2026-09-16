@@ -17,9 +17,9 @@
   <key>CFBundleIconName</key>
   <string>AppIcon</string>
   <key>CFBundleShortVersionString</key>
-  <string>1.12</string>
+  <string>1.13</string>
   <key>CFBundleVersion</key>
-  <string>20</string>
+  <string>21</string>
   <key>LSApplicationCategoryType</key>
   <string>public.app-category.utilities</string>
   <key>LSMinimumSystemVersion</key>
@@ -64,6 +64,8 @@
       </array>
     </dict>
   </array>
+  <key>NSAppleEventsUsageDescription</key>
+  <string>Storebase downloads the real file when you open or drag a cloud copy in Finder.</string>
   <key>NSUserNotificationAlertStyle</key>
   <string>banner</string>
   <key>NSUserNotificationsUsageDescription</key>

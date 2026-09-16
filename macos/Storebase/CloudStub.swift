@@ -41,6 +41,8 @@ enum CloudStub {
   private static var sessions: [Session] = []
   private static var sweeping = false
   private static var pending: [URL] = []
+  private static var hydrating: Set<String> = []
+  private static var holdUntil: [String: Date] = [:]
 
   static func meta(at url: URL) -> Meta? {
     if let fromXattr = readXattr(url) { return fromXattr }
@@ -61,7 +63,165 @@ enum CloudStub {
   }
 
   static func isBusy(local path: String) -> Bool {
-    gate.sync { sessions.contains { $0.stub.path == path } }
+    gate.sync { sessions.contains { $0.stub.path == path } || hydrating.contains(path) }
+  }
+
+  static func hold(_ url: URL, seconds: TimeInterval = 90) {
+    let path = url.standardizedFileURL.path
+    gate.sync { holdUntil[path] = Date().addingTimeInterval(seconds) }
+  }
+
+  private static func isHeld(_ url: URL) -> Bool {
+    let path = url.standardizedFileURL.path
+    return gate.sync {
+      if let until = holdUntil[path], until > Date() { return true }
+      holdUntil.removeValue(forKey: path)
+      return false
+    }
+  }
+
+  static func requestMaterialize(_ urls: [URL], unpinCopies: Bool = true) {
+    for url in urls {
+      guard isCloudFile(url) || hasStorebaseTag(url) || TrackedClouds.remote(forLocal: url.path) != nil else { continue }
+      hold(url)
+      Task {
+        do {
+          let tracked = TrackedClouds.isTracked(local: url.path)
+          _ = try await materialize(url, unpin: unpinCopies && !tracked)
+        } catch {
+          // drag materialize is best-effort; open still shows a notification
+        }
+      }
+    }
+  }
+
+  static func materialize(_ url: URL, unpin: Bool) async throws -> URL {
+    let path = url.standardizedFileURL.path
+    let claimed: Bool = gate.sync {
+      if hydrating.contains(path) { return false }
+      hydrating.insert(path)
+      return true
+    }
+    if !claimed {
+      for _ in 0 ..< 200 {
+        try await Task.sleep(nanoseconds: 50_000_000)
+        if gate.sync({ !hydrating.contains(path) }) { break }
+      }
+      return url
+    }
+    defer { gate.sync { hydrating.remove(path) } }
+
+    var info = meta(at: url)
+    if info == nil, let remote = TrackedClouds.remote(forLocal: url.path) ?? TrackedClouds.remoteMatchingName(url.lastPathComponent) {
+      info = Meta(path: remote, size: 0, state: "evicted", name: url.lastPathComponent)
+    }
+    guard let info, !info.path.isEmpty else {
+      throw APIError(status: 0, message: "Not a Storebase cloud copy", code: nil)
+    }
+    let existing = Int64((try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
+    if info.state == "hydrated", existing > 8192 {
+      if unpin { unpinCloud(url) }
+      return url
+    }
+
+    let pair = await MainActor.run { () -> (URL, String, Int)? in
+      guard let model = AppRuntime.model, model.paired, let base = URL(string: model.settings.nodeURL) else { return nil }
+      return (base, model.settings.token, model.settings.limitBytesPerSecond(onWifi: model.onWifi))
+    }
+    guard let pair else {
+      throw APIError(status: 0, message: "Storebase isn’t paired", code: nil)
+    }
+    let client = APIClient(baseURL: pair.0, token: pair.1)
+    client.limitBytesPerSecond = pair.2
+    let transferId = await MainActor.run {
+      AppRuntime.model?.beginTransfer(name: url.lastPathComponent, total: info.size, uploading: false)
+    }
+    defer {
+      if let transferId {
+        Task { @MainActor in AppRuntime.model?.endTransfer(id: transferId) }
+      }
+    }
+    try FileManager.default.createDirectory(at: cacheRoot(), withIntermediateDirectories: true)
+    let tmp = cacheRoot().appendingPathComponent("\(UUID().uuidString)-\(url.lastPathComponent)")
+    try await client.download(path: info.path, to: tmp) { done, total in
+      if let transferId {
+        Task { @MainActor in AppRuntime.model?.updateTransfer(id: transferId, done: done, total: total) }
+      }
+    }
+    do {
+      _ = try FileManager.default.replaceItemAt(url, withItemAt: tmp, backupItemName: nil, options: [])
+    } catch {
+      try? FileManager.default.removeItem(at: url)
+      try FileManager.default.moveItem(at: tmp, to: url)
+    }
+    if unpin {
+      unpinCloud(url)
+    } else {
+      writeMeta(
+        url,
+        Meta(path: info.path, size: info.size, state: "hydrated", name: info.name ?? url.lastPathComponent)
+      )
+      bindOpener(url)
+      applyFinderTag(url)
+      applyComment(url)
+    }
+    hold(url)
+    let changed = url.path
+    Task { @MainActor in
+      NSWorkspace.shared.noteFileSystemChanged(changed)
+    }
+    return url
+  }
+
+  static func scanDroppedCopies() {
+    let home = FileManager.default.homeDirectoryForCurrentUser
+    let folders = [
+      home.appendingPathComponent("Desktop"),
+      home.appendingPathComponent("Downloads"),
+      home.appendingPathComponent("Documents"),
+      home.appendingPathComponent("Pictures"),
+    ]
+    let fm = FileManager.default
+    var found: [URL] = []
+    for folder in folders {
+      guard let names = try? fm.contentsOfDirectory(atPath: folder.path) else { continue }
+      for name in names {
+        let url = folder.appendingPathComponent(name)
+        let values = try? url.resourceValues(forKeys: [.creationDateKey, .contentModificationDateKey, .fileSizeKey])
+        let stamp = values?.creationDate ?? values?.contentModificationDate
+        guard let stamp, Date().timeIntervalSince(stamp) < 20 else { continue }
+        if TrackedClouds.isTracked(local: url.path) { continue }
+        let size = values?.fileSize ?? 0
+        let tagged = hasStorebaseTag(url) || readXattr(url) != nil
+        let named = TrackedClouds.remoteMatchingName(name) != nil
+        if (tagged || named), size < 64 * 1024 {
+          found.append(url)
+        }
+      }
+    }
+    if !found.isEmpty {
+      requestMaterialize(found, unpinCopies: true)
+    }
+  }
+
+  private static func unpinCloud(_ url: URL) {
+    _ = url.path.withCString { pth in
+      xattrName.withCString { key in
+        removexattr(pth, key, 0)
+      }
+    }
+    stripOpener(url)
+    var tags = readStringListXattr(url, userTagsKey) ?? []
+    tags.removeAll { tagBase($0).caseInsensitiveCompare(tagLabel) == .orderedSame }
+    if tags.isEmpty {
+      _ = url.path.withCString { pth in
+        userTagsKey.withCString { key in
+          removexattr(pth, key, 0)
+        }
+      }
+    } else {
+      writePlist(url, userTagsKey, tags)
+    }
   }
 
   static func evict(url: URL, remotePath: String, size: Int64) {
@@ -102,6 +262,7 @@ enum CloudStub {
           continue
         }
         guard let info = readXattr(url), !info.path.isEmpty else { continue }
+        if info.state == "hydrated" || isHeld(url) || isBusy(local: url.path) { continue }
         let bytes = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
         if bytes > 4096 {
           evict(url: url, remotePath: info.path, size: info.size)
@@ -144,7 +305,7 @@ enum CloudStub {
 
   @MainActor
   private static func openOne(_ url: URL) async {
-    guard let model = AppRuntime.model, model.paired, let base = URL(string: model.settings.nodeURL) else {
+    guard AppRuntime.model?.paired == true else {
       gate.sync { pending.append(url) }
       Notifier.send(title: "Storebase isn’t paired", body: "Connect the Mac app, then open the file again.")
       return
@@ -155,31 +316,18 @@ enum CloudStub {
       Notifier.send(title: "Not a Storebase cloud copy", body: url.lastPathComponent)
       return
     }
-    let size = info?.size ?? 0
-    let client = APIClient(baseURL: base, token: model.settings.token)
-    client.limitBytesPerSecond = model.settings.limitBytesPerSecond(onWifi: model.onWifi)
-    let transferId = model.beginTransfer(name: url.lastPathComponent, total: size, uploading: false)
     do {
-      try FileManager.default.createDirectory(at: cacheRoot(), withIntermediateDirectories: true)
-      let dir = cacheRoot().appendingPathComponent(UUID().uuidString, isDirectory: true)
-      try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-      let cache = dir.appendingPathComponent(
-        cacheName(url, info: info ?? Meta(path: remote, size: size, state: "evicted", name: url.lastPathComponent), remote: remote)
-      )
-      try await client.download(path: remote, to: cache) { done, total in
-        Task { @MainActor in AppRuntime.model?.updateTransfer(id: transferId, done: done, total: total) }
-      }
-      model.endTransfer(id: transferId)
-      let values = try? cache.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
-      stripOpener(cache)
-      openInDefaultApp(cache)
+      let hydrated = try await materialize(url, unpin: false)
+      let values = try? hydrated.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
+      hold(hydrated)
+      openInDefaultApp(hydrated)
       gate.sync {
         sessions.append(
           Session(
             stub: url,
-            cache: cache,
+            cache: hydrated,
             remote: remote,
-            size: size,
+            size: info?.size ?? Int64(values?.fileSize ?? 0),
             snapshotSize: Int64(values?.fileSize ?? 0),
             snapshotMtime: values?.contentModificationDate,
             quietTicks: 0
@@ -187,7 +335,6 @@ enum CloudStub {
         )
       }
     } catch {
-      model.endTransfer(id: transferId)
       Notifier.send(title: "Couldn’t open from Storebase", body: "\(displayName(url, remote: remote)): \(error.localizedDescription)")
     }
   }
@@ -234,7 +381,7 @@ enum CloudStub {
       for name in names {
         let url = folder.appendingPathComponent(name)
         guard let info = meta(at: url), info.state == "hydrated" else { continue }
-        if isOpen(url) { continue }
+        if isOpen(url) || isBusy(local: url.path) || isHeld(url) { continue }
         evict(url: url, remotePath: info.path, size: info.size)
       }
     }
@@ -277,8 +424,11 @@ enum CloudStub {
         return
       }
     }
-    try? FileManager.default.removeItem(at: session.cache)
-    try? FileManager.default.removeItem(at: session.cache.deletingLastPathComponent())
+    let inPlace = session.cache.standardizedFileURL == session.stub.standardizedFileURL
+    if !inPlace {
+      try? FileManager.default.removeItem(at: session.cache)
+      try? FileManager.default.removeItem(at: session.cache.deletingLastPathComponent())
+    }
     if FileManager.default.fileExists(atPath: session.stub.path) {
       evict(url: session.stub, remotePath: session.remote, size: dirty ? size : session.size)
     }
@@ -549,6 +699,16 @@ enum TrackedClouds {
     gate.sync { loadLocked().first { $0.local == path }?.remote }
   }
 
+  static func isTracked(local path: String) -> Bool {
+    gate.sync { loadLocked().contains { $0.local == path } }
+  }
+
+  static func remoteMatchingName(_ name: String) -> String? {
+    gate.sync {
+      loadLocked().reversed().first { URL(fileURLWithPath: $0.local).lastPathComponent == name }?.remote
+    }
+  }
+
   static func reconcile(base: URL, token: String, folders: [URL], mirrorLocal: Bool) async {
     let snapshot: [Item]? = gate.sync {
       if reconciling { return nil }
@@ -662,6 +822,84 @@ enum TrackedClouds {
   private static func saveLocked(_ items: [Item]) {
     guard let data = try? JSONEncoder().encode(items) else { return }
     try? data.write(to: fileURL(), options: .atomic)
+  }
+}
+
+enum StubAccess {
+  private static let gate = Gate()
+  private static var started = false
+  private static var timer: DispatchSourceTimer?
+  private static var monitors: [Any] = []
+
+  static func start() {
+    let already = gate.sync { () -> Bool in
+      if started { return true }
+      started = true
+      return false
+    }
+    guard !already else { return }
+    let timer = DispatchSource.makeTimerSource(queue: DispatchQueue(label: "app.storebase.access"))
+    timer.schedule(deadline: .now() + 0.35, repeating: 0.35, leeway: .milliseconds(80))
+    timer.setEventHandler {
+      CloudStub.scanDroppedCopies()
+      DispatchQueue.main.async { pollDrag() }
+    }
+    timer.resume()
+    self.timer = timer
+    DispatchQueue.main.async { installMonitors() }
+  }
+
+  private static func installMonitors() {
+    let ping: (NSEvent) -> Void = { _ in
+      pollDrag()
+      pollFinderSelection()
+    }
+    if let monitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .leftMouseDragged], handler: ping) {
+      monitors.append(monitor)
+    }
+    if let monitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .leftMouseDragged], handler: { event in
+      ping(event)
+      return event
+    }) {
+      monitors.append(monitor)
+    }
+  }
+
+  private static func pollDrag() {
+    let pasteboard = NSPasteboard(name: .drag)
+    var urls: [URL] = []
+    if let names = pasteboard.propertyList(forType: NSPasteboard.PasteboardType("NSFilenamesPboardType")) as? [String] {
+      urls.append(contentsOf: names.map { URL(fileURLWithPath: $0) })
+    }
+    if let items = pasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] {
+      urls.append(contentsOf: items)
+    }
+    CloudStub.requestMaterialize(urls)
+  }
+
+  private static func pollFinderSelection() {
+    guard NSWorkspace.shared.frontmostApplication?.bundleIdentifier == "com.apple.finder" else { return }
+    DispatchQueue.global(qos: .userInitiated).async {
+      let source = """
+      tell application "Finder"
+        set out to ""
+        repeat with f in (get selection)
+          try
+            set out to out & POSIX path of (f as alias) & linefeed
+          end try
+        end repeat
+        return out
+      end tell
+      """
+      var err: NSDictionary?
+      guard let script = NSAppleScript(source: source) else { return }
+      let result = script.executeAndReturnError(&err)
+      guard err == nil, let text = result.stringValue, !text.isEmpty else { return }
+      let urls = text
+        .split(whereSeparator: \.isNewline)
+        .map { URL(fileURLWithPath: String($0)) }
+      CloudStub.requestMaterialize(urls)
+    }
   }
 }
 

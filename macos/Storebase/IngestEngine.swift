@@ -49,6 +49,9 @@ final class IngestEngine: @unchecked Sendable {
     guard !settings.token.isEmpty, let base = URL(string: settings.nodeURL) else { return }
     let folders = watchFolders(settings)
     ticks += 1
+    if settings.usesPlaceholders {
+      CloudStub.scanDroppedCopies()
+    }
     if settings.usesPlaceholders, ticks >= 3, Date().timeIntervalSince(lastMigrate) > 30 {
       lastMigrate = Date()
       CloudStub.migrate(in: folders)
