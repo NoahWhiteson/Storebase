@@ -30,24 +30,47 @@ sleep 1
 mkdir -p "$OUT"
 rm -rf "$STAGE" "$DMG" "$DERIVED"
 
-SIGN_ARGS=(CODE_SIGN_STYLE=Automatic)
+# Ad-hoc unless TEAM_ID is set. Automatic signing with no team hangs Xcode 26
+# in ProcessProductPackaging and dumps thousands of .pcm lines.
+SIGN_ARGS=(
+  CODE_SIGN_STYLE=Manual
+  CODE_SIGN_IDENTITY="-"
+  CODE_SIGNING_ALLOWED=YES
+  CODE_SIGNING_REQUIRED=NO
+  CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO
+)
 if [[ -n "${TEAM_ID:-}" ]]; then
-  SIGN_ARGS+=(DEVELOPMENT_TEAM="$TEAM_ID")
+  SIGN_ARGS=(CODE_SIGN_STYLE=Automatic DEVELOPMENT_TEAM="$TEAM_ID")
 elif [[ "${UNSIGNED:-}" == "1" ]]; then
   SIGN_ARGS=(CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO)
 fi
 
 ARCH="$(uname -m)"
-xcodebuild \
-  -project "$ROOT/Storebase.xcodeproj" \
-  -scheme Storebase \
-  -configuration Release \
-  -derivedDataPath "$DERIVED" \
-  -destination "platform=macOS,arch=${ARCH}" \
-  ARCHS="${ARCH}" \
-  ONLY_ACTIVE_ARCH=YES \
-  "${SIGN_ARGS[@]}" \
+echo "Building Storebase 1.12 for ${ARCH}…"
+XCODE_LOG="$OUT/xcodebuild.log"
+mkdir -p "$OUT"
+XCODEBUILD=(
+  xcodebuild
+  -project "$ROOT/Storebase.xcodeproj"
+  -scheme Storebase
+  -configuration Release
+  -derivedDataPath "$DERIVED"
+  -destination "platform=macOS,arch=${ARCH}"
+  ARCHS="${ARCH}"
+  ONLY_ACTIVE_ARCH=YES
+  "${SIGN_ARGS[@]}"
   build
+)
+if [[ "${VERBOSE:-}" == "1" ]]; then
+  "${XCODEBUILD[@]}"
+else
+  if ! "${XCODEBUILD[@]}" -quiet >"$XCODE_LOG" 2>&1; then
+    echo "Build failed. Last errors:" >&2
+    grep -E "error:|warning:|BUILD FAILED" "$XCODE_LOG" | grep -v "SDKExplicitPrecompiledModules\|\.pcm" | tail -n 40 >&2 || true
+    echo "Full log: $XCODE_LOG  (or VERBOSE=1 ./make-dmg.sh)" >&2
+    exit 1
+  fi
+fi
 
 APP="$DERIVED/Build/Products/Release/Storebase.app"
 if [[ ! -d "$APP" ]]; then
