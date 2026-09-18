@@ -99,6 +99,11 @@ enum CloudStub {
     }
   }
 
+  private static func isWanted(_ url: URL) -> Bool {
+    let path = url.standardizedFileURL.path
+    return gate.sync { selectionHolds.contains(path) || dragHolds.contains(path) }
+  }
+
   static func requestMaterialize(_ urls: [URL], unpinCopies: Bool = true) {
     for url in urls {
       guard isCloudFile(url) || hasStorebaseTag(url) || TrackedClouds.remote(forLocal: url.path) != nil else { continue }
@@ -106,7 +111,9 @@ enum CloudStub {
         do {
           let tracked = TrackedClouds.isTracked(local: url.path)
           _ = try await materialize(url, unpin: unpinCopies && !tracked)
-          pinBack(url)
+          if !isWanted(url) {
+            pinBack(url, force: true)
+          }
         } catch {
           // drag materialize is best-effort; open still shows a notification
         }
@@ -120,18 +127,30 @@ enum CloudStub {
     }
   }
 
-  static func pinBack(_ url: URL, force: Bool = false) {
+  static func pinBack(_ url: URL, force: Bool = false, attempt: Int = 0) {
     let path = url.standardizedFileURL.path
-    if isBusy(local: path) { return }
+    if isBusy(local: path) {
+      if force, attempt < 10 {
+        retryPinBack(url, attempt: attempt)
+      }
+      return
+    }
     if force {
-      gate.sync {
+      let stillSelected: Bool = gate.sync {
         holdUntil.removeValue(forKey: path)
         dragHolds.remove(path)
+        return selectionHolds.contains(path)
       }
+      if stillSelected { return }
     } else if isHeld(url) {
       return
     }
-    if isOpen(url) { return }
+    if isOpen(url) {
+      if force, attempt < 10 {
+        retryPinBack(url, attempt: attempt)
+      }
+      return
+    }
     guard FileManager.default.fileExists(atPath: path) else { return }
     let info = meta(at: url)
     let remote = info?.path ?? TrackedClouds.remote(forLocal: path) ?? ""
@@ -140,6 +159,12 @@ enum CloudStub {
     if allocated <= 8192, info?.state == "evicted" { return }
     let size = info?.size ?? Int64(allocated)
     evict(url: url, remotePath: remote, size: size)
+  }
+
+  private static func retryPinBack(_ url: URL, attempt: Int) {
+    DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 0.35) {
+      pinBack(url, force: true, attempt: attempt + 1)
+    }
   }
 
   static func materialize(_ url: URL, unpin: Bool) async throws -> URL {
@@ -643,17 +668,34 @@ enum CloudStub {
     return try? PropertyListSerialization.propertyList(from: Data(data.prefix(Int(read))), options: [], format: nil)
   }
 
+  private static let ignoreHolders: Set<String> = [
+    "finder",
+    "storebase",
+    "quicklookd",
+    "quicklooksatellite",
+    "quicklooksatellite-macos",
+    "quicklookuiservice",
+    "com.apple.quicklook.thumbnail",
+    "qlthumbnailgenerationextension",
+    "mds",
+    "mds_stores",
+    "mdworker",
+    "mdworker_shared",
+    "iconservicesagent",
+    "iconservicesd",
+  ]
+
   private static func isOpen(_ url: URL) -> Bool {
     let proc = Process()
     proc.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
-    proc.arguments = ["-t", "-n", "-P", "--", url.path]
+    proc.arguments = ["-n", "-P", "-F", "pc", "--", url.path]
     let out = Pipe()
     proc.standardOutput = out
     proc.standardError = FileHandle.nullDevice
     do {
       try proc.run()
     } catch {
-      return true
+      return false
     }
     let deadline = Date().addingTimeInterval(0.25)
     while proc.isRunning, Date() < deadline {
@@ -661,22 +703,30 @@ enum CloudStub {
     }
     if proc.isRunning {
       proc.terminate()
-      return true
     }
     let raw = String(data: out.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-    let pids = raw.split(whereSeparator: \.isNewline).compactMap { Int($0.trimmingCharacters(in: .whitespaces)) }
-    if pids.isEmpty { return false }
-    let ignore = Set(
-      NSWorkspace.shared.runningApplications.compactMap { app -> Int? in
-        let id = app.bundleIdentifier ?? ""
-        if id == "com.apple.finder" || id == "app.storebase.mac" { return Int(app.processIdentifier) }
-        if app.bundleURL?.lastPathComponent.caseInsensitiveCompare("Storebase.app") == .orderedSame {
-          return Int(app.processIdentifier)
-        }
-        return nil
+    var command = ""
+    for token in raw.split(whereSeparator: \.isNewline) {
+      guard let flag = token.first else { continue }
+      let value = String(token.dropFirst())
+      if flag == "c" {
+        command = value
+      } else if flag == "p" {
+        command = ""
       }
-    )
-    return pids.contains { !ignore.contains($0) }
+      if flag == "c", isRealHolder(command) {
+        return true
+      }
+    }
+    return false
+  }
+
+  private static func isRealHolder(_ command: String) -> Bool {
+    let name = URL(fileURLWithPath: command).lastPathComponent.lowercased()
+    if ignoreHolders.contains(name) { return false }
+    if name.contains("quicklook") || name.contains("thumbnail") { return false }
+    if name.contains("storebase") { return false }
+    return !name.isEmpty
   }
 
   @MainActor
@@ -893,6 +943,7 @@ enum StubAccess {
   private static var started = false
   private static var timer: DispatchSourceTimer?
   private static var monitors: [Any] = []
+  private static var draggingFiles = false
 
   static func start() {
     let already = gate.sync { () -> Bool in
@@ -916,15 +967,28 @@ enum StubAccess {
   }
 
   private static func installMonitors() {
-    let ping: (NSEvent) -> Void = { _ in
+    let dragged: (NSEvent) -> Void = { _ in
+      draggingFiles = true
       pollDrag()
       pollFinderSelection()
     }
-    if let monitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .leftMouseDragged], handler: ping) {
+    let clicked: (NSEvent) -> Void = { _ in
+      pollFinderSelection()
+    }
+    if let monitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDragged], handler: dragged) {
       monitors.append(monitor)
     }
-    if let monitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .leftMouseDragged], handler: { event in
-      ping(event)
+    if let monitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .leftMouseUp], handler: clicked) {
+      monitors.append(monitor)
+    }
+    if let monitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDragged], handler: { event in
+      dragged(event)
+      return event
+    }) {
+      monitors.append(monitor)
+    }
+    if let monitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .leftMouseUp], handler: { event in
+      clicked(event)
       return event
     }) {
       monitors.append(monitor)
@@ -932,24 +996,29 @@ enum StubAccess {
   }
 
   private static func pollDrag() {
+    let mouseDown = (NSEvent.pressedMouseButtons & 1) != 0
     let pasteboard = NSPasteboard(name: .drag)
     var urls: [URL] = []
-    if let names = pasteboard.propertyList(forType: NSPasteboard.PasteboardType("NSFilenamesPboardType")) as? [String] {
-      urls.append(contentsOf: names.map { URL(fileURLWithPath: $0) })
+    if mouseDown, draggingFiles {
+      if let names = pasteboard.propertyList(forType: NSPasteboard.PasteboardType("NSFilenamesPboardType")) as? [String] {
+        urls.append(contentsOf: names.map { URL(fileURLWithPath: $0) })
+      }
+      if let items = pasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] {
+        urls.append(contentsOf: items)
+      }
     }
-    if let items = pasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] {
-      urls.append(contentsOf: items)
+    if !mouseDown {
+      draggingFiles = false
     }
     let paths = Set(urls.map { $0.standardizedFileURL.path })
     let gone = CloudStub.replaceDrag(paths)
     if !urls.isEmpty {
-      CloudStub.requestMaterialize(urls)
+      CloudStub.requestMaterialize(urls, unpinCopies: false)
     }
-    CloudStub.pinBack(paths: gone)
+    CloudStub.pinBack(paths: gone, force: !mouseDown)
   }
 
   private static func pollFinderSelection() {
-    guard NSWorkspace.shared.frontmostApplication?.bundleIdentifier == "com.apple.finder" else { return }
     DispatchQueue.global(qos: .userInitiated).async {
       let source = """
       tell application "Finder"
