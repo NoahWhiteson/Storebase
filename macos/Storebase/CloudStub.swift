@@ -43,6 +43,8 @@ enum CloudStub {
   private static var pending: [URL] = []
   private static var hydrating: Set<String> = []
   private static var holdUntil: [String: Date] = [:]
+  private static var selectionHolds: Set<String> = []
+  private static var dragHolds: Set<String> = []
 
   static func meta(at url: URL) -> Meta? {
     if let fromXattr = readXattr(url) { return fromXattr }
@@ -71,9 +73,26 @@ enum CloudStub {
     gate.sync { holdUntil[path] = Date().addingTimeInterval(seconds) }
   }
 
+  static func replaceSelection(_ paths: Set<String>) -> Set<String> {
+    gate.sync {
+      let gone = selectionHolds.subtracting(paths)
+      selectionHolds = paths
+      return gone
+    }
+  }
+
+  static func replaceDrag(_ paths: Set<String>) -> Set<String> {
+    gate.sync {
+      let gone = dragHolds.subtracting(paths)
+      dragHolds = paths
+      return gone
+    }
+  }
+
   private static func isHeld(_ url: URL) -> Bool {
     let path = url.standardizedFileURL.path
     return gate.sync {
+      if selectionHolds.contains(path) || dragHolds.contains(path) { return true }
       if let until = holdUntil[path], until > Date() { return true }
       holdUntil.removeValue(forKey: path)
       return false
@@ -83,16 +102,36 @@ enum CloudStub {
   static func requestMaterialize(_ urls: [URL], unpinCopies: Bool = true) {
     for url in urls {
       guard isCloudFile(url) || hasStorebaseTag(url) || TrackedClouds.remote(forLocal: url.path) != nil else { continue }
-      hold(url)
       Task {
         do {
           let tracked = TrackedClouds.isTracked(local: url.path)
           _ = try await materialize(url, unpin: unpinCopies && !tracked)
+          pinBack(url)
         } catch {
           // drag materialize is best-effort; open still shows a notification
         }
       }
     }
+  }
+
+  static func pinBack(paths: Set<String>) {
+    for path in paths {
+      pinBack(URL(fileURLWithPath: path))
+    }
+  }
+
+  static func pinBack(_ url: URL) {
+    let path = url.standardizedFileURL.path
+    if isHeld(url) || isBusy(local: path) { return }
+    if isOpen(url) { return }
+    guard FileManager.default.fileExists(atPath: path) else { return }
+    let info = meta(at: url)
+    let remote = info?.path ?? TrackedClouds.remote(forLocal: path) ?? ""
+    guard !remote.isEmpty else { return }
+    let allocated = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+    if allocated <= 8192, info?.state == "evicted" { return }
+    let size = info?.size ?? Int64(allocated)
+    evict(url: url, remotePath: remote, size: size)
   }
 
   static func materialize(_ url: URL, unpin: Bool) async throws -> URL {
@@ -165,7 +204,6 @@ enum CloudStub {
       applyFinderTag(url)
       applyComment(url)
     }
-    hold(url)
     let changed = url.path
     Task { @MainActor in
       NSWorkspace.shared.noteFileSystemChanged(changed)
@@ -475,6 +513,10 @@ enum CloudStub {
 
   private static func finishStub(_ url: URL, remotePath: String, size: Int64, display: String) {
     stampCloud(url, remotePath: remotePath, size: size, display: display)
+    let path = url.path
+    Task { @MainActor in
+      NSWorkspace.shared.noteFileSystemChanged(path)
+    }
   }
 
   static func hasStorebaseTag(_ url: URL) -> Bool {
@@ -842,7 +884,10 @@ enum StubAccess {
     timer.schedule(deadline: .now() + 0.35, repeating: 0.35, leeway: .milliseconds(80))
     timer.setEventHandler {
       CloudStub.scanDroppedCopies()
-      DispatchQueue.main.async { pollDrag() }
+      DispatchQueue.main.async {
+        pollDrag()
+        pollFinderSelection()
+      }
     }
     timer.resume()
     self.timer = timer
@@ -874,7 +919,12 @@ enum StubAccess {
     if let items = pasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] {
       urls.append(contentsOf: items)
     }
-    CloudStub.requestMaterialize(urls)
+    let paths = Set(urls.map { $0.standardizedFileURL.path })
+    let gone = CloudStub.replaceDrag(paths)
+    if !urls.isEmpty {
+      CloudStub.requestMaterialize(urls)
+    }
+    CloudStub.pinBack(paths: gone)
   }
 
   private static func pollFinderSelection() {
@@ -894,11 +944,16 @@ enum StubAccess {
       var err: NSDictionary?
       guard let script = NSAppleScript(source: source) else { return }
       let result = script.executeAndReturnError(&err)
-      guard err == nil, let text = result.stringValue, !text.isEmpty else { return }
-      let urls = text
+      guard err == nil else { return }
+      let urls = (result.stringValue ?? "")
         .split(whereSeparator: \.isNewline)
         .map { URL(fileURLWithPath: String($0)) }
-      CloudStub.requestMaterialize(urls)
+      let paths = Set(urls.map { $0.standardizedFileURL.path })
+      let gone = CloudStub.replaceSelection(paths)
+      if !urls.isEmpty {
+        CloudStub.requestMaterialize(urls, unpinCopies: false)
+      }
+      CloudStub.pinBack(paths: gone)
     }
   }
 }

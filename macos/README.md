@@ -16,7 +16,7 @@ chmod +x make-dmg.sh
 
 The script quits any old Storebase process (same bundle id as the first agent build), rebuilds, writes `macos/dist/Storebase.dmg`, and replaces `/Applications/Storebase.app`.
 
-You should see **1.13** under the title and the cube icon. A hard-drive glyph means the old copy is still running — `killall -9 Storebase` then open `/Applications/Storebase.app`. HTTP to a public IP (no domain) is supposed to work — if ATS still complains, you are on an old binary.
+You should see **1.14** under the title and the cube icon. A hard-drive glyph means the old copy is still running — `killall -9 Storebase` then open `/Applications/Storebase.app`. HTTP to a public IP (no domain) is supposed to work — if ATS still complains, you are on an old binary.
 
 - First time in Xcode: open `Storebase.xcodeproj`, pick your Team under Signing, then re-run the script.
 - No Apple Developer team: `./make-dmg.sh` ad-hoc signs. Right-click → Open the first launch if Gatekeeper complains.
@@ -32,7 +32,7 @@ If Finder shows a generic white document, you are on a build from before the cub
 3. Launch Storebase on the Mac, paste both, hit Connect.
 4. Turn **Capture on** (big button). New files in Downloads upload, then stay as cloud copies — same name, same Finder icon, almost no disk — unless you change Storage.
 
-Double-click a cloud copy: Storebase downloads the real bytes into that same Finder file and opens Preview / QuickTime / whatever owns the type. Drag it to Desktop, Mail, Messages, etc. and the drop gets the real photo, not the empty stub — click first so the download can start. After you close it, the Downloads copy shrinks back to a cloud stub. Existing `.storebase` files convert back to the original name the first time the app ticks.
+Double-click a cloud copy: Storebase downloads the real bytes into that same Finder file and opens Preview / QuickTime / whatever owns the type. Drag it to Desktop, Mail, Messages, etc. and the drop gets the real photo, not the empty stub — click first so the download can start. Unselect it (or close the app that opened it) and the Downloads copy shrinks back to the ~127-byte stub. Existing `.storebase` files convert back to the original name the first time the app ticks.
 
 Deleting that file in Downloads (or another watched folder) moves it to Trash on the node if **Keep deletes in sync** is on (default). Trash or delete it on the website and the Mac copy goes away too. Turn the toggle off in Settings → Storage to stop local→cloud delete; cloud→local still happens for cloud copies so Finder doesn’t keep a ghost file.
 
