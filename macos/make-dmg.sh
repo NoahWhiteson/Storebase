@@ -23,8 +23,11 @@ fi
 
 # Same bundle id as the first agent build — if that process is still alive,
 # launching Storebase.app just foregrounds the old faceless copy.
-osascript -e 'tell application "Storebase" to quit' >/dev/null 2>&1 || true
+# Do not AppleScript-quit: an ANR Storebase never replies and this script
+# prints nothing. kill -9 first.
+echo "Stopping any running Storebase…"
 killall -9 Storebase >/dev/null 2>&1 || true
+killall -9 xcodebuild >/dev/null 2>&1 || true
 sleep 1
 
 mkdir -p "$OUT"
