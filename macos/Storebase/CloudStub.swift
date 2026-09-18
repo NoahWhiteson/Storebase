@@ -193,6 +193,7 @@ enum CloudStub {
     let existing = Int64((try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
     if info.state == "hydrated", existing > 8192 {
       if unpin { unpinCloud(url) }
+      else { stripOpener(url) }
       return url
     }
 
@@ -233,7 +234,7 @@ enum CloudStub {
         url,
         Meta(path: info.path, size: info.size, state: "hydrated", name: info.name ?? url.lastPathComponent)
       )
-      bindOpener(url)
+      stripOpener(url)
       applyFinderTag(url)
       applyComment(url)
     }
@@ -452,6 +453,7 @@ enum CloudStub {
       for name in names {
         let url = folder.appendingPathComponent(name)
         guard let info = meta(at: url), info.state == "hydrated" else { continue }
+        stripOpener(url)
         if isOpen(url) || isBusy(local: url.path) || isHeld(url) { continue }
         evict(url: url, remotePath: info.path, size: info.size)
       }
@@ -739,13 +741,18 @@ enum CloudStub {
     }
     let config = NSWorkspace.OpenConfiguration()
     config.activates = true
+    let handed: (NSRunningApplication?, Error?) -> Void = { _, _ in
+      DispatchQueue.main.async {
+        AppDelegate.shared?.hideForFileHandoff()
+      }
+    }
     if let chosen = apps.first {
-      NSWorkspace.shared.open([url], withApplicationAt: chosen, configuration: config, completionHandler: nil)
+      NSWorkspace.shared.open([url], withApplicationAt: chosen, configuration: config, completionHandler: handed)
       return
     }
     let preview = URL(fileURLWithPath: "/System/Applications/Preview.app")
     if FileManager.default.fileExists(atPath: preview.path) {
-      NSWorkspace.shared.open([url], withApplicationAt: preview, configuration: config, completionHandler: nil)
+      NSWorkspace.shared.open([url], withApplicationAt: preview, configuration: config, completionHandler: handed)
     }
   }
 

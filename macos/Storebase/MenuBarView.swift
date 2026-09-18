@@ -22,7 +22,7 @@ struct MenuBarView: View {
         .help(model.settings.captureEnabled ? "Pause capture" : "Start capture")
 
         VStack(alignment: .leading, spacing: 4) {
-          Text(statusTitle)
+          Text(model.paired ? "\(statusTitle) · 1.16" : "1.16")
             .font(.system(size: 15, weight: .semibold))
           Text(statusSubtitle)
             .font(.system(size: 12))

@@ -40,12 +40,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   private var popover: NSPopover?
   private var cancellable: AnyCancellable?
   private var lastTitle = ""
+  private var openedFromFiles = false
+
+  func applicationWillFinishLaunching(_ notification: Notification) {
+    if let event = NSAppleEventManager.shared().currentAppleEvent,
+       event.eventID == 0x6F646F63 {
+      openedFromFiles = true
+    }
+  }
 
   func applicationDidFinishLaunching(_ notification: Notification) {
     AppDelegate.shared = self
     NSApp.setActivationPolicy(.regular)
+    if let model = AppRuntime.model {
+      attach(model)
+      model.startRuntime()
+    }
     Task { @MainActor in
       self.installStatusItem()
+      if self.openedFromFiles {
+        self.hideForFileHandoff()
+      }
     }
   }
 
@@ -100,14 +115,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   }
 
   func application(_ application: NSApplication, open urls: [URL]) {
+    openedFromFiles = true
+    hideForFileHandoff()
     CloudStub.enqueue(urls)
   }
 
-  func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-    if !flag {
-      NSApp.windows.first(where: { $0.title == "Storebase" })?.makeKeyAndOrderFront(nil)
+  func hideForFileHandoff() {
+    for window in NSApp.windows where isMainWindow(window) {
+      window.orderOut(nil)
     }
-    sender.activate(ignoringOtherApps: true)
+    NSApp.hide(nil)
+  }
+
+  func showMainWindow() {
+    NSApp.unhide(nil)
+    if let window = NSApp.windows.first(where: isMainWindow) {
+      window.makeKeyAndOrderFront(nil)
+    }
+    NSApp.activate(ignoringOtherApps: true)
+  }
+
+  private func isMainWindow(_ window: NSWindow) -> Bool {
+    if window.title == "Storebase" { return true }
+    if window.identifier?.rawValue == "main" { return true }
+    return false
+  }
+
+  func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+    showMainWindow()
     return true
   }
 

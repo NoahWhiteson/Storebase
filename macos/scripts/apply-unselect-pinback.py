@@ -437,6 +437,78 @@ else:
     path.write_text(text)
     print("Patched", path)
 
+text = path.read_text()
+if "bindOpener(url)\n      applyFinderTag(url)\n      applyComment(url)" in text:
+    text = text.replace(
+        "      bindOpener(url)\n      applyFinderTag(url)\n      applyComment(url)",
+        "      stripOpener(url)\n      applyFinderTag(url)\n      applyComment(url)",
+        1,
+    )
+    path.write_text(text)
+    print("Stopped binding Open With on hydrated files")
+
+app = root / "macos/Storebase/StorebaseApp.swift"
+if app.exists():
+    app_text = app.read_text()
+    if "hideForFileHandoff" not in app_text:
+        app_text = app_text.replace(
+            "    NSApp.setActivationPolicy(.regular)\n    Task { @MainActor in\n      self.installStatusItem()\n    }",
+            """    NSApp.setActivationPolicy(.regular)
+    if let model = AppRuntime.model {
+      attach(model)
+      model.startRuntime()
+    }
+    Task { @MainActor in
+      self.installStatusItem()
+    }""",
+        )
+        app_text = app_text.replace(
+            """  func application(_ application: NSApplication, open urls: [URL]) {
+    CloudStub.enqueue(urls)
+  }
+
+  func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+    if !flag {
+      NSApp.windows.first(where: { $0.title == "Storebase" })?.makeKeyAndOrderFront(nil)
+    }
+    sender.activate(ignoringOtherApps: true)
+    return true
+  }
+""",
+            """  func application(_ application: NSApplication, open urls: [URL]) {
+    hideForFileHandoff()
+    CloudStub.enqueue(urls)
+  }
+
+  func hideForFileHandoff() {
+    for window in NSApp.windows where window.title == "Storebase" || window.identifier?.rawValue == "main" {
+      window.orderOut(nil)
+    }
+    NSApp.hide(nil)
+  }
+
+  func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+    NSApp.unhide(nil)
+    NSApp.windows.first(where: { $0.title == "Storebase" })?.makeKeyAndOrderFront(nil)
+    sender.activate(ignoringOtherApps: true)
+    return true
+  }
+""",
+        )
+        app.write_text(app_text)
+        print("Patched", app)
+
+text = path.read_text()
+if "AppDelegate.shared?.hideForFileHandoff()" not in text and "completionHandler: nil)" in text:
+    text = text.replace(
+        "completionHandler: nil)",
+        """completionHandler: { _, _ in
+      DispatchQueue.main.async { AppDelegate.shared?.hideForFileHandoff() }
+    })""",
+    )
+    path.write_text(text)
+    print("Hide Storebase after handing the file off")
+
 dmg = root / "macos/make-dmg.sh"
 if dmg.exists():
     dmg_text = dmg.read_text()
@@ -463,9 +535,11 @@ for rel in (
     if not target.exists():
         continue
     body = target.read_text()
-    updated = body.replace("1.14", "1.15")
+    updated = body.replace("1.14", "1.16").replace("1.15", "1.16")
     if "<string>23</string>" in updated and "CFBundleVersion" in updated:
-        updated = updated.replace("<string>23</string>", "<string>24</string>")
+        updated = updated.replace("<string>23</string>", "<string>25</string>")
+    if "<string>24</string>" in updated and "CFBundleVersion" in updated:
+        updated = updated.replace("<string>24</string>", "<string>25</string>")
     if updated != body:
         target.write_text(updated)
         print("Bumped", target)
@@ -473,8 +547,11 @@ for rel in (
 pbx = root / "macos/Storebase.xcodeproj/project.pbxproj"
 if pbx.exists():
     body = pbx.read_text()
-    updated = body.replace("CURRENT_PROJECT_VERSION = 23;", "CURRENT_PROJECT_VERSION = 24;").replace(
-        "MARKETING_VERSION = 1.14;", "MARKETING_VERSION = 1.15;"
+    updated = (
+        body.replace("CURRENT_PROJECT_VERSION = 23;", "CURRENT_PROJECT_VERSION = 25;")
+        .replace("CURRENT_PROJECT_VERSION = 24;", "CURRENT_PROJECT_VERSION = 25;")
+        .replace("MARKETING_VERSION = 1.14;", "MARKETING_VERSION = 1.16;")
+        .replace("MARKETING_VERSION = 1.15;", "MARKETING_VERSION = 1.16;")
     )
     if updated != body:
         pbx.write_text(updated)
