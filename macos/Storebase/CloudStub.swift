@@ -114,15 +114,23 @@ enum CloudStub {
     }
   }
 
-  static func pinBack(paths: Set<String>) {
+  static func pinBack(paths: Set<String>, force: Bool = false) {
     for path in paths {
-      pinBack(URL(fileURLWithPath: path))
+      pinBack(URL(fileURLWithPath: path), force: force)
     }
   }
 
-  static func pinBack(_ url: URL) {
+  static func pinBack(_ url: URL, force: Bool = false) {
     let path = url.standardizedFileURL.path
-    if isHeld(url) || isBusy(local: path) { return }
+    if isBusy(local: path) { return }
+    if force {
+      gate.sync {
+        holdUntil.removeValue(forKey: path)
+        dragHolds.remove(path)
+      }
+    } else if isHeld(url) {
+      return
+    }
     if isOpen(url) { return }
     guard FileManager.default.fileExists(atPath: path) else { return }
     let info = meta(at: url)
@@ -655,7 +663,20 @@ enum CloudStub {
       proc.terminate()
       return true
     }
-    return !out.fileHandleForReading.readDataToEndOfFile().isEmpty
+    let raw = String(data: out.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+    let pids = raw.split(whereSeparator: \.isNewline).compactMap { Int($0.trimmingCharacters(in: .whitespaces)) }
+    if pids.isEmpty { return false }
+    let ignore = Set(
+      NSWorkspace.shared.runningApplications.compactMap { app -> Int? in
+        let id = app.bundleIdentifier ?? ""
+        if id == "com.apple.finder" || id == "app.storebase.mac" { return Int(app.processIdentifier) }
+        if app.bundleURL?.lastPathComponent.caseInsensitiveCompare("Storebase.app") == .orderedSame {
+          return Int(app.processIdentifier)
+        }
+        return nil
+      }
+    )
+    return pids.contains { !ignore.contains($0) }
   }
 
   @MainActor
@@ -932,20 +953,25 @@ enum StubAccess {
     DispatchQueue.global(qos: .userInitiated).async {
       let source = """
       tell application "Finder"
-        set out to ""
-        repeat with f in (get selection)
-          try
-            set out to out & POSIX path of (f as alias) & linefeed
-          end try
-        end repeat
-        return out
+        try
+          set sel to (get selection)
+          set out to ""
+          repeat with f in sel
+            try
+              set out to out & POSIX path of (f as alias) & linefeed
+            end try
+          end repeat
+          return out
+        on error
+          return "__sb_sel_error__"
+        end try
       end tell
       """
       var err: NSDictionary?
       guard let script = NSAppleScript(source: source) else { return }
       let result = script.executeAndReturnError(&err)
-      guard err == nil else { return }
-      let urls = (result.stringValue ?? "")
+      guard err == nil, let text = result.stringValue, text != "__sb_sel_error__" else { return }
+      let urls = text
         .split(whereSeparator: \.isNewline)
         .map { URL(fileURLWithPath: String($0)) }
       let paths = Set(urls.map { $0.standardizedFileURL.path })
@@ -953,7 +979,7 @@ enum StubAccess {
       if !urls.isEmpty {
         CloudStub.requestMaterialize(urls, unpinCopies: false)
       }
-      CloudStub.pinBack(paths: gone)
+      CloudStub.pinBack(paths: gone, force: true)
     }
   }
 }
