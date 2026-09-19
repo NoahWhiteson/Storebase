@@ -1073,17 +1073,14 @@ function NetworkStores({
         <div className="mb-10 space-y-4">
           {mode === 'b2' ? (
             <>
-              <p className="text-sm text-[#8d8d8d]">
-                Four fields from the Backblaze website. Region is inferred. Don’t use Master Application Key.
-              </p>
-              <section className="rounded-2xl bg-white/[0.04] px-4 py-4">
+              <section className="rounded-2xl bg-white/[0.04] px-4 py-3">
                 <div className="mb-1 text-[11px] text-[#8d8d8d] uppercase">B2 Cloud Storage → Buckets</div>
-                <p className="mb-3 text-xs text-[#8d8d8d]">The bucket card titled Storebase. Not Caps & Alerts, Fireball, or Cloud Replication.</p>
+                <p className="mb-3 text-xs text-[#8d8d8d]">The Storebase card. Not Caps & Alerts, Fireball, or Cloud Replication.</p>
                 <div className="space-y-3">
-                  <Field label="Bucket name" hint="The title on the card. Not Bucket ID.">
+                  <Field label="Bucket name" hint="The title. Not Bucket ID.">
                     <Input className={fieldClass} placeholder="Storebase" value={bucket} onChange={(e) => setBucket(e.target.value)} />
                   </Field>
-                  <Field label="Endpoint" hint="Same card. Paste s3.us-east-005.backblazeb2.com — https is optional.">
+                  <Field label="Endpoint" hint="s3.us-east-005.backblazeb2.com — https optional.">
                     <Input
                       className={fieldClass}
                       placeholder="s3.us-east-005.backblazeb2.com"
@@ -1093,14 +1090,14 @@ function NetworkStores({
                   </Field>
                 </div>
               </section>
-              <section className="rounded-2xl bg-white/[0.04] px-4 py-4">
+              <section className="rounded-2xl bg-white/[0.04] px-4 py-3">
                 <div className="mb-1 text-[11px] text-[#8d8d8d] uppercase">App Keys → Your Application Keys</div>
-                <p className="mb-3 text-xs text-[#8d8d8d]">The Storebase row. Skip the Master Application Key block above it.</p>
+                <p className="mb-3 text-xs text-[#8d8d8d]">The Storebase row. Skip Master Application Key.</p>
                 <div className="space-y-3">
                   <Field label="keyID" hint="Starts with 005. Not the short Master keyID.">
                     <Input className={fieldClass} placeholder="005…" value={accessKey} onChange={(e) => setAccessKey(e.target.value)} />
                   </Field>
-                  <Field label="applicationKey" hint="Long secret shown once when the key was created. Not keyID.">
+                  <Field label="applicationKey" hint="Shown once. Not keyID.">
                     <Input
                       className={fieldClass}
                       type="password"
@@ -1126,12 +1123,14 @@ function NetworkStores({
                   </ol>
                 ) : null}
               </section>
-              <Field label="Storebase may use" hint="B2 itself is unlimited. This is just our cap.">
-                <div className="flex items-center gap-2">
-                  <Input className={`${fieldClass} w-28`} value={capacityGb} onChange={(e) => setCapacityGb(e.target.value)} />
-                  <span className="text-sm text-[#8d8d8d]">GB</span>
-                </div>
-              </Field>
+              <div className="flex flex-wrap items-end gap-3">
+                <Field label="Cap">
+                  <div className="flex items-center gap-2">
+                    <Input className={`${fieldClass} w-24`} value={capacityGb} onChange={(e) => setCapacityGb(e.target.value)} />
+                    <span className="text-sm text-[#8d8d8d]">GB</span>
+                  </div>
+                </Field>
+              </div>
             </>
           ) : mode === 's3' ? (
             <>
