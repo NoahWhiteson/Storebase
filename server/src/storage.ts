@@ -1,5 +1,5 @@
 import type { Dirent } from 'node:fs'
-import { open as openFile, cp, mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { cp, mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname, join, relative, resolve, sep } from 'node:path'
 import { assertWriteFits, folderSize } from './quota.ts'
 
@@ -177,57 +177,6 @@ export async function writeFileContent(
     userQuota: quota.userQuota,
   })
   await writeFile(full, buf)
-  const next = await stat(full)
-  return toEntry(root, full, next)
-}
-
-export async function writeRange(
-  root: string,
-  relPath: string,
-  offset: number,
-  bytes: Buffer,
-  quota: QuotaGate,
-  total?: number | null,
-): Promise<DriveEntry> {
-  if (isTrashPath(relPath)) throw new Error('Cannot edit trash')
-  if (!relPath) throw new Error('path required')
-  const full = resolveSafe(root, relPath)
-  const name = basename(full)
-  if (!name || name === '.' || name === '..' || name.startsWith('.')) {
-    throw new Error('Invalid file name')
-  }
-  await mkdir(dirname(full), { recursive: true })
-  let existing = 0
-  try {
-    const info = await stat(full)
-    if (info.isDirectory()) throw new Error('Cannot edit a folder')
-    existing = info.size
-  } catch (err) {
-    const code = err && typeof err === 'object' && 'code' in err ? String((err as { code?: string }).code) : ''
-    if (code !== 'ENOENT') throw err
-    await writeFile(full, Buffer.alloc(0))
-  }
-  const end = offset + bytes.byteLength
-  const projected = Math.max(existing, end, typeof total === 'number' && total > 0 ? total : 0)
-  const extra = Math.max(0, projected - existing)
-  await assertWriteFits({
-    userRoot: root,
-    poolRoot: quota.poolRoot,
-    incoming: extra,
-    nodeReserved: quota.nodeReserved,
-    userQuota: quota.userQuota,
-  })
-  const fh = await openFile(full, 'r+')
-  try {
-    if (bytes.byteLength > 0) {
-      await fh.write(bytes, 0, bytes.byteLength, offset)
-    }
-    if (typeof total === 'number' && total >= 0 && (end === total || total < existing)) {
-      await fh.truncate(total)
-    }
-  } finally {
-    await fh.close()
-  }
   const next = await stat(full)
   return toEntry(root, full, next)
 }

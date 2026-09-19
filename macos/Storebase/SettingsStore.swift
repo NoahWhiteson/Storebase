@@ -85,7 +85,6 @@ struct AppSettings: Codable, Equatable {
   var customKBps: Int? = nil
   var menuBarStorage: Bool? = nil
   var menuBarTransfers: Bool? = nil
-  var mountDisk: Bool? = nil
 
   enum Destination: String, Codable, CaseIterable {
     case myFiles
@@ -107,8 +106,6 @@ struct AppSettings: Codable, Equatable {
   }
 
   var usesPlaceholders: Bool { cloudPlaceholders ?? true }
-
-  var mountsDisk: Bool { mountDisk ?? true }
 
   var usesMirrorDeletes: Bool { mirrorDeletes ?? true }
 

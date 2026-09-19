@@ -22,7 +22,7 @@ struct MenuBarView: View {
         .help(model.settings.captureEnabled ? "Pause capture" : "Start capture")
 
         VStack(alignment: .leading, spacing: 4) {
-          Text(model.paired ? "\(statusTitle) · 1.17" : "1.17")
+          Text(model.paired ? "\(statusTitle) · 1.16" : "1.16")
             .font(.system(size: 15, weight: .semibold))
           Text(statusSubtitle)
             .font(.system(size: 12))
@@ -57,9 +57,6 @@ struct MenuBarView: View {
 
       Button("Settings") { model.openSettings() }
         .buttonStyle(MenuRowButton())
-      Button("Open Storebase disk") { model.openVolume() }
-        .buttonStyle(MenuRowButton())
-        .disabled(!model.paired || !model.settings.mountsDisk)
       Button("Open Storebase") { model.openWeb() }
         .buttonStyle(MenuRowButton())
         .disabled(!model.paired)

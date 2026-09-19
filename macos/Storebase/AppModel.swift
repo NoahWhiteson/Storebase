@@ -32,7 +32,6 @@ final class AppModel: ObservableObject {
   private var lastTransferPaint = Date.distantPast
 
   private var engine: IngestEngine?
-  private var volume: DavVolume?
   private var cancellable: AnyCancellable?
   private let pathMonitor = NWPathMonitor()
   private var runtimeStarted = false
@@ -68,10 +67,6 @@ final class AppModel: ObservableObject {
       return "\(pct)%"
     }
     return "\(transfers.count) files"
-  }
-
-  var volumePath: String {
-    volume?.mountPoint.path ?? "\(FileManager.default.homeDirectoryForCurrentUser.path)/Storebase"
   }
 
   var menuBarText: String {
@@ -138,7 +133,6 @@ final class AppModel: ObservableObject {
     }
     pathMonitor.start(queue: DispatchQueue(label: "app.storebase.path"))
     restartEngine()
-    restartVolume()
     StubAccess.start()
     Task { await CloudStub.flushPending() }
     Task {
@@ -172,25 +166,6 @@ final class AppModel: ObservableObject {
     next.start()
   }
 
-  func restartVolume() {
-    volume?.stop()
-    volume = nil
-    guard paired, settings.mountsDisk, let client = client() else { return }
-    let next = DavVolume(client: client)
-    do {
-      try next.start()
-      volume = next
-      lastEvent = "Mounted at \(next.mountPoint.path)"
-    } catch {
-      lastEvent = "Could not mount Storebase: \(error.localizedDescription)"
-    }
-  }
-
-  func openVolume() {
-    if volume == nil { restartVolume() }
-    volume?.reveal()
-  }
-
   func pair() async {
     pairingBusy = true
     pairingError = nil
@@ -219,7 +194,6 @@ final class AppModel: ObservableObject {
       reservedBytes = result.quotaBytes ?? result.reservedBytes
       lastEvent = "Paired with \(settings.nodeName.isEmpty ? "Storebase" : settings.nodeName)"
       restartEngine()
-      restartVolume()
     } catch {
       pairingError = error.localizedDescription
     }
@@ -229,7 +203,6 @@ final class AppModel: ObservableObject {
     settings.token = ""
     lastEvent = "Disconnected"
     restartEngine()
-    restartVolume()
   }
 
   func openWeb() {

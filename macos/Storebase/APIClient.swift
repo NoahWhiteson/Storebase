@@ -96,88 +96,6 @@ final class APIClient: @unchecked Sendable {
     return try JSONDecoder().decode(Body.self, from: data).item.path
   }
 
-  struct DriveItem: Decodable, Sendable {
-    var path: String
-    var name: String
-    var type: String
-    var size: Int64
-    var modifiedAt: String
-
-    var isFolder: Bool { type == "folder" }
-
-    var modified: Date {
-      ISO8601.date(from: modifiedAt) ?? Date()
-    }
-  }
-
-  func list(path: String) async throws -> [DriveItem] {
-    var comps = URLComponents(url: baseURL.appendingPathComponent("api/files"), resolvingAgainstBaseURL: false)!
-    comps.queryItems = [URLQueryItem(name: "path", value: path)]
-    var request = URLRequest(url: comps.url!)
-    request.timeoutInterval = 30
-    request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-    let (data, response) = try await NodeHTTP.data(for: request)
-    try Self.throwIfNeeded(data: data, response: response)
-    struct Body: Decodable { let items: [DriveItem] }
-    return try JSONDecoder().decode(Body.self, from: data).items
-  }
-
-  func stat(path: String) async throws -> DriveItem {
-    var comps = URLComponents(url: baseURL.appendingPathComponent("api/files/stat"), resolvingAgainstBaseURL: false)!
-    comps.queryItems = [URLQueryItem(name: "path", value: path)]
-    var request = URLRequest(url: comps.url!)
-    request.timeoutInterval = 20
-    request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-    let (data, response) = try await NodeHTTP.data(for: request)
-    try Self.throwIfNeeded(data: data, response: response)
-    struct Body: Decodable { let item: DriveItem }
-    return try JSONDecoder().decode(Body.self, from: data).item
-  }
-
-  func getRange(path: String, offset: Int64, length: Int) async throws -> Data {
-    guard length > 0 else { return Data() }
-    var comps = URLComponents(url: baseURL.appendingPathComponent("api/files/raw"), resolvingAgainstBaseURL: false)!
-    comps.queryItems = [URLQueryItem(name: "path", value: path)]
-    var request = URLRequest(url: comps.url!)
-    request.timeoutInterval = 120
-    request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-    let end = offset + Int64(length) - 1
-    request.setValue("bytes=\(offset)-\(end)", forHTTPHeaderField: "Range")
-    let (data, response) = try await NodeHTTP.data(for: request)
-    try Self.throwIfNeeded(data: data, response: response)
-    return data
-  }
-
-  func putRange(path: String, offset: Int64, data: Data, total: Int64?) async throws -> DriveItem {
-    var comps = URLComponents(url: baseURL.appendingPathComponent("api/files/raw"), resolvingAgainstBaseURL: false)!
-    comps.queryItems = [URLQueryItem(name: "path", value: path)]
-    var request = URLRequest(url: comps.url!)
-    request.httpMethod = "PUT"
-    request.timeoutInterval = 120
-    request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-    request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
-    if !data.isEmpty {
-      let end = offset + Int64(data.count) - 1
-      let totalPart = total.map(String.init) ?? "*"
-      request.setValue("bytes \(offset)-\(end)/\(totalPart)", forHTTPHeaderField: "Content-Range")
-    } else if let total, total >= 0 {
-      request.setValue("bytes \(offset)-\(max(offset, 1) - 1)/\(total)", forHTTPHeaderField: "Content-Range")
-    }
-    request.httpBody = data
-    let (body, response) = try await NodeHTTP.data(for: request)
-    try Self.throwIfNeeded(data: body, response: response)
-    struct Body: Decodable { let item: DriveItem }
-    return try JSONDecoder().decode(Body.self, from: body).item
-  }
-
-  func move(path: String, destDir: String) async throws {
-    try await postJSON("/api/files/move", body: ["paths": [path], "dest": destDir])
-  }
-
-  func rename(path: String, name: String) async throws {
-    try await postJSON("/api/files/rename", body: ["path": path, "name": name])
-  }
-
   func livePaths() async throws -> Set<String> {
     var comps = URLComponents(url: baseURL.appendingPathComponent("api/files"), resolvingAgainstBaseURL: false)!
     comps.queryItems = [URLQueryItem(name: "view", value: "index")]
@@ -876,17 +794,6 @@ private func decodeChunked(_ data: Data) -> Data? {
     }
   }
   return nil
-}
-
-private enum ISO8601 {
-  static func date(from raw: String) -> Date? {
-    let frac = ISO8601DateFormatter()
-    frac.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-    if let date = frac.date(from: raw) { return date }
-    let plain = ISO8601DateFormatter()
-    plain.formatOptions = [.withInternetDateTime]
-    return plain.date(from: raw)
-  }
 }
 
 private func mapNWError(_ error: Error) -> Error {

@@ -75,7 +75,6 @@ import {
   walkLiveFilePaths,
   walkVisible,
   writeFileContent,
-  writeRange,
 } from './storage.ts'
 import {
   dropTempPath,
@@ -145,18 +144,6 @@ function publicPath(path: string): boolean {
     path === '/api/pair' ||
     path.startsWith('/api/public/')
   )
-}
-
-function parseContentRange(header: string | undefined): { start: number; end: number; total: number | null } | null {
-  if (!header) return null
-  const match = header.match(/^bytes (\d+)-(\d+)\/(\d+|\*)$/i)
-  if (!match) return null
-  const start = Number(match[1])
-  const end = Number(match[2])
-  const total = match[3] === '*' ? null : Number(match[3])
-  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return null
-  if (total != null && !Number.isFinite(total)) return null
-  return { start, end, total }
 }
 
 function parseRange(header: string | undefined, size: number): { start: number; end: number } | null {
@@ -1092,45 +1079,6 @@ export function createApp(config: ServerConfig) {
       return sendFile(await openOwned(), inline, c.req.header('range'))
     } catch (err) {
       if (err instanceof ShareError) return c.json({ error: err.message }, err.status)
-      throw err
-    }
-  })
-
-  app.get('/api/files/stat', async (c) => {
-    const root = c.get('root')
-    const path = c.req.query('path') ?? ''
-    if (!path) {
-      return c.json({
-        item: { path: '', name: '', type: 'folder', size: 0, modifiedAt: new Date(0).toISOString() },
-      })
-    }
-    const item = await entryAt(root, path)
-    if (!item) return c.json({ error: 'Not found' }, 404)
-    return c.json({ item })
-  })
-
-  app.put('/api/files/raw', async (c) => {
-    const root = c.get('root')
-    const path = c.req.query('path') ?? ''
-    if (!path) return c.json({ error: 'path required' }, 400)
-    const buf = Buffer.from(await c.req.arrayBuffer())
-    const ranged = parseContentRange(c.req.header('content-range'))
-    const offsetHeader = Number(c.req.header('x-write-offset') ?? '')
-    const offset = ranged?.start ?? (Number.isFinite(offsetHeader) ? offsetHeader : 0)
-    if (ranged && buf.byteLength && ranged.end - ranged.start + 1 !== buf.byteLength) {
-      return c.json({ error: 'Content-Range does not match body' }, 400)
-    }
-    try {
-      const quota = await quotaGate(config, c.get('user'))
-      const item = await writeRange(root, path, offset, buf, quota, ranged?.total)
-      await touchRecent(root, item.path)
-      return c.json({ item: { ...item, starred: false, trashed: false } })
-    } catch (err) {
-      if (err instanceof QuotaError) return c.json({ error: err.message, code: err.code }, 507)
-      const message = err instanceof Error ? err.message : 'Could not write'
-      if (message.includes('Invalid') || message.includes('folder') || message.includes('trash')) {
-        return c.json({ error: message }, 400)
-      }
       throw err
     }
   })

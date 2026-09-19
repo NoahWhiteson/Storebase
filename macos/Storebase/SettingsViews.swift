@@ -80,15 +80,6 @@ struct GeneralPane: View {
           Text(model.settings.userEmail.isEmpty ? "—" : model.settings.userEmail)
         }
       }
-      Section("Mounted disk") {
-        Toggle("Mount Storebase as a disk", isOn: mountBind)
-          .onChange(of: model.settings.mountsDisk) { _, _ in model.restartVolume() }
-        Text("Finder gets a Storebase volume. Apps read byte ranges from the node through a local cache — they do not wait for a full download. Path: \(model.volumePath).")
-          .font(.caption)
-          .foregroundStyle(.secondary)
-        Button("Open Storebase disk") { model.openVolume() }
-          .disabled(!model.paired || !model.settings.mountsDisk)
-      }
     }
   }
 
@@ -96,13 +87,6 @@ struct GeneralPane: View {
     Binding(
       get: { model.settings[keyPath: key] },
       set: { model.settings[keyPath: key] = $0 }
-    )
-  }
-
-  private var mountBind: Binding<Bool> {
-    Binding(
-      get: { model.settings.mountsDisk },
-      set: { model.settings.mountDisk = $0 }
     )
   }
 }
