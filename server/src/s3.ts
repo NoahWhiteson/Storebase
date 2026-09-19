@@ -104,8 +104,10 @@ export async function s3Delete(target: S3Target, key: string): Promise<void> {
 
 export async function s3Probe(target: S3Target): Promise<void> {
   const res = await s3Request(target, 'GET', '', { query: '?list-type=2&max-keys=1' })
-  if (res.status === 404) throw new Error('Bucket not found')
-  if (res.status === 403) throw new Error('Keys are wrong or the bucket is closed')
+  if (res.status === 404) throw new Error('Bucket not found. Check the name — Backblaze shows it on the bucket card.')
+  if (res.status === 403) {
+    throw new Error('Backblaze rejected the keys. Use keyID + applicationKey from App Keys, not the Master keyID alone.')
+  }
   if (!res.ok) throw new Error(await s3Error(res, 'Could not reach that bucket'))
 }
 

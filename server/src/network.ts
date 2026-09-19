@@ -334,6 +334,49 @@ function cleanName(name: string): string {
   return next.slice(0, 80)
 }
 
+function stripLabeled(value: string, labels: string[]): string {
+  let next = (value ?? '').trim().replace(/^["']|["']$/g, '')
+  for (const label of labels) {
+    const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    next = next.replace(new RegExp(`^${escaped}\\s*:\\s*`, 'i'), '').trim()
+  }
+  return next
+}
+
+export function normalizeS3Keys(accessKey: string, secretKey: string): { accessKey: string; secretKey: string } {
+  const key = stripLabeled(accessKey, ['keyid', 'key id', 'application key id', 'access key', 'access key id'])
+  const secret = stripLabeled(secretKey, ['applicationkey', 'application key', 'secret', 'secret key', 'secret access key'])
+  if (!key || !secret) throw new NetworkError('Paste keyID and applicationKey from App Keys → Your Application Keys')
+  if (key === secret) {
+    throw new NetworkError('applicationKey is a different secret than keyID. If you lost it, Add a New Application Key.')
+  }
+  if (/^[a-f0-9]{8,16}$/i.test(key) && !/^00/i.test(key)) {
+    throw new NetworkError('That looks like Master Application Key. Use the Storebase row under Your Application Keys.')
+  }
+  return { accessKey: key, secretKey: secret }
+}
+
+export function normalizeS3Target(input: {
+  name?: string
+  endpoint?: string
+  region?: string
+  bucket?: string
+}): { name: string; endpoint: string; region: string; bucket: string } {
+  const bucket = stripLabeled(input.bucket ?? '', ['bucket name', 'bucketname', 'bucket'])
+  let host = stripLabeled(input.endpoint ?? '', ['endpoint', 's3 endpoint'])
+  host = host.replace(/^https?:\/\//i, '').replace(/\/+$/, '')
+  if (host.includes('/')) host = host.split('/')[0] ?? host
+  const b2 = host.match(/^s3\.([a-z0-9-]+)\.backblazeb2\.com$/i)
+  const region = (input.region ?? '').trim() || (b2 ? b2[1] : '') || 'us-east-1'
+  const name = (input.name ?? '').trim() || bucket || (b2 ? 'Backblaze' : 'S3')
+  if (!host) throw new NetworkError('Paste Endpoint from the bucket card (s3.us-east-005.backblazeb2.com)')
+  if (!bucket) throw new NetworkError('Paste the Bucket name from the card, not the Bucket ID')
+  if (/^[a-f0-9]{20,32}$/i.test(bucket)) {
+    throw new NetworkError('That’s a Bucket ID. Paste the name on the card (Storebase), not the ID.')
+  }
+  return { name: cleanName(name), endpoint: `https://${host}`, region, bucket }
+}
+
 export async function addBackend(
   config: ServerConfig,
   input: {
@@ -352,19 +395,21 @@ export async function addBackend(
   if (input.type !== 's3' && input.type !== 'node') throw new NetworkError('Type must be s3 or node')
   const capacityBytes = Math.round(Number(input.capacityGb) * 1024 ** 3)
   if (!(capacityBytes > 0)) throw new NetworkError('Capacity must be greater than 0 GB')
+  const s3 = input.type === 's3' ? normalizeS3Target(input) : null
+  const keys = input.type === 's3' ? normalizeS3Keys(input.accessKey ?? '', input.secretKey ?? '') : null
   const backend: StorageBackend =
-    input.type === 's3'
+    input.type === 's3' && s3 && keys
       ? {
           id: crypto.randomUUID(),
           type: 's3',
-          name: cleanName(input.name),
+          name: s3.name,
           capacityBytes,
           createdAt: new Date().toISOString(),
-          endpoint: (input.endpoint ?? '').trim().replace(/\/+$/, ''),
-          region: (input.region ?? '').trim() || 'us-east-1',
-          bucket: (input.bucket ?? '').trim(),
-          accessKey: (input.accessKey ?? '').trim(),
-          secretKey: input.secretKey ?? '',
+          endpoint: s3.endpoint,
+          region: s3.region,
+          bucket: s3.bucket,
+          accessKey: keys.accessKey,
+          secretKey: keys.secretKey,
         }
       : {
           id: crypto.randomUUID(),
@@ -375,8 +420,8 @@ export async function addBackend(
           url: (input.url ?? '').trim().replace(/\/+$/, ''),
           token: (input.token ?? '').trim(),
         }
-  if (backend.type === 's3' && (!backend.endpoint || !backend.bucket || !backend.accessKey || !backend.secretKey)) {
-    throw new NetworkError('Endpoint, bucket, access key, and secret are required')
+  if (backend.type === 's3' && (!backend.accessKey || !backend.secretKey)) {
+    throw new NetworkError('Paste keyID and applicationKey from Backblaze → App Keys')
   }
   if (backend.type === 'node') {
     if (!backend.url?.startsWith('http')) throw new NetworkError('Node URL must start with http')

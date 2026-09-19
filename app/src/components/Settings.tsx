@@ -45,7 +45,7 @@ import {
   UserRound,
   Users,
 } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 
 const fieldClass =
   'h-11 rounded-xl border-0 bg-[#242424] text-white shadow-none placeholder:text-[#8d8d8d] outline-none focus:outline-none focus-visible:outline-none focus-visible:ring-0'
@@ -955,10 +955,10 @@ function NetworkStores({
 }) {
   const storage = data.storage
   const backends = storage?.backends ?? []
-  const [mode, setMode] = useState<null | 's3' | 'node'>(null)
+  const [mode, setMode] = useState<null | 'b2' | 's3' | 'node'>(null)
   const [busy, setBusy] = useState(false)
   const [name, setName] = useState('')
-  const [capacityGb, setCapacityGb] = useState('100')
+  const [capacityGb, setCapacityGb] = useState('1000')
   const [endpoint, setEndpoint] = useState('')
   const [region, setRegion] = useState('')
   const [bucket, setBucket] = useState('')
@@ -966,14 +966,19 @@ function NetworkStores({
   const [secretKey, setSecretKey] = useState('')
   const [url, setUrl] = useState('')
   const [token, setToken] = useState('')
+  const [lostKey, setLostKey] = useState(false)
 
   if (!storage) return null
   const pool = storage.poolBytes ?? storage.reservedBytes
+  const ready =
+    mode === 'node'
+      ? Boolean(url.trim() && token.trim())
+      : Boolean(bucket.trim() && endpoint.trim() && accessKey.trim() && secretKey.trim())
 
   function reset() {
     setMode(null)
     setName('')
-    setCapacityGb('100')
+    setCapacityGb('1000')
     setEndpoint('')
     setRegion('')
     setBucket('')
@@ -981,6 +986,7 @@ function NetworkStores({
     setSecretKey('')
     setUrl('')
     setToken('')
+    setLostKey(false)
   }
 
   async function add() {
@@ -988,11 +994,11 @@ function NetworkStores({
     try {
       await addStorageBackend(
         mode === 'node'
-          ? { type: 'node', name, capacityGb: Number(capacityGb), url, token }
+          ? { type: 'node', name: name.trim() || 'Storebase node', capacityGb: Number(capacityGb) || 1000, url, token }
           : {
               type: 's3',
-              name,
-              capacityGb: Number(capacityGb),
+              name: name.trim() || (mode === 'b2' ? bucket.trim() || 'Backblaze' : bucket.trim() || 'S3'),
+              capacityGb: Number(capacityGb) || 1000,
               endpoint,
               region,
               bucket,
@@ -1002,7 +1008,7 @@ function NetworkStores({
       )
       reset()
       await onSaved()
-      onToast('Store connected. New files spill there when this disk is full.')
+      onToast('Connected. Files use this disk first, then Backblaze when it’s full.')
     } catch (err) {
       onToast(err instanceof Error ? err.message : 'Could not connect')
     } finally {
@@ -1014,11 +1020,205 @@ function NetworkStores({
     <div className="mt-12">
       <Heading
         title="Network"
-        hint="S3, Backblaze, R2, MinIO, or another Storebase node. One drive. Files land here first, then on connected stores."
+        hint="This disk fills first. When it’s full, new files land on Backblaze (or another store)."
       />
       <p className="mb-6 text-sm text-[#8d8d8d]">
         Pool {formatBytes(storage.poolUsedBytes)} of {formatBytes(pool)}
       </p>
+
+      {backends.length > 0 ? (
+        <div className="mb-6 space-y-3">
+          {backends.map((backend) => (
+            <div key={backend.id} className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="truncate text-sm text-white">{backend.name}</div>
+                <div className="text-xs text-[#8d8d8d]">
+                  {backend.type === 's3' ? backend.bucket || backend.endpoint : backend.url} ·{' '}
+                  {formatBytes(backend.usedBytes)} / {formatBytes(backend.capacityBytes)}
+                </div>
+              </div>
+              <div className="flex shrink-0 gap-2">
+                <button
+                  type="button"
+                  className="text-xs text-[#8d8d8d] hover:text-white"
+                  onClick={() => {
+                    void testStorageBackend(backend.id)
+                      .then(() => onToast(`${backend.name} is reachable`))
+                      .catch((err) => onToast(err instanceof Error ? err.message : 'Unreachable'))
+                  }}
+                >
+                  Test
+                </button>
+                <button
+                  type="button"
+                  className="text-xs text-[#8d8d8d] hover:text-[#f28b82]"
+                  onClick={() => {
+                    void deleteStorageBackend(backend.id)
+                      .then(async () => {
+                        await onSaved()
+                        onToast(`Removed ${backend.name}`)
+                      })
+                      .catch((err) => onToast(err instanceof Error ? err.message : 'Could not remove'))
+                  }}
+                >
+                  Remove
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      {mode ? (
+        <div className="mb-10 space-y-4">
+          {mode === 'b2' ? (
+            <>
+              <p className="text-sm text-[#8d8d8d]">
+                Four fields from the Backblaze website. Region is inferred. Don’t use Master Application Key.
+              </p>
+              <section className="rounded-2xl bg-white/[0.04] px-4 py-4">
+                <div className="mb-1 text-[11px] text-[#8d8d8d] uppercase">B2 Cloud Storage → Buckets</div>
+                <p className="mb-3 text-xs text-[#8d8d8d]">The bucket card titled Storebase. Not Caps & Alerts, Fireball, or Cloud Replication.</p>
+                <div className="space-y-3">
+                  <Field label="Bucket name" hint="The title on the card. Not Bucket ID.">
+                    <Input className={fieldClass} placeholder="Storebase" value={bucket} onChange={(e) => setBucket(e.target.value)} />
+                  </Field>
+                  <Field label="Endpoint" hint="Same card. Paste s3.us-east-005.backblazeb2.com — https is optional.">
+                    <Input
+                      className={fieldClass}
+                      placeholder="s3.us-east-005.backblazeb2.com"
+                      value={endpoint}
+                      onChange={(e) => setEndpoint(e.target.value)}
+                    />
+                  </Field>
+                </div>
+              </section>
+              <section className="rounded-2xl bg-white/[0.04] px-4 py-4">
+                <div className="mb-1 text-[11px] text-[#8d8d8d] uppercase">App Keys → Your Application Keys</div>
+                <p className="mb-3 text-xs text-[#8d8d8d]">The Storebase row. Skip the Master Application Key block above it.</p>
+                <div className="space-y-3">
+                  <Field label="keyID" hint="Starts with 005. Not the short Master keyID.">
+                    <Input className={fieldClass} placeholder="005…" value={accessKey} onChange={(e) => setAccessKey(e.target.value)} />
+                  </Field>
+                  <Field label="applicationKey" hint="Long secret shown once when the key was created. Not keyID.">
+                    <Input
+                      className={fieldClass}
+                      type="password"
+                      placeholder="Shown only once"
+                      value={secretKey}
+                      onChange={(e) => setSecretKey(e.target.value)}
+                    />
+                  </Field>
+                </div>
+                <button
+                  type="button"
+                  className="mt-3 text-xs text-[#8d8d8d] hover:text-white"
+                  onClick={() => setLostKey((on) => !on)}
+                >
+                  {lostKey ? 'Hide' : 'I only have a keyID'}
+                </button>
+                {lostKey ? (
+                  <ol className="mt-2 list-decimal space-y-1 pl-5 text-xs text-[#8d8d8d]">
+                    <li>Add a New Application Key. Name it Storebase.</li>
+                    <li>Allow access to this bucket (or all buckets).</li>
+                    <li>Copy applicationKey immediately. Backblaze never shows it again.</li>
+                    <li>Paste that new keyID + applicationKey here.</li>
+                  </ol>
+                ) : null}
+              </section>
+              <Field label="Storebase may use" hint="B2 itself is unlimited. This is just our cap.">
+                <div className="flex items-center gap-2">
+                  <Input className={`${fieldClass} w-28`} value={capacityGb} onChange={(e) => setCapacityGb(e.target.value)} />
+                  <span className="text-sm text-[#8d8d8d]">GB</span>
+                </div>
+              </Field>
+            </>
+          ) : mode === 's3' ? (
+            <>
+              <Field label="Name">
+                <Input className={fieldClass} placeholder="R2" value={name} onChange={(e) => setName(e.target.value)} />
+              </Field>
+              <Field label="Bucket">
+                <Input className={fieldClass} value={bucket} onChange={(e) => setBucket(e.target.value)} />
+              </Field>
+              <Field label="Endpoint">
+                <Input className={fieldClass} placeholder="https://…" value={endpoint} onChange={(e) => setEndpoint(e.target.value)} />
+              </Field>
+              <Field label="Region">
+                <Input className={fieldClass} placeholder="auto" value={region} onChange={(e) => setRegion(e.target.value)} />
+              </Field>
+              <Field label="Access key">
+                <Input className={fieldClass} value={accessKey} onChange={(e) => setAccessKey(e.target.value)} />
+              </Field>
+              <Field label="Secret">
+                <Input className={fieldClass} type="password" value={secretKey} onChange={(e) => setSecretKey(e.target.value)} />
+              </Field>
+              <Field label="Cap">
+                <div className="flex items-center gap-2">
+                  <Input className={`${fieldClass} w-28`} value={capacityGb} onChange={(e) => setCapacityGb(e.target.value)} />
+                  <span className="text-sm text-[#8d8d8d]">GB</span>
+                </div>
+              </Field>
+            </>
+          ) : (
+            <>
+              <Field label="Name">
+                <Input className={fieldClass} placeholder="Office node" value={name} onChange={(e) => setName(e.target.value)} />
+              </Field>
+              <Field label="Node URL" hint="The other Storebase, not 0.0.0.0.">
+                <Input className={fieldClass} placeholder="http://72.61.3.42:4780" value={url} onChange={(e) => setUrl(e.target.value)} />
+              </Field>
+              <Field label="Inbound token" hint="On that node: Settings → Storage → Network → Copy.">
+                <Input className={fieldClass} value={token} onChange={(e) => setToken(e.target.value)} />
+              </Field>
+              <Field label="Cap">
+                <div className="flex items-center gap-2">
+                  <Input className={`${fieldClass} w-28`} value={capacityGb} onChange={(e) => setCapacityGb(e.target.value)} />
+                  <span className="text-sm text-[#8d8d8d]">GB</span>
+                </div>
+              </Field>
+            </>
+          )}
+          <div className="flex gap-2">
+            <Button variant="ghost" className="rounded-full" onClick={reset}>
+              Cancel
+            </Button>
+            <Button
+              className="rounded-full bg-white text-[#1a1a1a] hover:bg-[#f2f2f2]"
+              disabled={busy || !ready}
+              onClick={() => void add()}
+            >
+              {busy ? 'Connecting…' : 'Connect'}
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <div className="mb-10">
+          <div className="mb-4 rounded-2xl bg-white/[0.04] px-4 py-4">
+            <div className="text-sm text-white">Connect Backblaze</div>
+            <p className="mt-1 text-xs text-[#8d8d8d]">
+              Open B2 Cloud Storage → Buckets, then App Keys. You need four values. That’s it.
+            </p>
+            <ol className="mt-3 list-decimal space-y-1 pl-5 text-xs text-[#8d8d8d]">
+              <li>Bucket name — the title on the card (Storebase), not Bucket ID.</li>
+              <li>Endpoint — s3.us-east-005.backblazeb2.com, from that same card.</li>
+              <li>keyID — Your Application Keys → Storebase. Not Master Application Key.</li>
+              <li>applicationKey — the secret Backblaze showed once. If you lost it, create a new key.</li>
+            </ol>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button className="rounded-full bg-white text-[#1a1a1a] hover:bg-[#f2f2f2]" onClick={() => setMode('b2')}>
+              I have those four
+            </Button>
+            <Button variant="ghost" className="rounded-full" onClick={() => setMode('s3')}>
+              Other S3
+            </Button>
+            <Button variant="ghost" className="rounded-full" onClick={() => setMode('node')}>
+              Another Storebase
+            </Button>
+          </div>
+        </div>
+      )}
 
       <div className="mb-8 rounded-2xl bg-white/[0.04] px-4 py-3">
         <div className="flex items-center justify-between gap-3">
@@ -1091,133 +1291,17 @@ function NetworkStores({
           </div>
         ) : null}
       </div>
-
-      {backends.length > 0 ? (
-        <div className="mb-6 space-y-3">
-          {backends.map((backend) => (
-            <div key={backend.id} className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <div className="truncate text-sm text-white">{backend.name}</div>
-                <div className="text-xs text-[#8d8d8d]">
-                  {backend.type === 's3' ? backend.bucket || backend.endpoint : backend.url} ·{' '}
-                  {formatBytes(backend.usedBytes)} / {formatBytes(backend.capacityBytes)}
-                </div>
-              </div>
-              <div className="flex shrink-0 gap-2">
-                <button
-                  type="button"
-                  className="text-xs text-[#8d8d8d] hover:text-white"
-                  onClick={() => {
-                    void testStorageBackend(backend.id)
-                      .then(() => onToast(`${backend.name} is reachable`))
-                      .catch((err) => onToast(err instanceof Error ? err.message : 'Unreachable'))
-                  }}
-                >
-                  Test
-                </button>
-                <button
-                  type="button"
-                  className="text-xs text-[#8d8d8d] hover:text-[#f28b82]"
-                  onClick={() => {
-                    void deleteStorageBackend(backend.id)
-                      .then(async () => {
-                        await onSaved()
-                        onToast(`Removed ${backend.name}`)
-                      })
-                      .catch((err) => onToast(err instanceof Error ? err.message : 'Could not remove'))
-                  }}
-                >
-                  Remove
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
-      ) : (
-        <p className="mb-6 text-sm text-[#8d8d8d]">No extra stores yet.</p>
-      )}
-
-      {mode ? (
-        <div className="space-y-3">
-          <div className="flex gap-2">
-            <button
-              type="button"
-              className={mode === 's3' ? 'h-8 rounded-full bg-white px-3 text-xs text-[#1a1a1a]' : 'h-8 rounded-full bg-white/10 px-3 text-xs'}
-              onClick={() => setMode('s3')}
-            >
-              S3 / Backblaze
-            </button>
-            <button
-              type="button"
-              className={mode === 'node' ? 'h-8 rounded-full bg-white px-3 text-xs text-[#1a1a1a]' : 'h-8 rounded-full bg-white/10 px-3 text-xs'}
-              onClick={() => setMode('node')}
-            >
-              Storebase node
-            </button>
-          </div>
-          <Input className={fieldClass} placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} />
-          <Input
-            className={fieldClass}
-            placeholder="Capacity GB"
-            value={capacityGb}
-            onChange={(e) => setCapacityGb(e.target.value)}
-          />
-          {mode === 's3' ? (
-            <>
-              <Input
-                className={fieldClass}
-                placeholder="Endpoint · https://s3.us-west-004.backblazeb2.com"
-                value={endpoint}
-                onChange={(e) => setEndpoint(e.target.value)}
-              />
-              <div className="grid grid-cols-2 gap-2">
-                <Input className={fieldClass} placeholder="Region" value={region} onChange={(e) => setRegion(e.target.value)} />
-                <Input className={fieldClass} placeholder="Bucket" value={bucket} onChange={(e) => setBucket(e.target.value)} />
-              </div>
-              <Input className={fieldClass} placeholder="Access key" value={accessKey} onChange={(e) => setAccessKey(e.target.value)} />
-              <Input
-                className={fieldClass}
-                type="password"
-                placeholder="Secret key"
-                value={secretKey}
-                onChange={(e) => setSecretKey(e.target.value)}
-              />
-            </>
-          ) : (
-            <>
-              <Input
-                className={fieldClass}
-                placeholder="https://other-node:4780"
-                value={url}
-                onChange={(e) => setUrl(e.target.value)}
-              />
-              <Input className={fieldClass} placeholder="Inbound token from that node" value={token} onChange={(e) => setToken(e.target.value)} />
-            </>
-          )}
-          <div className="flex gap-2">
-            <Button variant="ghost" className="rounded-full" onClick={reset}>
-              Cancel
-            </Button>
-            <Button
-              className="rounded-full bg-white text-[#1a1a1a] hover:bg-[#f2f2f2]"
-              disabled={busy || !name.trim()}
-              onClick={() => void add()}
-            >
-              {busy ? 'Connecting…' : 'Connect'}
-            </Button>
-          </div>
-        </div>
-      ) : (
-        <div className="flex gap-2">
-          <Button variant="ghost" className="rounded-full" onClick={() => setMode('s3')}>
-            Add S3
-          </Button>
-          <Button variant="ghost" className="rounded-full" onClick={() => setMode('node')}>
-            Add node
-          </Button>
-        </div>
-      )}
     </div>
+  )
+}
+
+function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
+  return (
+    <label className="block">
+      <span className="mb-1 block text-sm text-[#e8e8e8]">{label}</span>
+      {children}
+      {hint ? <span className="mt-1 block text-xs text-[#8d8d8d]">{hint}</span> : null}
+    </label>
   )
 }
 
