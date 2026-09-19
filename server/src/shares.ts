@@ -287,6 +287,21 @@ export async function listSharedFolder(
   }
 }
 
+export async function resolveSharedPath(
+  config: ServerConfig,
+  user: UserRecord,
+  shareId: string,
+  sub = '',
+): Promise<{ root: string; rel: string }> {
+  const share = (await loadAll(config)).find((item) => item.id === shareId)
+  if (!share || share.toUserId !== user.id) throw new ShareError('Share not found', 404)
+  const root = await ensureUserDrive(config, share.ownerId)
+  const rel = sub ? `${share.path}/${sub.replace(/^\/+/, '')}` : share.path
+  resolveSafe(root, rel)
+  if (!covers(share.path, rel)) throw new ShareError('Path escapes the share', 400)
+  return { root, rel }
+}
+
 export async function openSharedDownload(
   config: ServerConfig,
   user: UserRecord,
@@ -295,10 +310,7 @@ export async function openSharedDownload(
 ) {
   const share = (await loadAll(config)).find((item) => item.id === shareId)
   if (!share || share.toUserId !== user.id || shareStatus(share) !== 'ok') throw new ShareError('Share not found', 404)
-  const root = await ensureUserDrive(config, share.ownerId)
-  const rel = sub ? `${share.path}/${sub.replace(/^\/+/, '')}` : share.path
-  resolveSafe(root, rel)
-  if (!covers(share.path, rel)) throw new ShareError('Path escapes the share', 400)
+  const { root, rel } = await resolveSharedPath(config, user, shareId, sub)
   const item = await entryAt(root, rel)
   if (!item) throw new ShareError('File not found', 404)
   if (item.type === 'folder') throw new ShareError('Cannot download a folder', 400)

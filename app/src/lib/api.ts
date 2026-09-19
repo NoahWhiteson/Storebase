@@ -49,6 +49,24 @@ export type FileVersion = {
   createdAt: string
 }
 
+export type FileInfo = {
+  path: string
+  name: string
+  type: 'file' | 'folder'
+  kind: string
+  mime: string
+  extension: string | null
+  size: number
+  allocated: number
+  deviceBytes: number
+  createdAt: string
+  modifiedAt: string
+  fileCount: number
+  folderCount: number
+  versions: number
+  versionsBytes: number
+}
+
 export class ApiError extends Error {
   status: number
   code?: string
@@ -316,6 +334,16 @@ export async function copyFiles(paths: string[], dest?: string | null): Promise<
 export async function listFileVersions(path: string): Promise<FileVersion[]> {
   const body = await api<{ versions: FileVersion[] }>(`/api/files/versions?path=${encodeURIComponent(path)}`)
   return body.versions
+}
+
+export async function fetchFileInfo(path: string): Promise<FileInfo> {
+  const parsed = parseSharePath(path)
+  if (parsed) {
+    const qs = new URLSearchParams({ share: parsed.shareId })
+    if (parsed.sub) qs.set('path', parsed.sub)
+    return api(`/api/files/info?${qs}`)
+  }
+  return api(`/api/files/info?path=${encodeURIComponent(path)}`)
 }
 
 export async function restoreFileVersion(path: string, id: string): Promise<FileEntry> {

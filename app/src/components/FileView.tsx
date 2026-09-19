@@ -1,4 +1,5 @@
 import { FileGlyph } from '@/components/FileGlyph'
+import { GetInfoDialog } from '@/components/GetInfoDialog'
 import { VideoThumb } from '@/components/VideoThumb'
 import {
   ContextMenu,
@@ -27,6 +28,7 @@ import {
   FolderOpen,
   FolderPlus,
   HardDrive,
+  Info,
   LayoutGrid,
   List,
   Pencil,
@@ -93,6 +95,7 @@ export function FileView(props: FileViewProps) {
   const empty = props.items.length === 0
   const [dragIds, setDragIds] = useState<string[]>([])
   const [overId, setOverId] = useState<string | null>(null)
+  const [infoItem, setInfoItem] = useState<DriveItem | null>(null)
   const draggingRef = useRef(false)
 
   function beginDrag(item: DriveItem, e: DragEvent) {
@@ -195,20 +198,16 @@ export function FileView(props: FileViewProps) {
     </ContextMenuContent>
   )
 
-  if (empty) {
-    return (
-      <ContextMenu>
-        <ContextMenuTrigger asChild>
-          <div className="min-h-[320px]">
-            <EmptyState section={props.section} search={props.search} />
-          </div>
-        </ContextMenuTrigger>
-        {blankMenu}
-      </ContextMenu>
-    )
-  }
-
-  return (
+  const shell = empty ? (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <div className="min-h-[320px]">
+          <EmptyState section={props.section} search={props.search} />
+        </div>
+      </ContextMenuTrigger>
+      {blankMenu}
+    </ContextMenu>
+  ) : (
     <div className="relative min-h-[320px]">
       <ContextMenu>
         <ContextMenuTrigger asChild>
@@ -218,12 +217,26 @@ export function FileView(props: FileViewProps) {
       </ContextMenu>
       <div className="relative z-10">
         {props.view === 'list' ? (
-          <ListView {...props} items={ordered} drag={drag} />
+          <ListView {...props} items={ordered} drag={drag} onGetInfo={setInfoItem} />
         ) : (
-          <GridView {...props} folders={folders} files={files} showSplit={showSplit} drag={drag} />
+          <GridView
+            {...props}
+            folders={folders}
+            files={files}
+            showSplit={showSplit}
+            drag={drag}
+            onGetInfo={setInfoItem}
+          />
         )}
       </div>
     </div>
+  )
+
+  return (
+    <>
+      {shell}
+      {infoItem ? <GetInfoDialog item={infoItem} onClose={() => setInfoItem(null)} /> : null}
+    </>
   )
 }
 
@@ -238,7 +251,7 @@ type DragApi = {
   canMove: boolean
 }
 
-function ListView(props: FileViewProps & { items: DriveItem[]; drag: DragApi }) {
+function ListView(props: FileViewProps & { items: DriveItem[]; drag: DragApi; onGetInfo: (item: DriveItem) => void }) {
   return (
     <div>
       <div className="hidden grid-cols-[minmax(0,2fr)_140px_160px_100px] gap-3 px-3 py-2 text-xs font-medium text-[#8d8d8d] md:grid">
@@ -282,7 +295,13 @@ function GridView({
   showSplit,
   drag,
   ...props
-}: FileViewProps & { folders: DriveItem[]; files: DriveItem[]; showSplit: boolean; drag: DragApi }) {
+}: FileViewProps & {
+  folders: DriveItem[]
+  files: DriveItem[]
+  showSplit: boolean
+  drag: DragApi
+  onGetInfo: (item: DriveItem) => void
+}) {
   return (
     <div className="flex flex-col gap-8">
       {folders.length > 0 ? (
@@ -437,9 +456,10 @@ function Tile({
   )
 }
 
-function handlers(props: FileViewProps) {
+function handlers(props: FileViewProps & { onGetInfo: (item: DriveItem) => void }) {
   return {
     onOpen: props.onOpen,
+    onGetInfo: props.onGetInfo,
     onStar: props.onStar,
     onShare: props.onShare,
     onRename: props.onRename,
@@ -482,6 +502,7 @@ function ItemMenu({
   selectedIds,
   children,
   onOpen,
+  onGetInfo,
   onStar,
   onShare,
   onRename,
@@ -503,6 +524,7 @@ function ItemMenu({
   selectedIds: string[]
   children: ReactNode
   onOpen: (item: DriveItem) => void
+  onGetInfo: (item: DriveItem) => void
   onStar: (ids: string[]) => void
   onShare: (id: string) => void
   onRename: (id: string) => void
@@ -555,6 +577,12 @@ function ItemMenu({
         {spam ? (
           <>
             {n === 1 ? (
+              <ContextMenuItem onSelect={() => onGetInfo(item)}>
+                <Info />
+                Get Info
+              </ContextMenuItem>
+            ) : null}
+            {n === 1 ? (
               <ContextMenuItem onSelect={() => onAcceptShare(item.id)}>
                 <Check />
                 Accept
@@ -571,6 +599,12 @@ function ItemMenu({
           <ContextMenuItem onSelect={() => onOpen(item)}>
             <FolderOpen />
             Open
+          </ContextMenuItem>
+        ) : null}
+        {n === 1 ? (
+          <ContextMenuItem onSelect={() => onGetInfo(item)}>
+            <Info />
+            Get Info
           </ContextMenuItem>
         ) : null}
         {n === 1 && !inbound ? (

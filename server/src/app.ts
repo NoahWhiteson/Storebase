@@ -53,9 +53,11 @@ import {
   openSharedDownload,
   parseSharePath,
   pathIsShared,
+  resolveSharedPath,
   rewriteShares,
   ShareError,
 } from './shares.ts'
+import { inspectEntry } from './inspect.ts'
 import {
   TEMP_DIR,
   copyEntries,
@@ -938,6 +940,35 @@ export function createApp(config: ServerConfig) {
       if (message.includes('itself') || message.includes('trash') || message.includes('Destination') || message.includes('Nothing')) {
         return c.json({ error: message }, 400)
       }
+      throw err
+    }
+  })
+
+  app.get('/api/files/info', async (c) => {
+    const user = c.get('user')
+    const root = c.get('root')
+    const shareId = c.req.query('share') ?? ''
+    const path = c.req.query('path') ?? ''
+    try {
+      if (shareId) {
+        const target = await resolveSharedPath(config, user, shareId, path)
+        const info = await inspectEntry(target.root, target.rel)
+        if (!info) return c.json({ error: 'Not found' }, 404)
+        return c.json(info)
+      }
+      const parsed = parseSharePath(path)
+      if (parsed) {
+        const target = await resolveSharedPath(config, user, parsed.shareId, parsed.sub)
+        const info = await inspectEntry(target.root, target.rel)
+        if (!info) return c.json({ error: 'Not found' }, 404)
+        return c.json(info)
+      }
+      if (!path) return c.json({ error: 'path required' }, 400)
+      const info = await inspectEntry(root, path)
+      if (!info) return c.json({ error: 'Not found' }, 404)
+      return c.json(info)
+    } catch (err) {
+      if (err instanceof ShareError) return c.json({ error: err.message }, err.status)
       throw err
     }
   })

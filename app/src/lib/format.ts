@@ -22,6 +22,10 @@ export function formatBytes(bytes: number | null): string {
   return `${value.toFixed(digits)} ${units[i]}`
 }
 
+export function formatExactBytes(bytes: number): string {
+  return `${bytes.toLocaleString('en-US')} byte${bytes === 1 ? '' : 's'}`
+}
+
 export function formatDate(iso: string): string {
   return DATE_FMT.format(new Date(iso))
 }
