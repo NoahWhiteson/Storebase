@@ -949,18 +949,11 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
       />
 
       <Dialog open={dialog !== null} onOpenChange={(open) => !open && setDialog(null)}>
-        <DialogContent>
+        <DialogContent showCloseButton={false}>
           <DialogHeader>
             <DialogTitle>
               {dialog?.mode === 'rename' ? 'Rename' : dialog?.mode === 'create-file' ? 'New file' : 'New folder'}
             </DialogTitle>
-            <DialogDescription>
-              {dialog?.mode === 'rename'
-                ? 'Update the file name. Extension stays yours to keep or drop.'
-                : dialog?.mode === 'create-file'
-                  ? 'Created in this folder. Use an extension like .txt or .py.'
-                  : 'Folders live in the current location.'}
-            </DialogDescription>
           </DialogHeader>
           <Input
             autoFocus
@@ -972,10 +965,14 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
             }}
           />
           <DialogFooter>
-            <Button variant="ghost" onClick={() => setDialog(null)}>
+            <Button variant="ghost" className="rounded-full" onClick={() => setDialog(null)}>
               Cancel
             </Button>
-            <Button onClick={() => void submitDialog()} disabled={!nameDraft.trim()}>
+            <Button
+              className="rounded-full bg-white text-[#1a1a1a] hover:bg-[#f2f2f2]"
+              onClick={() => void submitDialog()}
+              disabled={!nameDraft.trim()}
+            >
               {dialog?.mode === 'rename' ? 'Save' : 'Create'}
             </Button>
           </DialogFooter>
@@ -1023,7 +1020,7 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
       ) : null}
 
       <Dialog open={confirm !== null} onOpenChange={(open) => !open && setConfirm(null)}>
-        <DialogContent>
+        <DialogContent showCloseButton={false}>
           <DialogHeader>
             <DialogTitle>
               {confirm?.mode === 'empty-trash'
@@ -1032,23 +1029,23 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
                   ? 'Delete forever?'
                   : 'No trash for this file'}
             </DialogTitle>
-            <DialogDescription>
+            <DialogDescription className="text-[#8d8d8d]">
               {confirm?.mode === 'empty-trash'
-                ? 'Everything in trash is deleted now. This cannot be undone.'
+                ? 'Everything in trash is deleted now.'
                 : confirm?.mode === 'delete-forever'
                   ? `${confirm.name} leaves trash and is gone.`
                   : confirm?.mode === 'permanent'
-                    ? `${confirm.name} is over 20 GB (or includes a file that is). Delete is permanent — no 30-day trash.`
+                    ? `${confirm.name} is over 20 GB. Delete is permanent.`
                     : ''}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="ghost" onClick={() => setConfirm(null)}>
+            <Button variant="ghost" className="rounded-full" onClick={() => setConfirm(null)}>
               Cancel
             </Button>
             <Button
               variant="destructive"
-              className="bg-[#c5221f] text-white hover:bg-[#a50e0e]"
+              className="rounded-full bg-[#c5221f] text-white hover:bg-[#a50e0e]"
               onClick={() => {
                 const next = confirm
                 setConfirm(null)

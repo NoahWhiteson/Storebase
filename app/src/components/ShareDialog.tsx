@@ -3,7 +3,6 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
@@ -159,20 +158,19 @@ export function ShareDialog({
   }
 
   const url = link ? publicLinkUrl(link.token) : ''
+  const linkDirty = Boolean(link) && (password.trim().length > 0 || clearPassword)
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="border-[#2a2a2a] bg-[#1a1a1a] text-white sm:max-w-md">
+      <DialogContent>
         <DialogHeader>
-          <DialogTitle>Share {name}</DialogTitle>
-          <DialogDescription className="text-[#8d8d8d]">
-            Send it by email to someone on this node, or copy a view-only link.
-          </DialogDescription>
+          <DialogTitle>Share</DialogTitle>
+          <DialogDescription className="truncate text-[#8d8d8d]">{name}</DialogDescription>
         </DialogHeader>
 
         {error ? <p className="text-sm text-[#f28b82]">{error}</p> : null}
 
-        <div className="rounded-2xl bg-white/[0.04] px-4 py-3">
+        <div className="space-y-3">
           <button
             type="button"
             role="switch"
@@ -192,7 +190,26 @@ export function ShareDialog({
               />
             </span>
           </button>
-          <div className="mt-3 grid gap-2 sm:grid-cols-2">
+
+          {link ? (
+            <div className="flex gap-2">
+              <Input
+                ref={urlRef}
+                readOnly
+                className="h-10 text-xs"
+                value={url}
+                onFocus={(e) => e.currentTarget.select()}
+              />
+              <Button
+                className="h-10 shrink-0 rounded-full bg-white px-3 text-[#1a1a1a] hover:bg-[#f2f2f2]"
+                onClick={() => void copyUrl(url)}
+              >
+                Copy
+              </Button>
+            </div>
+          ) : null}
+
+          <div className="grid grid-cols-2 gap-2">
             <label className="block">
               <span className="mb-1 block text-[11px] text-[#8d8d8d]">Expires</span>
               <select
@@ -212,7 +229,6 @@ export function ShareDialog({
               <Input
                 type="password"
                 autoComplete="new-password"
-                className="h-10 rounded-xl border-0 bg-[#242424] text-sm text-white"
                 placeholder={link?.passwordProtected ? 'Keep current' : 'Optional'}
                 value={password}
                 onChange={(e) => {
@@ -222,13 +238,12 @@ export function ShareDialog({
               />
             </label>
           </div>
-          {link?.expiresAt ? (
-            <p className="mt-2 text-xs text-[#8d8d8d]">{formatRemaining(link.expiresAt)}</p>
-          ) : null}
+
+          {link?.expiresAt ? <p className="text-xs text-[#8d8d8d]">{formatRemaining(link.expiresAt)}</p> : null}
           {link?.passwordProtected ? (
             <button
               type="button"
-              className="mt-2 text-xs text-[#8d8d8d] underline-offset-2 hover:text-white hover:underline"
+              className="text-xs text-[#8d8d8d] underline-offset-2 hover:text-white hover:underline"
               onClick={() => {
                 setClearPassword(true)
                 setPassword('')
@@ -237,79 +252,62 @@ export function ShareDialog({
               {clearPassword ? 'Password will be removed' : 'Remove password'}
             </button>
           ) : null}
-          {link ? (
-            <>
-              <div className="mt-3 flex gap-2">
-                <Input
-                  ref={urlRef}
-                  readOnly
-                  className="h-10 rounded-xl border-0 bg-[#242424] text-xs text-white"
-                  value={url}
-                  onFocus={(e) => e.currentTarget.select()}
-                />
-                <Button
-                  className="h-10 shrink-0 rounded-full bg-white px-3 text-[#1a1a1a] hover:bg-[#f2f2f2]"
-                  onClick={() => void copyUrl(url)}
-                >
-                  Copy
-                </Button>
-              </div>
-              <Button
-                variant="ghost"
-                className="mt-2 h-8 rounded-full px-3 text-xs"
-                disabled={busy}
-                onClick={() => void applyLink()}
-              >
-                Apply expiry / password
-              </Button>
-            </>
-          ) : (
-            <p className="mt-2 text-xs text-[#8d8d8d]">Off. They only see this file, not Storebase. Set expiry or a password before turning it on.</p>
-          )}
+          {linkDirty ? (
+            <button
+              type="button"
+              className="text-xs text-[#e8e8e8] underline-offset-2 hover:underline"
+              disabled={busy}
+              onClick={() => void applyLink()}
+            >
+              Save link settings
+            </button>
+          ) : null}
         </div>
 
         {shares.length > 0 ? (
-          <div className="space-y-2">
+          <div className="space-y-1.5">
             {shares.map((share) => (
-              <div key={share.id} className="flex items-center justify-between gap-3 rounded-xl bg-white/[0.04] px-3 py-2">
+              <div key={share.id} className="flex items-center justify-between gap-3">
                 <div className="min-w-0">
                   <div className="truncate text-sm text-white">{share.toName}</div>
                   <div className="truncate text-xs text-[#8d8d8d]">
                     {share.toEmail}
-                    {share.status === 'pending' ? ' · waiting to accept' : ''}
+                    {share.status === 'pending' ? ' · waiting' : ''}
                   </div>
                 </div>
-                <Button variant="ghost" className="h-8 rounded-full text-[#f28b82]" disabled={busy} onClick={() => void remove(share)}>
+                <button
+                  type="button"
+                  className="shrink-0 text-xs text-[#8d8d8d] hover:text-[#f28b82]"
+                  disabled={busy}
+                  onClick={() => void remove(share)}
+                >
                   Remove
-                </Button>
+                </button>
               </div>
             ))}
           </div>
-        ) : (
-          <p className="text-sm text-[#8d8d8d]">Nobody has email access yet.</p>
-        )}
+        ) : null}
 
-        <Input
-          className="h-11 rounded-xl border-0 bg-[#242424] text-white placeholder:text-[#8d8d8d] outline-none focus-visible:ring-0"
-          placeholder="email@on-this-node"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') void shareWith(email)
+        <form
+          className="flex gap-2"
+          onSubmit={(e) => {
+            e.preventDefault()
+            void shareWith(email)
           }}
-        />
-        <DialogFooter>
-          <Button variant="ghost" className="rounded-full" onClick={onClose}>
-            Done
-          </Button>
+        >
+          <Input
+            placeholder="email@on-this-node"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+          />
           <Button
-            className="rounded-full bg-white text-[#1a1a1a] hover:bg-[#f2f2f2]"
+            type="submit"
+            className="h-10 shrink-0 rounded-full bg-white px-4 text-[#1a1a1a] hover:bg-[#f2f2f2]"
             disabled={busy || !email.trim()}
-            onClick={() => void shareWith(email)}
           >
             Share
           </Button>
-        </DialogFooter>
+        </form>
       </DialogContent>
     </Dialog>
   )

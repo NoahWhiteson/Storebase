@@ -1,10 +1,8 @@
 import { FileGlyph } from '@/components/FileGlyph'
-import { Button } from '@/components/ui/button'
 import {
   Dialog,
   DialogContent,
   DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
@@ -29,13 +27,13 @@ function whereLabel(item: DriveItem, info: FileInfo): string {
   return parent || 'My files'
 }
 
-function Row({ label, value, hint }: { label: string; value: string; hint?: string }) {
+function Row({ label, value, detail }: { label: string; value: string; detail?: string }) {
   return (
-    <div className="grid grid-cols-[108px_minmax(0,1fr)] gap-3 py-2.5 sm:grid-cols-[120px_minmax(0,1fr)]">
-      <dt className="pt-0.5 text-xs text-[#8d8d8d]">{label}</dt>
-      <dd className="min-w-0">
-        <div className="break-words text-sm text-[#e8e8e8]">{value}</div>
-        {hint ? <div className="mt-0.5 text-xs leading-relaxed text-[#8d8d8d]">{hint}</div> : null}
+    <div className="grid grid-cols-[6.5rem_minmax(0,1fr)] items-baseline gap-x-3 py-1.5">
+      <dt className="text-xs text-[#8d8d8d]">{label}</dt>
+      <dd className="min-w-0 text-sm text-[#e8e8e8]">
+        <span className="break-words">{value}</span>
+        {detail ? <span className="mt-0.5 block text-xs text-[#8d8d8d]">{detail}</span> : null}
       </dd>
     </div>
   )
@@ -62,72 +60,58 @@ export function GetInfoDialog({ item, onClose }: { item: DriveItem; onClose: () 
   }, [item.id])
 
   const driveBytes = info ? info.allocated + info.versionsBytes : 0
-  const contents =
-    info?.type === 'folder'
+  const kindLine = info
+    ? info.type === 'folder'
       ? info.fileCount + info.folderCount === 0
-        ? 'Empty'
-        : `${info.fileCount + info.folderCount} item${info.fileCount + info.folderCount === 1 ? '' : 's'} · ${info.fileCount} file${info.fileCount === 1 ? '' : 's'}, ${info.folderCount} folder${info.folderCount === 1 ? '' : 's'}`
-      : null
+        ? 'Folder · empty'
+        : `Folder · ${info.fileCount + info.folderCount} item${info.fileCount + info.folderCount === 1 ? '' : 's'}`
+      : info.extension
+        ? `${info.kind} · .${info.extension}`
+        : info.kind
+    : item.kind === 'folder'
+      ? 'Folder'
+      : item.name.includes('.')
+        ? item.name.slice(item.name.lastIndexOf('.'))
+        : 'File'
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="border-[#2a2a2a] bg-[#1a1a1a] text-white sm:max-w-md">
+      <DialogContent className="sm:max-w-sm">
         <DialogHeader>
-          <div className="flex items-start gap-3">
+          <div className="flex items-center gap-3">
             <FileGlyph kind={item.kind} size="sm" />
             <div className="min-w-0">
               <DialogTitle className="truncate">{item.name}</DialogTitle>
-              <DialogDescription className="text-[#8d8d8d]">Get Info</DialogDescription>
+              <DialogDescription className="truncate text-[#8d8d8d]">{kindLine}</DialogDescription>
             </div>
           </div>
         </DialogHeader>
 
         {error ? <p className="text-sm text-[#f28b82]">{error}</p> : null}
-        {!info && !error ? <p className="text-sm text-[#8d8d8d]">Reading size on the drive…</p> : null}
+        {!info && !error ? <p className="text-sm text-[#8d8d8d]">Reading size…</p> : null}
 
         {info ? (
-          <dl className="divide-y divide-white/10">
-            <Row label="Kind" value={info.kind} />
-            <Row
-              label="Type"
-              value={info.type === 'folder' ? 'Folder' : info.extension ? `.${info.extension} · ${info.mime}` : info.mime}
-            />
-            {contents ? <Row label="Contents" value={contents} /> : null}
-            <Row
-              label="Size"
-              value={`${formatBytes(info.size)} (${formatExactBytes(info.size)})`}
-            />
+          <dl>
+            <Row label="Size" value={formatBytes(info.size)} detail={formatExactBytes(info.size)} />
             <Row
               label="On the drive"
-              value={`${formatBytes(driveBytes)} (${formatExactBytes(driveBytes)})`}
-              hint={
+              value={formatBytes(driveBytes)}
+              detail={
                 info.versions
-                  ? `Includes ${info.versions} older version${info.versions === 1 ? '' : 's'} (${formatBytes(info.versionsBytes)}).`
-                  : info.allocated !== info.size
-                    ? 'Allocated blocks on the node disk, which can be a bit larger than the file.'
-                    : undefined
+                  ? `${formatExactBytes(driveBytes)} · ${info.versions} older version${info.versions === 1 ? '' : 's'}`
+                  : formatExactBytes(driveBytes)
               }
             />
             <Row
               label="On a Mac"
-              value={`${formatBytes(info.deviceBytes)} (${formatExactBytes(info.deviceBytes)})`}
-              hint={
-                info.type === 'folder'
-                  ? info.fileCount === 0
-                    ? 'Folders themselves stay empty locally until you open files inside.'
-                    : 'Storebase keeps each file as a cloud copy until you open it.'
-                  : 'Cloud copy size. Opening the file in Storebase downloads the full thing.'
-              }
+              value={formatBytes(info.deviceBytes)}
+              detail="Cloud copy until you open it"
             />
             <Row label="Where" value={whereLabel(item, info)} />
             <Row label="Created" value={formatDateTime(info.createdAt)} />
             <Row label="Modified" value={formatDateTime(info.modifiedAt)} />
           </dl>
         ) : null}
-
-        <DialogFooter>
-          <Button onClick={onClose}>Done</Button>
-        </DialogFooter>
       </DialogContent>
     </Dialog>
   )

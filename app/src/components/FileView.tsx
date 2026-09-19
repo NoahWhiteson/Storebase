@@ -336,7 +336,9 @@ function GridView({
         <section>
           {showSplit ? <h2 className="mb-3 text-sm font-medium text-[#8d8d8d]">Files</h2> : null}
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
-            {files.map((item) => (
+            {files.map((item) => {
+              const preview = item.kind === 'image' || item.kind === 'video'
+              return (
               <ItemMenu key={item.id} item={item} items={props.items} selectedIds={props.selectedIds} {...handlers(props)}>
                 <Tile
                   item={item}
@@ -344,22 +346,39 @@ function GridView({
                   drag={drag}
                   onSelect={props.onSelect}
                   onOpen={props.onOpen}
-                  className="flex w-full flex-col items-stretch rounded-xl p-2 text-left hover:bg-white/5"
+                  className={
+                    preview
+                      ? 'flex w-full flex-col items-stretch rounded-xl p-2 text-left hover:bg-white/5'
+                      : 'flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left hover:bg-white/5'
+                  }
                 >
-                  <div className="flex h-28 items-center justify-center overflow-hidden rounded-lg bg-[#141414]">
-                    <ItemThumb item={item} size="lg" />
-                  </div>
-                  <div className="mt-3 flex items-start gap-2 px-1 pb-1">
-                    <ItemThumb item={item} size="sm" />
-                    <div className="min-w-0">
-                      <div className="truncate text-sm font-medium">{item.name}</div>
-                      <div className="truncate text-xs text-[#8d8d8d]">{when(item)}</div>
-                    </div>
-                    <Marks item={item} className="ml-auto" />
-                  </div>
+                  {preview ? (
+                    <>
+                      <div className="flex h-28 items-center justify-center overflow-hidden rounded-lg bg-[#141414]">
+                        <ItemThumb item={item} size="lg" />
+                      </div>
+                      <div className="mt-2 flex items-start gap-2 px-1 pb-0.5">
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate text-sm font-medium">{item.name}</div>
+                          <div className="truncate text-xs text-[#8d8d8d]">{when(item)}</div>
+                        </div>
+                        <Marks item={item} />
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <FileGlyph kind={item.kind} size="sm" />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-medium">{item.name}</span>
+                        <span className="block truncate text-xs text-[#8d8d8d]">{when(item)}</span>
+                      </span>
+                      <Marks item={item} />
+                    </>
+                  )}
                 </Tile>
               </ItemMenu>
-            ))}
+              )
+            })}
           </div>
         </section>
       ) : null}
