@@ -189,10 +189,10 @@ final class DavVolume: @unchecked Sendable {
         return DavResponse(status: 201, headers: [:], body: Data())
       case "LOCK":
         let token = "opaquelocktoken:\(UUID().uuidString)"
-        queue.sync { locks[path] = token }
+        _ = queue.sync { self.locks[path] = token }
         return DavResponse(status: 200, headers: ["Lock-Token": "<\(token)>"], body: Data(lockXML(token).utf8))
       case "UNLOCK":
-        queue.sync { locks.removeValue(forKey: path) }
+        _ = queue.sync { self.locks.removeValue(forKey: path) }
         return DavResponse(status: 204, headers: [:], body: Data())
       default:
         return DavResponse.text(405, "Method not allowed")
@@ -437,8 +437,8 @@ private func receive(_ connection: NWConnection) async throws -> Data {
       if let error {
         cont.resume(throwing: error)
       } else {
-        var out = data ?? Data()
-        if isComplete, out.isEmpty { /* eof */ }
+        let out = data ?? Data()
+        _ = isComplete
         cont.resume(returning: out)
       }
     }

@@ -19,7 +19,7 @@ final class CloudFS: @unchecked Sendable {
     listings.removeValue(forKey: path)
     stats.removeValue(forKey: path)
     gate.unlock()
-    cache.drop(path)
+    cache.drop(path: path)
   }
 
   func list(_ path: String) async throws -> [APIClient.DriveItem] {
@@ -85,7 +85,7 @@ final class CloudFS: @unchecked Sendable {
       if inner == 0, take == Int(BlockCache.chunk) || (total != nil && cursor + Int64(take) == total) {
         cache.put(path: path, offset: aligned, data: Data(piece))
       } else {
-        cache.drop(path)
+        cache.drop(path: path)
       }
       _ = try await client.putRange(path: path, offset: cursor, data: Data(piece), total: total)
       slice = slice.dropFirst(take)
