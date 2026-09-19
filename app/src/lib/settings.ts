@@ -54,11 +54,13 @@ export type SettingsPayload = {
     reservedBytes: number
     reservedGb: number
     poolUsedBytes: number
+    localUsedBytes?: number
     poolBytes?: number
     disk: DiskInfo
     inboundToken?: string
     inboundEnabled?: boolean
     backends?: StorageBackend[]
+    order?: string[]
   }
   users?: SettingsUser[]
   update?: {
@@ -198,6 +200,7 @@ export async function addStorageBackend(body: {
   secretKey?: string
   url?: string
   token?: string
+  first?: boolean
 }): Promise<StorageBackend> {
   const res = await api<{ backend: StorageBackend }>('/api/settings/backends', {
     method: 'POST',
@@ -221,4 +224,8 @@ export async function rotateNetworkToken(): Promise<string> {
 
 export async function setNetworkInbound(enabled: boolean): Promise<void> {
   await api('/api/settings/network', { method: 'PATCH', body: JSON.stringify({ inboundEnabled: enabled }) })
+}
+
+export async function setStoreOrder(order: string[]): Promise<void> {
+  await api('/api/settings/network', { method: 'PATCH', body: JSON.stringify({ order }) })
 }

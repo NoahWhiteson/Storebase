@@ -23,6 +23,7 @@ import {
   saveDomain,
   saveSettings,
   setNetworkInbound,
+  setStoreOrder,
   testStorageBackend,
   clearDomain,
   type DomainInfo,
@@ -33,6 +34,8 @@ import {
 import { cn } from 'cn'
 import {
   ArrowLeft,
+  ChevronDown,
+  ChevronUp,
   Globe,
   HardDrive,
   KeyRound,
@@ -967,6 +970,7 @@ function NetworkStores({
   const [url, setUrl] = useState('')
   const [token, setToken] = useState('')
   const [lostKey, setLostKey] = useState(false)
+  const [preferFirst, setPreferFirst] = useState(true)
 
   if (!storage) return null
   const pool = storage.poolBytes ?? storage.reservedBytes
@@ -974,6 +978,29 @@ function NetworkStores({
     mode === 'node'
       ? Boolean(url.trim() && token.trim())
       : Boolean(bucket.trim() && endpoint.trim() && accessKey.trim() && secretKey.trim())
+  const stores = (storage.order?.length ? storage.order : ['local', ...backends.map((backend) => backend.id)])
+    .map((id) => {
+      if (id === 'local') {
+        return {
+          id: 'local',
+          name: 'This disk',
+          detail: 'Node reserve on this machine',
+          usedBytes: storage.localUsedBytes ?? 0,
+          capacityBytes: storage.reservedBytes,
+        }
+      }
+      const backend = backends.find((item) => item.id === id)
+      if (!backend) return null
+      return {
+        id: backend.id,
+        name: backend.name,
+        detail: backend.type === 's3' ? backend.bucket || backend.endpoint || '' : backend.url || '',
+        usedBytes: backend.usedBytes,
+        capacityBytes: backend.capacityBytes,
+        remote: backend,
+      }
+    })
+    .filter((row): row is NonNullable<typeof row> => Boolean(row))
 
   function reset() {
     setMode(null)
@@ -987,14 +1014,23 @@ function NetworkStores({
     setUrl('')
     setToken('')
     setLostKey(false)
+    setPreferFirst(true)
   }
 
   async function add() {
     setBusy(true)
+    const first = preferFirst
     try {
       await addStorageBackend(
         mode === 'node'
-          ? { type: 'node', name: name.trim() || 'Storebase node', capacityGb: Number(capacityGb) || 1000, url, token }
+          ? {
+              type: 'node',
+              name: name.trim() || 'Storebase node',
+              capacityGb: Number(capacityGb) || 1000,
+              url,
+              token,
+              first,
+            }
           : {
               type: 's3',
               name: name.trim() || (mode === 'b2' ? bucket.trim() || 'Backblaze' : bucket.trim() || 'S3'),
@@ -1004,11 +1040,12 @@ function NetworkStores({
               bucket,
               accessKey,
               secretKey,
+              first,
             },
       )
       reset()
       await onSaved()
-      onToast('Connected. Files use this disk first, then Backblaze when it’s full.')
+      onToast(first ? 'Connected. New files go here first, then the next store when it’s full.' : 'Connected. Move it up if you want it before this disk.')
     } catch (err) {
       onToast(err instanceof Error ? err.message : 'Could not connect')
     } finally {
@@ -1016,11 +1053,25 @@ function NetworkStores({
     }
   }
 
+  async function moveStore(id: string, dir: -1 | 1) {
+    const ids = stores.map((row) => row.id)
+    const index = ids.indexOf(id)
+    const next = index + dir
+    if (index < 0 || next < 0 || next >= ids.length) return
+    ;[ids[index], ids[next]] = [ids[next]!, ids[index]!]
+    try {
+      await setStoreOrder(ids)
+      await onSaved()
+    } catch (err) {
+      onToast(err instanceof Error ? err.message : 'Could not reorder')
+    }
+  }
+
   return (
     <div className="mt-12">
       <Heading
         title="Network"
-        hint="This disk fills first. When it’s full, new files land on Backblaze (or another store)."
+        hint="New files use the first store with room. Move Backblaze above this disk if you want B2 first."
       />
       <p className="mb-6 text-sm text-[#8d8d8d]">
         Pool {formatBytes(storage.poolUsedBytes)} of {formatBytes(pool)}
@@ -1028,41 +1079,65 @@ function NetworkStores({
 
       {backends.length > 0 ? (
         <div className="mb-6 space-y-3">
-          {backends.map((backend) => (
-            <div key={backend.id} className="flex items-start justify-between gap-3">
+          {stores.map((row, index) => (
+            <div key={row.id} className="flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <div className="truncate text-sm text-white">{backend.name}</div>
+                <div className="truncate text-sm text-white">
+                  <span className="mr-2 text-[#8d8d8d]">{index === 0 ? 'First' : 'Then'}</span>
+                  {row.name}
+                </div>
                 <div className="text-xs text-[#8d8d8d]">
-                  {backend.type === 's3' ? backend.bucket || backend.endpoint : backend.url} ·{' '}
-                  {formatBytes(backend.usedBytes)} / {formatBytes(backend.capacityBytes)}
+                  {row.detail} · {formatBytes(row.usedBytes)} / {formatBytes(row.capacityBytes)}
                 </div>
               </div>
-              <div className="flex shrink-0 gap-2">
+              <div className="flex shrink-0 items-center gap-2">
                 <button
                   type="button"
-                  className="text-xs text-[#8d8d8d] hover:text-white"
-                  onClick={() => {
-                    void testStorageBackend(backend.id)
-                      .then(() => onToast(`${backend.name} is reachable`))
-                      .catch((err) => onToast(err instanceof Error ? err.message : 'Unreachable'))
-                  }}
+                  aria-label={`Move ${row.name} up`}
+                  className="text-[#8d8d8d] hover:text-white disabled:opacity-30"
+                  disabled={index === 0}
+                  onClick={() => void moveStore(row.id, -1)}
                 >
-                  Test
+                  <ChevronUp className="size-4" />
                 </button>
                 <button
                   type="button"
-                  className="text-xs text-[#8d8d8d] hover:text-[#f28b82]"
-                  onClick={() => {
-                    void deleteStorageBackend(backend.id)
-                      .then(async () => {
-                        await onSaved()
-                        onToast(`Removed ${backend.name}`)
-                      })
-                      .catch((err) => onToast(err instanceof Error ? err.message : 'Could not remove'))
-                  }}
+                  aria-label={`Move ${row.name} down`}
+                  className="text-[#8d8d8d] hover:text-white disabled:opacity-30"
+                  disabled={index === stores.length - 1}
+                  onClick={() => void moveStore(row.id, 1)}
                 >
-                  Remove
+                  <ChevronDown className="size-4" />
                 </button>
+                {row.remote ? (
+                  <>
+                    <button
+                      type="button"
+                      className="text-xs text-[#8d8d8d] hover:text-white"
+                      onClick={() => {
+                        void testStorageBackend(row.remote!.id)
+                          .then(() => onToast(`${row.name} is reachable`))
+                          .catch((err) => onToast(err instanceof Error ? err.message : 'Unreachable'))
+                      }}
+                    >
+                      Test
+                    </button>
+                    <button
+                      type="button"
+                      className="text-xs text-[#8d8d8d] hover:text-[#f28b82]"
+                      onClick={() => {
+                        void deleteStorageBackend(row.remote!.id)
+                          .then(async () => {
+                            await onSaved()
+                            onToast(`Removed ${row.name}`)
+                          })
+                          .catch((err) => onToast(err instanceof Error ? err.message : 'Could not remove'))
+                      }}
+                    >
+                      Remove
+                    </button>
+                  </>
+                ) : null}
               </div>
             </div>
           ))}
@@ -1178,6 +1253,26 @@ function NetworkStores({
               </Field>
             </>
           )}
+          <label className="flex cursor-pointer items-center justify-between gap-3">
+            <span className="text-sm text-[#e8e8e8]">Fill this before this disk</span>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={preferFirst}
+              className="shrink-0"
+              onClick={() => setPreferFirst((on) => !on)}
+            >
+              <span className={preferFirst ? 'relative block h-6 w-11 rounded-full bg-white' : 'relative block h-6 w-11 rounded-full bg-white/20'}>
+                <span
+                  className={
+                    preferFirst
+                      ? 'absolute top-0.5 left-5 size-5 rounded-full bg-[#1a1a1a]'
+                      : 'absolute top-0.5 left-0.5 size-5 rounded-full bg-white'
+                  }
+                />
+              </span>
+            </button>
+          </label>
           <div className="flex gap-2">
             <Button variant="ghost" className="rounded-full" onClick={reset}>
               Cancel
@@ -1206,13 +1301,33 @@ function NetworkStores({
             </ol>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button className="rounded-full bg-white text-[#1a1a1a] hover:bg-[#f2f2f2]" onClick={() => setMode('b2')}>
+            <Button
+              className="rounded-full bg-white text-[#1a1a1a] hover:bg-[#f2f2f2]"
+              onClick={() => {
+                setPreferFirst(true)
+                setMode('b2')
+              }}
+            >
               I have those four
             </Button>
-            <Button variant="ghost" className="rounded-full" onClick={() => setMode('s3')}>
+            <Button
+              variant="ghost"
+              className="rounded-full"
+              onClick={() => {
+                setPreferFirst(false)
+                setMode('s3')
+              }}
+            >
               Other S3
             </Button>
-            <Button variant="ghost" className="rounded-full" onClick={() => setMode('node')}>
+            <Button
+              variant="ghost"
+              className="rounded-full"
+              onClick={() => {
+                setPreferFirst(false)
+                setMode('node')
+              }}
+            >
               Another Storebase
             </Button>
           </div>

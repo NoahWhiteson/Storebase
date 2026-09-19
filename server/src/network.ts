@@ -38,10 +38,13 @@ export type BackendPublic = {
   accessKey?: string
 }
 
+export const LOCAL_STORE_ID = 'local'
+
 export type NetworkState = {
   inboundToken: string
   inboundEnabled: boolean
   backends: StorageBackend[]
+  order: string[]
 }
 
 export class NetworkError extends Error {
@@ -66,7 +69,24 @@ async function emptyState(): Promise<NetworkState> {
     inboundToken: randomBytes(24).toString('hex'),
     inboundEnabled: true,
     backends: [],
+    order: [LOCAL_STORE_ID],
   }
+}
+
+export function normalizeOrder(backends: StorageBackend[], order?: string[]): string[] {
+  const known = new Set<string>([LOCAL_STORE_ID, ...backends.map((backend) => backend.id)])
+  const next: string[] = []
+  const seen = new Set<string>()
+  for (const id of order ?? [LOCAL_STORE_ID]) {
+    if (!known.has(id) || seen.has(id)) continue
+    seen.add(id)
+    next.push(id)
+  }
+  for (const id of [LOCAL_STORE_ID, ...backends.map((backend) => backend.id)]) {
+    if (seen.has(id)) continue
+    next.push(id)
+  }
+  return next
 }
 
 export async function loadNetwork(config: ServerConfig): Promise<NetworkState> {
@@ -78,6 +98,7 @@ export async function loadNetwork(config: ServerConfig): Promise<NetworkState> {
       inboundToken: typeof parsed.inboundToken === 'string' && parsed.inboundToken ? parsed.inboundToken : randomBytes(24).toString('hex'),
       inboundEnabled: parsed.inboundEnabled !== false,
       backends,
+      order: normalizeOrder(backends, Array.isArray(parsed.order) ? parsed.order : undefined),
     }
   } catch {
     const state = await emptyState()
@@ -256,13 +277,28 @@ export async function pickTarget(
   localRealUsed: number,
   localReserved: number,
 ): Promise<{ kind: 'local' } | { kind: 'remote'; backend: StorageBackend }> {
-  if (localRealUsed + incoming <= localReserved) return { kind: 'local' }
   const state = await loadNetwork(config)
-  for (const backend of state.backends) {
+  for (const id of normalizeOrder(state.backends, state.order)) {
+    if (id === LOCAL_STORE_ID) {
+      if (localRealUsed + incoming <= localReserved) return { kind: 'local' }
+      continue
+    }
+    const backend = state.backends.find((item) => item.id === id)
+    if (!backend) continue
     const used = await sumBackendUsed(config.driveDir, backend.id)
     if (used + incoming <= backend.capacityBytes) return { kind: 'remote', backend }
   }
-  throw new NetworkError('Local disk and every connected store are full', 409)
+  throw new NetworkError('Every store in the fill order is full', 409)
+}
+
+export async function setStoreOrder(config: ServerConfig, order: string[]): Promise<string[]> {
+  if (!Array.isArray(order) || !order.includes(LOCAL_STORE_ID)) {
+    throw new NetworkError('Fill order must include this disk')
+  }
+  const state = await loadNetwork(config)
+  state.order = normalizeOrder(state.backends, order)
+  await saveNetwork(config, state)
+  return state.order
 }
 
 export async function writePointerFile(full: string, pointer: FilePointer): Promise<void> {
@@ -390,6 +426,7 @@ export async function addBackend(
     secretKey?: string
     url?: string
     token?: string
+    first?: boolean
   },
 ): Promise<BackendPublic> {
   if (input.type !== 's3' && input.type !== 'node') throw new NetworkError('Type must be s3 or node')
@@ -429,7 +466,9 @@ export async function addBackend(
   }
   await probeBackend(backend)
   const state = await loadNetwork(config)
+  const prior = normalizeOrder(state.backends, state.order)
   state.backends.push(backend)
+  state.order = input.first ? [backend.id, ...prior.filter((id) => id !== backend.id)] : [...prior.filter((id) => id !== backend.id), backend.id]
   await saveNetwork(config, state)
   return publicBackend(backend, 0)
 }
@@ -441,6 +480,7 @@ export async function removeBackend(config: ServerConfig, id: string): Promise<v
   const next = state.backends.filter((item) => item.id !== id)
   if (next.length === state.backends.length) throw new NetworkError('Store not found', 404)
   state.backends = next
+  state.order = normalizeOrder(next, state.order)
   await saveNetwork(config, state)
 }
 

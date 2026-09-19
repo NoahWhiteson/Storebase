@@ -16,6 +16,7 @@ import {
   removeBackend,
   rotateInbound,
   setInboundEnabled,
+  setStoreOrder,
 } from './network.ts'
 import { folderSize } from './quota.ts'
 import { issueSession, rotateSecret } from './session.ts'
@@ -99,6 +100,7 @@ export function mountAdmin(app: Hono<{ Variables: Vars }>, config: ServerConfig,
     const users = await loadUsers(config)
     const disk = await diskInfo(config.dataDir)
     const poolUsedBytes = await folderSize(config.driveDir)
+    const localUsedBytes = await folderSize(config.driveDir, { real: true })
     const network = await loadNetwork(config)
     const backends = await listBackends(config)
     const remoteBytes = await remoteCapacity(config)
@@ -129,11 +131,13 @@ export function mountAdmin(app: Hono<{ Variables: Vars }>, config: ServerConfig,
         reservedBytes: manifest.reservedBytes,
         reservedGb: bytesToGb(manifest.reservedBytes),
         poolUsedBytes,
+        localUsedBytes,
         poolBytes: manifest.reservedBytes + remoteBytes,
         disk,
         inboundToken: network.inboundToken,
         inboundEnabled: network.inboundEnabled,
         backends,
+        order: network.order,
       },
       users: people,
       update: { ...updateStatus(), autoUpdate: platform.autoUpdate },
@@ -355,6 +359,7 @@ export function mountAdmin(app: Hono<{ Variables: Vars }>, config: ServerConfig,
       secretKey?: string
       url?: string
       token?: string
+      first?: boolean
     }>()
     try {
       const backend = await addBackend(config, {
@@ -368,6 +373,7 @@ export function mountAdmin(app: Hono<{ Variables: Vars }>, config: ServerConfig,
         secretKey: body.secretKey,
         url: body.url,
         token: body.token,
+        first: body.first === true,
       })
       return c.json({ backend }, 201)
     } catch (err) {
@@ -412,9 +418,16 @@ export function mountAdmin(app: Hono<{ Variables: Vars }>, config: ServerConfig,
   app.patch('/api/settings/network', async (c) => {
     const denied = adminOnly(c.get('user'))
     if (denied) return c.json({ error: denied }, 403)
-    const body = await c.req.json<{ inboundEnabled?: boolean }>()
-    const state = await setInboundEnabled(config, body.inboundEnabled !== false)
-    return c.json({ inboundEnabled: state.inboundEnabled })
+    const body = await c.req.json<{ inboundEnabled?: boolean; order?: string[] }>()
+    try {
+      if (body.order) await setStoreOrder(config, body.order)
+      const state =
+        body.inboundEnabled === undefined ? await loadNetwork(config) : await setInboundEnabled(config, body.inboundEnabled !== false)
+      return c.json({ inboundEnabled: state.inboundEnabled, order: state.order })
+    } catch (err) {
+      if (err instanceof NetworkError) return c.json({ error: err.message }, err.status)
+      throw err
+    }
   })
 
   app.patch('/api/me', async (c) => {
