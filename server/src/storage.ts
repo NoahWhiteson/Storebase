@@ -1,7 +1,24 @@
 import type { Dirent } from 'node:fs'
-import { cp, mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname, join, relative, resolve, sep } from 'node:path'
-import { assertWriteFits, folderSize } from './quota.ts'
+import type { ServerConfig } from './config.ts'
+import {
+  copyStored,
+  dropStored,
+  findBackend,
+  newObjectKey,
+  pickTarget,
+  putBlob,
+  writePointerFile,
+} from './network.ts'
+import { logicalFileSize, readPointerAt } from './pointer.ts'
+import { assertWriteFits, folderSize, QuotaError } from './quota.ts'
+
+let networkConfig: ServerConfig | null = null
+
+export function attachNetwork(config: ServerConfig): void {
+  networkConfig = config
+}
 
 export const TRASH_DIR = '.trash'
 
@@ -32,14 +49,24 @@ export async function ensureDir(dir: string): Promise<void> {
   await mkdir(dir, { recursive: true })
 }
 
-function toEntry(root: string, full: string, info: { isDirectory(): boolean; size: number; mtime: Date }): DriveEntry {
+function toEntry(
+  root: string,
+  full: string,
+  info: { isDirectory(): boolean; size: number; mtime: Date },
+  logicalSize?: number,
+): DriveEntry {
   return {
     path: relative(root, full).replaceAll('\\', '/'),
     name: basename(full),
     type: info.isDirectory() ? 'folder' : 'file',
-    size: info.isDirectory() ? 0 : info.size,
+    size: info.isDirectory() ? 0 : (logicalSize ?? info.size),
     modifiedAt: info.mtime.toISOString(),
   }
+}
+
+async function entryFrom(root: string, full: string, info: { isDirectory(): boolean; size: number; mtime: Date }): Promise<DriveEntry> {
+  if (info.isDirectory()) return toEntry(root, full, info)
+  return toEntry(root, full, info, await logicalFileSize(full, info.size))
 }
 
 export async function entryAt(root: string, relPath: string): Promise<DriveEntry | null> {
@@ -47,7 +74,7 @@ export async function entryAt(root: string, relPath: string): Promise<DriveEntry
   const full = resolveSafe(root, relPath)
   try {
     const info = await stat(full)
-    return toEntry(root, full, info)
+    return entryFrom(root, full, info)
   } catch {
     return null
   }
@@ -62,7 +89,7 @@ export async function listPath(root: string, relPath: string): Promise<DriveEntr
     if (entry.name.startsWith('.')) continue
     const full = join(dir, entry.name)
     const info = await stat(full)
-    out.push(toEntry(root, full, info))
+    out.push(await entryFrom(root, full, info))
   }
   out.sort((a, b) => {
     if (a.type !== b.type) return a.type === 'folder' ? -1 : 1
@@ -121,6 +148,7 @@ export type QuotaGate = {
   poolRoot: string
   nodeReserved: number
   userQuota: number | null
+  userId?: string
 }
 
 export async function saveFile(
@@ -139,8 +167,7 @@ export async function saveFile(
   const full = resolveSafe(root, join(relDir, safeName))
   let extra = bytes.byteLength
   try {
-    const existing = await stat(full)
-    if (existing.isFile()) extra = Math.max(0, bytes.byteLength - existing.size)
+    extra = Math.max(0, bytes.byteLength - await logicalFileSize(full))
   } catch {
     // new file
   }
@@ -150,10 +177,40 @@ export async function saveFile(
     incoming: extra,
     nodeReserved: quota.nodeReserved,
     userQuota: quota.userQuota,
+    config: networkConfig ?? undefined,
   })
+  if (networkConfig) {
+    const existing = await readPointerAt(full)
+    if (existing) {
+      const backend = await findBackend(networkConfig, existing.backend)
+      if (backend) {
+        await putBlob(backend, existing.key, bytes)
+        await writePointerFile(full, { ...existing, size: bytes.byteLength })
+        const info = await stat(full)
+        return toEntry(root, full, info, bytes.byteLength)
+      }
+    }
+    const localReal = await folderSize(quota.poolRoot, { real: true })
+    let target
+    try {
+      target = await pickTarget(networkConfig, extra, localReal, quota.nodeReserved)
+    } catch (err) {
+      if (err instanceof Error && err.message.includes('full')) {
+        throw new QuotaError(err.message)
+      }
+      throw err
+    }
+    if (target.kind === 'remote') {
+      const key = newObjectKey(quota.userId ?? 'drive')
+      await putBlob(target.backend, key, bytes)
+      await writePointerFile(full, { sb: 1, backend: target.backend.id, key, size: bytes.byteLength })
+      const info = await stat(full)
+      return toEntry(root, full, info, bytes.byteLength)
+    }
+  }
   await writeFile(full, bytes)
   const info = await stat(full)
-  return toEntry(root, full, info)
+  return entryFrom(root, full, info)
 }
 
 export async function writeFileContent(
@@ -168,17 +225,28 @@ export async function writeFileContent(
   if (info.isDirectory()) throw new Error('Cannot edit a folder')
   const buf = Buffer.from(content, 'utf8')
   if (buf.byteLength > 8_000_000) throw new Error('File is too large to edit in the browser')
-  const extra = Math.max(0, buf.byteLength - info.size)
+  const extra = Math.max(0, buf.byteLength - await logicalFileSize(full, info.size))
   await assertWriteFits({
     userRoot: root,
     poolRoot: quota.poolRoot,
     incoming: extra,
     nodeReserved: quota.nodeReserved,
     userQuota: quota.userQuota,
+    config: networkConfig ?? undefined,
   })
+  const pointer = await readPointerAt(full)
+  if (pointer && networkConfig) {
+    const backend = await findBackend(networkConfig, pointer.backend)
+    if (backend) {
+      await putBlob(backend, pointer.key, buf)
+      await writePointerFile(full, { ...pointer, size: buf.byteLength })
+      const next = await stat(full)
+      return toEntry(root, full, next, buf.byteLength)
+    }
+  }
   await writeFile(full, buf)
   const next = await stat(full)
-  return toEntry(root, full, next)
+  return entryFrom(root, full, next)
 }
 
 export type MovedEntry = { from: string; to: string; item: DriveEntry }
@@ -211,7 +279,7 @@ export async function moveEntries(root: string, relPaths: string[], destDir: str
     const dest = join(destFull, name)
     await rename(full, dest)
     const info = await stat(dest)
-    const item = toEntry(root, dest, info)
+    const item = await entryFrom(root, dest, info)
     moved.push({ from: rel, to: item.path, item })
   }
   return moved
@@ -246,6 +314,7 @@ export async function copyEntries(
     incoming,
     nodeReserved: quota.nodeReserved,
     userQuota: quota.userQuota,
+    config: networkConfig ?? undefined,
   })
 
   if (destDir != null) {
@@ -267,9 +336,9 @@ export async function copyEntries(
     await mkdir(destParent, { recursive: true })
     const name = await uniqueIn(destParent, basename(full))
     const dest = join(destParent, name)
-    await cp(full, dest, { recursive: true, errorOnExist: true })
+    await copyTree(full, dest, quota.userId ?? 'drive')
     const info = await stat(dest)
-    const item = toEntry(root, dest, info)
+    const item = await entryFrom(root, dest, info)
     copied.push({ from: rel, to: item.path, item })
   }
   return copied
@@ -365,11 +434,29 @@ export async function restoreFromTrash(root: string, relPath: string, originalPa
   return toEntry(root, dest, info)
 }
 
+async function copyTree(src: string, dest: string, userId: string): Promise<void> {
+  const info = await stat(src)
+  if (info.isDirectory()) {
+    await mkdir(dest, { recursive: true })
+    const entries = await readdir(src, { withFileTypes: true })
+    for (const entry of entries) {
+      await copyTree(join(src, entry.name), join(dest, entry.name), userId)
+    }
+    return
+  }
+  if (networkConfig) {
+    await copyStored(networkConfig, src, dest, userId)
+    return
+  }
+  const { copyFile } = await import('node:fs/promises')
+  await copyFile(src, dest)
+}
+
 export async function entrySize(root: string, relPath: string): Promise<number> {
   const full = resolveSafe(root, relPath)
   const info = await stat(full)
   if (info.isDirectory()) return folderSize(full)
-  return info.size
+  return logicalFileSize(full, info.size)
 }
 
 export function isTrashPath(relPath: string): boolean {
@@ -389,14 +476,30 @@ export async function removePath(root: string, relPath: string): Promise<void> {
     throw new Error('Refusing to delete the drive root')
   }
   const full = resolveSafe(root, relPath)
+  if (networkConfig) await dropStored(networkConfig, full)
   await rm(full, { recursive: true, force: true })
 }
 
-export async function openDownload(root: string, relPath: string) {
+export type OpenedFile = {
+  name: string
+  size: number
+  full?: string
+  pointer?: { backend: string; key: string }
+}
+
+export async function openDownload(root: string, relPath: string): Promise<OpenedFile> {
   const full = resolveSafe(root, relPath)
   const info = await stat(full)
   if (info.isDirectory()) {
     throw new Error('Cannot download a folder')
+  }
+  const pointer = await readPointerAt(full)
+  if (pointer) {
+    return {
+      name: basename(full),
+      size: pointer.size,
+      pointer: { backend: pointer.backend, key: pointer.key },
+    }
   }
   return {
     name: basename(full),
@@ -410,8 +513,19 @@ export async function unzipArchive(root: string, relPath: string, quota: QuotaGa
   const info = await stat(full)
   if (info.isDirectory()) throw new Error('Not a zip file')
   if (!full.toLowerCase().endsWith('.zip')) throw new Error('Only .zip files can be unzipped')
+  const pointer = await readPointerAt(full)
+  let zipBytes: Buffer
+  if (pointer && networkConfig) {
+    const backend = await findBackend(networkConfig, pointer.backend)
+    if (!backend) throw new Error('That zip’s store is gone')
+    const { getBlob } = await import('./network.ts')
+    const blob = await getBlob(backend, pointer.key)
+    zipBytes = Buffer.from(await new Response(blob.body).arrayBuffer())
+  } else {
+    zipBytes = await readFile(full)
+  }
   const { unzipSync } = await import('fflate')
-  const packed = unzipSync(new Uint8Array(await readFile(full)))
+  const packed = unzipSync(new Uint8Array(zipBytes))
   let incoming = 0
   const files: { rel: string; data: Uint8Array }[] = []
   for (const [name, data] of Object.entries(packed)) {
@@ -428,6 +542,7 @@ export async function unzipArchive(root: string, relPath: string, quota: QuotaGa
     incoming,
     nodeReserved: quota.nodeReserved,
     userQuota: quota.userQuota,
+    config: networkConfig ?? undefined,
   })
   const parent = dirname(full)
   const folderName = await uniqueIn(parent, basename(full).replace(/\.zip$/i, ''))

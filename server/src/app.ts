@@ -33,6 +33,16 @@ import {
   unlockLink,
 } from './links.ts'
 import { mimeFor } from './mime.ts'
+import {
+  deleteInbound,
+  inboundOk,
+  inboundStoreUsed,
+  loadNetwork,
+  openRemote,
+  putInbound,
+  readInbound,
+  remoteCapacity,
+} from './network.ts'
 import { dropPath, loadMeta, rewritePath, setStarred, touchRecent } from './meta.ts'
 import { loadPlatform, terminalsAllowed } from './platform.ts'
 import { requirePool } from './pool.ts'
@@ -69,6 +79,7 @@ import {
   listPath,
   makeFolder,
   moveEntries,
+  attachNetwork,
   openDownload,
   removePath,
   renameEntry,
@@ -77,6 +88,7 @@ import {
   walkLiveFilePaths,
   walkVisible,
   writeFileContent,
+  type OpenedFile,
 } from './storage.ts'
 import {
   dropTempPath,
@@ -135,6 +147,7 @@ async function quotaGate(config: ServerConfig, user: UserRecord) {
     poolRoot: config.driveDir,
     nodeReserved: manifest.reservedBytes,
     userQuota: personalQuota(user),
+    userId: user.id,
   }
 }
 
@@ -144,7 +157,8 @@ function publicPath(path: string): boolean {
     path === '/api/setup' ||
     path === '/api/login' ||
     path === '/api/pair' ||
-    path.startsWith('/api/public/')
+    path.startsWith('/api/public/') ||
+    path.startsWith('/api/network/')
   )
 }
 
@@ -168,10 +182,27 @@ function parseRange(header: string | undefined, size: number): { start: number; 
   return { start, end: Math.min(end, size - 1) }
 }
 
-function sendFile(
-  file: { name: string; size: number; full: string },
+async function openStream(
+  file: OpenedFile,
+  range: { start: number; end: number } | null,
+  config?: ServerConfig,
+) {
+  if (file.pointer) {
+    if (!config) throw new Error('Remote file needs this node')
+    const remote = await openRemote(config, { sb: 1, backend: file.pointer.backend, key: file.pointer.key, size: file.size }, range)
+    return remote.stream
+  }
+  if (!file.full) throw new Error('File is missing')
+  return range
+    ? createReadStream(file.full, { start: range.start, end: range.end })
+    : createReadStream(file.full)
+}
+
+async function sendFile(
+  file: OpenedFile,
   inline: boolean,
   rangeHeader?: string | null,
+  config?: ServerConfig,
 ) {
   const mime = mimeFor(file.name)
   const disposition = `${inline ? 'inline' : 'attachment'}; filename="${file.name.replaceAll('"', '')}"`
@@ -187,7 +218,7 @@ function sendFile(
         },
       })
     }
-    const stream = createReadStream(file.full, { start: range.start, end: range.end })
+    const stream = await openStream(file, range, config)
     return new Response(Readable.toWeb(stream) as unknown as ReadableStream, {
       status: 206,
         headers: {
@@ -201,7 +232,7 @@ function sendFile(
         },
     })
   }
-  const stream = createReadStream(file.full)
+  const stream = await openStream(file, null, config)
   return new Response(Readable.toWeb(stream) as unknown as ReadableStream, {
     headers: {
       'content-type': mime,
@@ -221,6 +252,7 @@ async function touchTempMove(root: string, from: string, to: string): Promise<vo
 }
 
 export function createApp(config: ServerConfig) {
+  attachNetwork(config)
   const app = new Hono<{ Variables: Vars }>()
   const terminals = createTerminalHub(config)
   app.use('/api/*', cors({ origin: (origin) => origin || '*', credentials: true }))
@@ -232,6 +264,51 @@ export function createApp(config: ServerConfig) {
   })
 
   app.get('/api/health', (c) => c.json({ ok: true, service: 'storebase' }))
+
+  app.get('/api/network/status', async (c) => {
+    const state = await loadNetwork(config)
+    if (!inboundOk(state, c.req.header('authorization'))) return c.json({ error: 'Bad network token' }, 401)
+    const manifest = await requirePool(config)
+    const used = await inboundStoreUsed(config)
+    const platform = await loadPlatform(config)
+    return c.json({
+      name: platform.nodeName,
+      reservedBytes: manifest.reservedBytes,
+      usedBytes: used,
+      freeBytes: Math.max(0, manifest.reservedBytes - used),
+    })
+  })
+
+  app.put('/api/network/objects/*', async (c) => {
+    const state = await loadNetwork(config)
+    if (!inboundOk(state, c.req.header('authorization'))) return c.json({ error: 'Bad network token' }, 401)
+    const key = c.req.path.replace('/api/network/objects/', '')
+    const buf = Buffer.from(await c.req.arrayBuffer())
+    const manifest = await requirePool(config)
+    const used = await inboundStoreUsed(config)
+    if (used + buf.byteLength > manifest.reservedBytes) {
+      return c.json({ error: 'This node is out of inbound storage' }, 507)
+    }
+    await putInbound(config, key, buf)
+    return c.json({ ok: true, size: buf.byteLength })
+  })
+
+  app.get('/api/network/objects/*', async (c) => {
+    const state = await loadNetwork(config)
+    if (!inboundOk(state, c.req.header('authorization'))) return c.json({ error: 'Bad network token' }, 401)
+    const key = c.req.path.replace('/api/network/objects/', '')
+    const found = await readInbound(config, key)
+    if (!found) return c.json({ error: 'Not found' }, 404)
+    return sendFile({ name: key.split('/').pop() || 'blob', size: found.size, full: found.full }, true, c.req.header('range'), config)
+  })
+
+  app.delete('/api/network/objects/*', async (c) => {
+    const state = await loadNetwork(config)
+    if (!inboundOk(state, c.req.header('authorization'))) return c.json({ error: 'Bad network token' }, 401)
+    const key = c.req.path.replace('/api/network/objects/', '')
+    await deleteInbound(config, key)
+    return c.json({ ok: true })
+  })
 
   app.get('/api/setup', async (c) => {
     const state = await getSetupState(config)
@@ -270,12 +347,13 @@ export function createApp(config: ServerConfig) {
     const manifest = await requirePool(config)
     const usedBytes = await folderSize(root)
     const platform = await loadPlatform(config)
+    const pool = manifest.reservedBytes + (await remoteCapacity(config))
     return c.json({
       user: toPublic(user),
       host: hostname(),
-      reservedBytes: effectiveReserved(user, manifest.reservedBytes),
+      reservedBytes: effectiveReserved(user, pool),
       quotaBytes: personalQuota(user),
-      nodeReservedBytes: manifest.reservedBytes,
+      nodeReservedBytes: pool,
       usedBytes,
       nodeName: platform.nodeName,
       defaultView: platform.defaultView,
@@ -383,7 +461,7 @@ export function createApp(config: ServerConfig) {
         c.req.query('path') ?? '',
         await linkUnlocked(c, config, token),
       )
-      return sendFile(file, true, c.req.header('range'))
+      return sendFile(file, true, c.req.header('range'), config)
     } catch (err) {
       if (err instanceof LinkError) return c.json({ error: err.message, code: err.code }, err.status)
       throw err
@@ -399,7 +477,7 @@ export function createApp(config: ServerConfig) {
         c.req.query('path') ?? '',
         await linkUnlocked(c, config, token),
       )
-      return sendFile(file, false, c.req.header('range'))
+      return sendFile(file, false, c.req.header('range'), config)
     } catch (err) {
       if (err instanceof LinkError) return c.json({ error: err.message, code: err.code }, err.status)
       throw err
@@ -466,15 +544,16 @@ export function createApp(config: ServerConfig) {
     const manifest = await requirePool(config)
     const usedBytes = await folderSize(root)
     const platform = await loadPlatform(config)
+    const pool = manifest.reservedBytes + (await remoteCapacity(config))
     return c.json({
       user: toPublic(user),
       host: hostname(),
-      reservedBytes: effectiveReserved(user, manifest.reservedBytes),
+      reservedBytes: effectiveReserved(user, pool),
       quotaBytes: personalQuota(user),
-      nodeReservedBytes: manifest.reservedBytes,
+      nodeReservedBytes: pool,
       usedBytes,
       usedGb: bytesToGb(usedBytes),
-      reservedGb: bytesToGb(effectiveReserved(user, manifest.reservedBytes)),
+      reservedGb: bytesToGb(effectiveReserved(user, pool)),
       nodeName: platform.nodeName,
       defaultView: platform.defaultView,
       terminalsEnabled: terminalsAllowed(user, platform),
@@ -1107,7 +1186,7 @@ export function createApp(config: ServerConfig) {
       return file
     }
     try {
-      return sendFile(await openOwned(), inline, c.req.header('range'))
+      return sendFile(await openOwned(), inline, c.req.header('range'), config)
     } catch (err) {
       if (err instanceof ShareError) return c.json({ error: err.message }, err.status)
       throw err
@@ -1122,12 +1201,12 @@ export function createApp(config: ServerConfig) {
     const range = c.req.header('range')
     try {
       if (shareId) {
-        return sendFile(await openSharedDownload(config, user, shareId, path), true, range)
+        return sendFile(await openSharedDownload(config, user, shareId, path), true, range, config)
       }
       if (!path) return c.json({ error: 'path required' }, 400)
       const parsed = parseSharePath(path)
-      if (parsed) return sendFile(await openSharedDownload(config, user, parsed.shareId, parsed.sub), true, range)
-      return sendFile(await openDownload(root, path), true, range)
+      if (parsed) return sendFile(await openSharedDownload(config, user, parsed.shareId, parsed.sub), true, range, config)
+      return sendFile(await openDownload(root, path), true, range, config)
     } catch (err) {
       if (err instanceof ShareError) return c.json({ error: err.message }, err.status)
       throw err

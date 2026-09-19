@@ -2,6 +2,7 @@ import type { Stats } from 'node:fs'
 import { readdir, stat } from 'node:fs/promises'
 import { basename, extname, join } from 'node:path'
 import { mimeFor } from './mime.ts'
+import { logicalFileSize, readPointerAt } from './pointer.ts'
 import { resolveSafe } from './storage.ts'
 import { listVersions } from './versions.ts'
 
@@ -21,6 +22,7 @@ export type DriveInfo = {
   folderCount: number
   versions: number
   versionsBytes: number
+  storedOn: string
 }
 
 const SKIP = new Set(['.versions', '.trash', '.storebase-meta.json', '.temp-index.json', '.trash-index.json'])
@@ -90,10 +92,11 @@ async function walkTree(full: string, rel: string): Promise<Tree> {
       continue
     }
     if (info.isFile()) {
+      const size = await logicalFileSize(full, info.size)
       out.files += 1
-      out.size += info.size
-      out.allocated += allocatedOf(info)
-      out.device += macStubBytes(childRel, info.size, entry.name)
+      out.size += size
+      out.allocated += size
+      out.device += macStubBytes(childRel, size, entry.name)
     }
   }
   return out
@@ -128,10 +131,13 @@ export async function inspectEntry(root: string, relPath: string): Promise<Drive
       folderCount: tree.folders,
       versions: 0,
       versionsBytes: 0,
+      storedOn: 'This node',
     }
   }
   const versions = await listVersions(root, clean)
   const versionsBytes = versions.reduce((sum, version) => sum + version.size, 0)
+  const pointer = await readPointerAt(full)
+  const size = pointer?.size ?? info.size
   return {
     path: clean,
     name,
@@ -139,14 +145,15 @@ export async function inspectEntry(root: string, relPath: string): Promise<Drive
     kind: kindLabel(name, 'file'),
     mime: mimeFor(name),
     extension: extname(name).replace('.', '').toLowerCase() || null,
-    size: info.size,
-    allocated: allocatedOf(info),
-    deviceBytes: macStubBytes(clean, info.size, name),
+    size,
+    allocated: pointer ? size : allocatedOf(info),
+    deviceBytes: macStubBytes(clean, size, name),
     createdAt: createdOf(info),
     modifiedAt: info.mtime.toISOString(),
     fileCount: 1,
     folderCount: 0,
     versions: versions.length,
     versionsBytes,
+    storedOn: pointer ? 'Connected store' : 'This node',
   }
 }

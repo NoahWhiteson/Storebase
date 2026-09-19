@@ -65,6 +65,7 @@ export type FileInfo = {
   folderCount: number
   versions: number
   versionsBytes: number
+  storedOn?: string
 }
 
 export class ApiError extends Error {

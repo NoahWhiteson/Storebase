@@ -3,6 +3,20 @@ import type { PublicUser } from '@/lib/setup'
 
 export type DiskInfo = { totalBytes: number; freeBytes: number }
 
+export type StorageBackend = {
+  id: string
+  type: 's3' | 'node'
+  name: string
+  capacityBytes: number
+  usedBytes: number
+  createdAt: string
+  endpoint?: string
+  region?: string
+  bucket?: string
+  url?: string
+  accessKey?: string
+}
+
 export type SettingsUser = PublicUser & { usedBytes: number; quotaBytes: number | null }
 
 export type SettingsPayload = {
@@ -40,7 +54,11 @@ export type SettingsPayload = {
     reservedBytes: number
     reservedGb: number
     poolUsedBytes: number
+    poolBytes?: number
     disk: DiskInfo
+    inboundToken?: string
+    inboundEnabled?: boolean
+    backends?: StorageBackend[]
   }
   users?: SettingsUser[]
   update?: {
@@ -167,4 +185,40 @@ export async function refreshDomain(): Promise<DomainInfo> {
 
 export async function clearDomain(): Promise<DomainInfo> {
   return api('/api/settings/domain', { method: 'DELETE' })
+}
+
+export async function addStorageBackend(body: {
+  type: 's3' | 'node'
+  name: string
+  capacityGb: number
+  endpoint?: string
+  region?: string
+  bucket?: string
+  accessKey?: string
+  secretKey?: string
+  url?: string
+  token?: string
+}): Promise<StorageBackend> {
+  const res = await api<{ backend: StorageBackend }>('/api/settings/backends', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+  return res.backend
+}
+
+export async function testStorageBackend(id: string): Promise<void> {
+  await api(`/api/settings/backends/${id}/test`, { method: 'POST' })
+}
+
+export async function deleteStorageBackend(id: string): Promise<void> {
+  await api(`/api/settings/backends/${id}`, { method: 'DELETE' })
+}
+
+export async function rotateNetworkToken(): Promise<string> {
+  const res = await api<{ inboundToken: string }>('/api/settings/network/rotate', { method: 'POST' })
+  return res.inboundToken
+}
+
+export async function setNetworkInbound(enabled: boolean): Promise<void> {
+  await api('/api/settings/network', { method: 'PATCH', body: JSON.stringify({ inboundEnabled: enabled }) })
 }

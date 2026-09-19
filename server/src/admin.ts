@@ -6,6 +6,17 @@ import { bytesToGb, gbToBytes, type ServerConfig } from './config.ts'
 import { diskInfo } from './disk.ts'
 import { loadPlatform, savePlatform, type PlatformSettings } from './platform.ts'
 import { requirePool, writeManifest } from './pool.ts'
+import {
+  addBackend,
+  listBackends,
+  loadNetwork,
+  NetworkError,
+  probeBackend,
+  remoteCapacity,
+  removeBackend,
+  rotateInbound,
+  setInboundEnabled,
+} from './network.ts'
 import { folderSize } from './quota.ts'
 import { issueSession, rotateSecret } from './session.ts'
 import { updateStatus } from './update.ts'
@@ -88,6 +99,9 @@ export function mountAdmin(app: Hono<{ Variables: Vars }>, config: ServerConfig,
     const users = await loadUsers(config)
     const disk = await diskInfo(config.dataDir)
     const poolUsedBytes = await folderSize(config.driveDir)
+    const network = await loadNetwork(config)
+    const backends = await listBackends(config)
+    const remoteBytes = await remoteCapacity(config)
     const people = await Promise.all(
       users.map(async (person) => ({
         ...toPublic(person),
@@ -115,7 +129,11 @@ export function mountAdmin(app: Hono<{ Variables: Vars }>, config: ServerConfig,
         reservedBytes: manifest.reservedBytes,
         reservedGb: bytesToGb(manifest.reservedBytes),
         poolUsedBytes,
+        poolBytes: manifest.reservedBytes + remoteBytes,
         disk,
+        inboundToken: network.inboundToken,
+        inboundEnabled: network.inboundEnabled,
+        backends,
       },
       users: people,
       update: { ...updateStatus(), autoUpdate: platform.autoUpdate },
@@ -321,6 +339,82 @@ export function mountAdmin(app: Hono<{ Variables: Vars }>, config: ServerConfig,
     )
     await rm(join(config.driveDir, id), { recursive: true, force: true })
     return c.json({ ok: true })
+  })
+
+  app.post('/api/settings/backends', async (c) => {
+    const denied = adminOnly(c.get('user'))
+    if (denied) return c.json({ error: denied }, 403)
+    const body = await c.req.json<{
+      type?: 's3' | 'node'
+      name?: string
+      capacityGb?: number
+      endpoint?: string
+      region?: string
+      bucket?: string
+      accessKey?: string
+      secretKey?: string
+      url?: string
+      token?: string
+    }>()
+    try {
+      const backend = await addBackend(config, {
+        type: body.type ?? 's3',
+        name: body.name ?? '',
+        capacityGb: Number(body.capacityGb),
+        endpoint: body.endpoint,
+        region: body.region,
+        bucket: body.bucket,
+        accessKey: body.accessKey,
+        secretKey: body.secretKey,
+        url: body.url,
+        token: body.token,
+      })
+      return c.json({ backend }, 201)
+    } catch (err) {
+      if (err instanceof NetworkError) return c.json({ error: err.message }, err.status)
+      throw err
+    }
+  })
+
+  app.post('/api/settings/backends/:id/test', async (c) => {
+    const denied = adminOnly(c.get('user'))
+    if (denied) return c.json({ error: denied }, 403)
+    const state = await loadNetwork(config)
+    const backend = state.backends.find((item) => item.id === c.req.param('id'))
+    if (!backend) return c.json({ error: 'Store not found' }, 404)
+    try {
+      await probeBackend(backend)
+      return c.json({ ok: true })
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : 'Unreachable' }, 400)
+    }
+  })
+
+  app.delete('/api/settings/backends/:id', async (c) => {
+    const denied = adminOnly(c.get('user'))
+    if (denied) return c.json({ error: denied }, 403)
+    try {
+      await removeBackend(config, c.req.param('id'))
+      return c.json({ ok: true })
+    } catch (err) {
+      if (err instanceof NetworkError) return c.json({ error: err.message }, err.status)
+      throw err
+    }
+  })
+
+  app.post('/api/settings/network/rotate', async (c) => {
+    const denied = adminOnly(c.get('user'))
+    if (denied) return c.json({ error: denied }, 403)
+    const token = await rotateInbound(config)
+    return c.json({ inboundToken: token })
+  })
+
+  app.patch('/api/settings/network', async (c) => {
+    const denied = adminOnly(c.get('user'))
+    if (denied) return c.json({ error: denied }, 403)
+    const body = await c.req.json<{ inboundEnabled?: boolean }>()
+    const state = await setInboundEnabled(config, body.inboundEnabled !== false)
+    return c.json({ inboundEnabled: state.inboundEnabled })
   })
 
   app.patch('/api/me', async (c) => {

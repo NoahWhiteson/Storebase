@@ -53,7 +53,7 @@ Mac client: on a Mac run `macos/make-dmg.sh`, then open Storebase.app (Dock + wi
 ## How files work
 
 - Each signed-in user has an isolated folder on the node.
-- Node reserve is the disk cap for the machine. Admins can also set a per-user GB cap in Settings → Users (blank = node default). Uploads fail if either cap would be exceeded.
+- Node reserve is the disk cap for the machine. Admins can also set a per-user GB cap in Settings → Users (blank = node default). Uploads fail if either cap would be exceeded. Settings → Storage → Network connects S3-compatible buckets (Backblaze B2, R2, MinIO, AWS) or another Storebase node. Files stay in one drive: this disk fills first, then remotes. The other node pastes this node’s inbound token. Secrets live in `data/network.json`; inbound blobs in `data/network-store/`.
 - Passwords are scrypt hashes in `data/users.json`. Sessions are httpOnly cookies.
 - Hidden `.trash`, `.temp`, `.versions`, `.temp-index.json`, `.trash-index.json`, and `.storebase-meta.json` live in that user’s folder.
 - Right-click Get Info for kind, type, size on the node, and what a Mac cloud copy uses (tiny stub until you open it). Right-click Share to email someone on this node, or turn on Anyone with the link for a view-only page (`/s/...`). Links can expire (1 hour / 1 day / 7 / 30 days) and can take an optional password. They cannot see the rest of the app. First-time inbound shares land in Spam until you Accept. User shares live in `data/shares.json`, links in `data/links.json`.

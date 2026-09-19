@@ -108,6 +108,7 @@ export function GetInfoDialog({ item, onClose }: { item: DriveItem; onClose: () 
               detail="Cloud copy until you open it"
             />
             <Row label="Where" value={whereLabel(item, info)} />
+            <Row label="Stored on" value={info.storedOn ?? 'This node'} />
             <Row label="Created" value={formatDateTime(info.createdAt)} />
             <Row label="Modified" value={formatDateTime(info.modifiedAt)} />
           </dl>

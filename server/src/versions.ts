@@ -1,6 +1,7 @@
 import { copyFile, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { assertWriteFits } from './quota.ts'
+import { readPointerAt } from './pointer.ts'
 import { entryAt, resolveSafe, type DriveEntry, type QuotaGate } from './storage.ts'
 
 export const VERSIONS_DIR = '.versions'
@@ -53,6 +54,7 @@ export async function snapshotExisting(root: string, relPath: string, quota: Quo
     return
   }
   if (!info.isFile() || info.size <= 0 || info.size > MAX_BYTES) return
+  if (await readPointerAt(full)) return
   await assertWriteFits({
     userRoot: root,
     poolRoot: quota.poolRoot,

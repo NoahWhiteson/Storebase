@@ -5,20 +5,25 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { copyText } from '@/lib/clipboard'
 import { formatBytes, formatDate } from '@/lib/format'
 import {
+  addStorageBackend,
   applyUpdate,
   checkUpdate,
   createUser,
+  deleteStorageBackend,
   deleteUser,
   fetchPairing,
   fetchSettings,
   patchUser,
   refreshDomain,
   revokeDevice,
+  rotateNetworkToken,
   rotatePairCode,
   rotateSecret,
   saveAccount,
   saveDomain,
   saveSettings,
+  setNetworkInbound,
+  testStorageBackend,
   clearDomain,
   type DomainInfo,
   type PairingInfo,
@@ -934,6 +939,284 @@ function StoragePanel({
       <Button className="h-11 rounded-full bg-white text-[#1a1a1a] hover:bg-[#f2f2f2]" disabled={busy} onClick={() => void save()}>
         {busy ? 'Saving…' : 'Save cap'}
       </Button>
+      <NetworkStores data={data} onSaved={onSaved} onToast={onToast} />
+    </div>
+  )
+}
+
+function NetworkStores({
+  data,
+  onSaved,
+  onToast,
+}: {
+  data: SettingsPayload
+  onSaved: () => Promise<void>
+  onToast: (message: string) => void
+}) {
+  const storage = data.storage
+  const backends = storage?.backends ?? []
+  const [mode, setMode] = useState<null | 's3' | 'node'>(null)
+  const [busy, setBusy] = useState(false)
+  const [name, setName] = useState('')
+  const [capacityGb, setCapacityGb] = useState('100')
+  const [endpoint, setEndpoint] = useState('')
+  const [region, setRegion] = useState('')
+  const [bucket, setBucket] = useState('')
+  const [accessKey, setAccessKey] = useState('')
+  const [secretKey, setSecretKey] = useState('')
+  const [url, setUrl] = useState('')
+  const [token, setToken] = useState('')
+
+  if (!storage) return null
+  const pool = storage.poolBytes ?? storage.reservedBytes
+
+  function reset() {
+    setMode(null)
+    setName('')
+    setCapacityGb('100')
+    setEndpoint('')
+    setRegion('')
+    setBucket('')
+    setAccessKey('')
+    setSecretKey('')
+    setUrl('')
+    setToken('')
+  }
+
+  async function add() {
+    setBusy(true)
+    try {
+      await addStorageBackend(
+        mode === 'node'
+          ? { type: 'node', name, capacityGb: Number(capacityGb), url, token }
+          : {
+              type: 's3',
+              name,
+              capacityGb: Number(capacityGb),
+              endpoint,
+              region,
+              bucket,
+              accessKey,
+              secretKey,
+            },
+      )
+      reset()
+      await onSaved()
+      onToast('Store connected. New files spill there when this disk is full.')
+    } catch (err) {
+      onToast(err instanceof Error ? err.message : 'Could not connect')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="mt-12">
+      <Heading
+        title="Network"
+        hint="S3, Backblaze, R2, MinIO, or another Storebase node. One drive. Files land here first, then on connected stores."
+      />
+      <p className="mb-6 text-sm text-[#8d8d8d]">
+        Pool {formatBytes(storage.poolUsedBytes)} of {formatBytes(pool)}
+      </p>
+
+      <div className="mb-8 rounded-2xl bg-white/[0.04] px-4 py-3">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <div className="text-sm text-white">Let other nodes store here</div>
+            <div className="text-xs text-[#8d8d8d]">They paste this token when they add this node.</div>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={storage.inboundEnabled !== false}
+            className="shrink-0"
+            onClick={() => {
+              void (async () => {
+                try {
+                  await setNetworkInbound(storage.inboundEnabled === false)
+                  await onSaved()
+                } catch (err) {
+                  onToast(err instanceof Error ? err.message : 'Could not update')
+                }
+              })()
+            }}
+          >
+            <span
+              className={
+                storage.inboundEnabled !== false
+                  ? 'relative block h-6 w-11 rounded-full bg-white'
+                  : 'relative block h-6 w-11 rounded-full bg-white/20'
+              }
+            >
+              <span
+                className={
+                  storage.inboundEnabled !== false
+                    ? 'absolute top-0.5 left-5 size-5 rounded-full bg-[#1a1a1a]'
+                    : 'absolute top-0.5 left-0.5 size-5 rounded-full bg-white'
+                }
+              />
+            </span>
+          </button>
+        </div>
+        {storage.inboundEnabled !== false && storage.inboundToken ? (
+          <div className="mt-3 flex gap-2">
+            <Input readOnly className={fieldClass} value={storage.inboundToken} onFocus={(e) => e.currentTarget.select()} />
+            <Button
+              variant="ghost"
+              className="h-11 rounded-full"
+              onClick={() => {
+                void copyText(storage.inboundToken ?? '').then((ok) => onToast(ok ? 'Token copied' : 'Copy failed'))
+              }}
+            >
+              Copy
+            </Button>
+            <Button
+              variant="ghost"
+              className="h-11 rounded-full"
+              onClick={() => {
+                void (async () => {
+                  try {
+                    await rotateNetworkToken()
+                    await onSaved()
+                    onToast('Token rotated. Update any node that used the old one.')
+                  } catch (err) {
+                    onToast(err instanceof Error ? err.message : 'Could not rotate')
+                  }
+                })()
+              }}
+            >
+              Rotate
+            </Button>
+          </div>
+        ) : null}
+      </div>
+
+      {backends.length > 0 ? (
+        <div className="mb-6 space-y-3">
+          {backends.map((backend) => (
+            <div key={backend.id} className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="truncate text-sm text-white">{backend.name}</div>
+                <div className="text-xs text-[#8d8d8d]">
+                  {backend.type === 's3' ? backend.bucket || backend.endpoint : backend.url} ·{' '}
+                  {formatBytes(backend.usedBytes)} / {formatBytes(backend.capacityBytes)}
+                </div>
+              </div>
+              <div className="flex shrink-0 gap-2">
+                <button
+                  type="button"
+                  className="text-xs text-[#8d8d8d] hover:text-white"
+                  onClick={() => {
+                    void testStorageBackend(backend.id)
+                      .then(() => onToast(`${backend.name} is reachable`))
+                      .catch((err) => onToast(err instanceof Error ? err.message : 'Unreachable'))
+                  }}
+                >
+                  Test
+                </button>
+                <button
+                  type="button"
+                  className="text-xs text-[#8d8d8d] hover:text-[#f28b82]"
+                  onClick={() => {
+                    void deleteStorageBackend(backend.id)
+                      .then(async () => {
+                        await onSaved()
+                        onToast(`Removed ${backend.name}`)
+                      })
+                      .catch((err) => onToast(err instanceof Error ? err.message : 'Could not remove'))
+                  }}
+                >
+                  Remove
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="mb-6 text-sm text-[#8d8d8d]">No extra stores yet.</p>
+      )}
+
+      {mode ? (
+        <div className="space-y-3">
+          <div className="flex gap-2">
+            <button
+              type="button"
+              className={mode === 's3' ? 'h-8 rounded-full bg-white px-3 text-xs text-[#1a1a1a]' : 'h-8 rounded-full bg-white/10 px-3 text-xs'}
+              onClick={() => setMode('s3')}
+            >
+              S3 / Backblaze
+            </button>
+            <button
+              type="button"
+              className={mode === 'node' ? 'h-8 rounded-full bg-white px-3 text-xs text-[#1a1a1a]' : 'h-8 rounded-full bg-white/10 px-3 text-xs'}
+              onClick={() => setMode('node')}
+            >
+              Storebase node
+            </button>
+          </div>
+          <Input className={fieldClass} placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} />
+          <Input
+            className={fieldClass}
+            placeholder="Capacity GB"
+            value={capacityGb}
+            onChange={(e) => setCapacityGb(e.target.value)}
+          />
+          {mode === 's3' ? (
+            <>
+              <Input
+                className={fieldClass}
+                placeholder="Endpoint · https://s3.us-west-004.backblazeb2.com"
+                value={endpoint}
+                onChange={(e) => setEndpoint(e.target.value)}
+              />
+              <div className="grid grid-cols-2 gap-2">
+                <Input className={fieldClass} placeholder="Region" value={region} onChange={(e) => setRegion(e.target.value)} />
+                <Input className={fieldClass} placeholder="Bucket" value={bucket} onChange={(e) => setBucket(e.target.value)} />
+              </div>
+              <Input className={fieldClass} placeholder="Access key" value={accessKey} onChange={(e) => setAccessKey(e.target.value)} />
+              <Input
+                className={fieldClass}
+                type="password"
+                placeholder="Secret key"
+                value={secretKey}
+                onChange={(e) => setSecretKey(e.target.value)}
+              />
+            </>
+          ) : (
+            <>
+              <Input
+                className={fieldClass}
+                placeholder="https://other-node:4780"
+                value={url}
+                onChange={(e) => setUrl(e.target.value)}
+              />
+              <Input className={fieldClass} placeholder="Inbound token from that node" value={token} onChange={(e) => setToken(e.target.value)} />
+            </>
+          )}
+          <div className="flex gap-2">
+            <Button variant="ghost" className="rounded-full" onClick={reset}>
+              Cancel
+            </Button>
+            <Button
+              className="rounded-full bg-white text-[#1a1a1a] hover:bg-[#f2f2f2]"
+              disabled={busy || !name.trim()}
+              onClick={() => void add()}
+            >
+              {busy ? 'Connecting…' : 'Connect'}
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <div className="flex gap-2">
+          <Button variant="ghost" className="rounded-full" onClick={() => setMode('s3')}>
+            Add S3
+          </Button>
+          <Button variant="ghost" className="rounded-full" onClick={() => setMode('node')}>
+            Add node
+          </Button>
+        </div>
+      )}
     </div>
   )
 }
