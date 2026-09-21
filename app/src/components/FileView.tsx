@@ -16,7 +16,7 @@ import { isTempId, rawUrl } from '@/lib/api'
 import type { DriveItem, SectionId } from '@/types'
 import { cn } from 'cn'
 import type { DragEvent, ReactNode } from 'react'
-import { useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import {
   ArchiveRestore,
   ArrowDownAz,
@@ -88,7 +88,7 @@ type FileViewProps = {
 }
 
 export function FileView(props: FileViewProps) {
-  const ordered = sortItems(props.items, props.sort)
+  const ordered = useMemo(() => sortItems(props.items, props.sort), [props.items, props.sort])
   const folders = ordered.filter((item) => item.kind === 'folder')
   const files = ordered.filter((item) => item.kind !== 'folder')
   const showSplit = props.view === 'grid' && folders.length > 0 && files.length > 0
@@ -398,7 +398,7 @@ function ItemThumb({ item, size }: { item: DriveItem; size: 'sm' | 'lg' }) {
     )
   }
   if (image && size === 'lg') {
-    return <img src={rawUrl(item.id)} alt="" className="h-full w-full object-cover" />
+    return <img loading="lazy" decoding="async" src={rawUrl(item.id)} alt="" className="h-full w-full object-cover" />
   }
   return <FileGlyph kind={item.kind} size={size} />
 }
@@ -433,6 +433,7 @@ function Tile({
   const over = drag.overId === item.id && canDrop
   return (
     <button
+      style={{ contentVisibility: 'auto', containIntrinsicSize: 'auto 48px' }}
       type="button"
       data-drive-item
       draggable={false}

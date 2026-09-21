@@ -208,7 +208,7 @@ function nodeUrl(backend: StorageBackend, key: string): string {
   return `${base}/api/network/objects/${key.split('/').map(encodeURIComponent).join('/')}`
 }
 
-async function nodeHeaders(backend: StorageBackend, extra?: HeadersInit): Promise<Headers> {
+async function nodeHeaders(backend: StorageBackend, extra?: ConstructorParameters<typeof Headers>[0]): Promise<Headers> {
   const headers = new Headers(extra)
   headers.set('authorization', `Bearer ${backend.token ?? ''}`)
   return headers

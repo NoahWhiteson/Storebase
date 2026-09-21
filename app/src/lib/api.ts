@@ -1,3 +1,4 @@
+import { beginOperation } from '@/lib/operations'
 import type { DriveItem, FileKind } from '@/types'
 import type { PublicUser } from '@/lib/setup'
 
@@ -162,8 +163,70 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   if (init.body && !(init.body instanceof FormData) && !headers.has('content-type')) {
     headers.set('content-type', 'application/json')
   }
-  const res = await fetch(path, { credentials: 'include', ...init, headers })
-  return parse<T>(res)
+  const action = path.split('?')[0].split('/').pop() ?? ''
+  const labels: Record<string, string> = { unzip: 'Extracting archive', copy: 'Duplicating files', trash: 'Moving to trash', files: 'Deleting file', 'empty-trash': 'Emptying trash', upload: 'Uploading file', move: 'Moving files', keep: 'Keeping file', restore: 'Restoring file', rename: 'Renaming file', mkdir: 'Creating folder', content: 'Saving file', star: 'Updating star' }
+  const tracked = init.method && init.method !== 'GET' && (path.startsWith('/api/files') || path.startsWith('/api/temp/'))
+  let detail = ''
+  if (typeof init.body === 'string') {
+    try { const body = JSON.parse(init.body); detail = body.path ?? body.paths?.join(', ') ?? '' } catch { /* optional label */ }
+  } else if (init.body instanceof FormData) {
+    const file = init.body.get('file')
+    if (file instanceof File) detail = file.name
+  }
+  if (!detail && init.method === 'DELETE') detail = new URLSearchParams(path.split('?')[1]).get('path') ?? ''
+  const operation = tracked ? beginOperation(labels[action] ?? 'Updating files', detail) : undefined
+  if (action === 'unzip') headers.set('accept', 'application/x-ndjson')
+  try {
+    const res = init.body instanceof FormData && action === 'upload'
+      ? await new Promise<Response>((resolve, reject) => {
+          const xhr = new XMLHttpRequest()
+          xhr.open(init.method ?? 'POST', path)
+          xhr.withCredentials = true
+          headers.forEach((value, key) => xhr.setRequestHeader(key, value))
+          xhr.upload.onprogress = event => {
+            if (event.lengthComputable) operation?.progress(detail, Math.min(99, event.loaded / event.total * 100))
+          }
+          xhr.upload.onload = () => operation?.progress('Saving ' + detail)
+          xhr.onload = () => resolve(new Response(xhr.responseText, { status: xhr.status, headers: { 'content-type': 'application/json' } }))
+          xhr.onerror = () => reject(new Error('Upload connection failed'))
+          xhr.onabort = () => reject(new Error('Upload cancelled'))
+          xhr.send(init.body as FormData)
+        })
+      : await fetch(path, { credentials: 'include', ...init, headers })
+    let result: T
+    if (res.ok && res.headers.get('content-type')?.includes('application/x-ndjson') && res.body) {
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let pending = ''
+      let received = false
+      let value: T | undefined
+      try {
+        while (true) {
+          const chunk = await reader.read()
+          pending += decoder.decode(chunk.value, { stream: !chunk.done })
+          const lines = pending.split('\n')
+          pending = lines.pop() ?? ''
+          if (chunk.done && pending) lines.push(pending)
+          for (const line of lines) {
+            if (!line.trim()) continue
+            const event = JSON.parse(line)
+            if (event.error) throw new ApiError(event.error, 400, event)
+            if (event.result) { value = event.result; received = true }
+            else operation?.progress(event.detail ?? detail, event.progress)
+          }
+          if (chunk.done) break
+        }
+      } finally { reader.releaseLock() }
+      if (!received) throw new Error('Connection closed before the operation completed')
+      result = value as T
+    } else result = await parse<T>(res)
+    operation?.finish()
+    if (tracked) window.dispatchEvent(new Event('storebase:files-changed'))
+    return result
+  } catch (error) {
+    operation?.finish(error)
+    throw error
+  }
 }
 
 export async function fetchMe(): Promise<Me | null> {

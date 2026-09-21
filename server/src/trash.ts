@@ -1,4 +1,6 @@
-import { readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { withLock } from './concurrency.ts'
+import { atomicWriteFile } from './atomic-json.ts'
+import { readdir, readFile, rm, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
   TRASH_DIR,
@@ -46,7 +48,7 @@ async function loadIndex(root: string): Promise<TrashRecord[]> {
 }
 
 async function saveIndex(root: string, items: TrashRecord[]): Promise<void> {
-  await writeFile(indexPath(root), `${JSON.stringify({ items }, null, 2)}\n`)
+  await atomicWriteFile(indexPath(root), `${JSON.stringify({ items }, null, 2)}\n`)
 }
 
 export function expiresAt(trashedAt: string, days = TRASH_DAYS): string {
@@ -62,7 +64,7 @@ export function isExpired(trashedAt: string, days = TRASH_DAYS): boolean {
   return Date.now() - new Date(trashedAt).getTime() >= days * DAY_MS
 }
 
-export async function trashEntry(root: string, relPath: string): Promise<{ item: DriveEntry; record: TrashRecord }> {
+async function trashEntryUnlocked(root: string, relPath: string): Promise<{ item: DriveEntry; record: TrashRecord }> {
   const size = await entrySize(root, relPath)
   const item = await moveToTrash(root, relPath)
   const record: TrashRecord = {
@@ -77,7 +79,7 @@ export async function trashEntry(root: string, relPath: string): Promise<{ item:
   return { item, record }
 }
 
-export async function restoreTrash(root: string, relPath: string): Promise<DriveEntry> {
+async function restoreTrashUnlocked(root: string, relPath: string): Promise<DriveEntry> {
   if (!isTrashPath(relPath)) throw new Error('Not in trash')
   const items = await loadIndex(root)
   const rec = items.find((item) => item.trashPath === relPath)
@@ -89,7 +91,7 @@ export async function restoreTrash(root: string, relPath: string): Promise<Drive
   return restored
 }
 
-export async function purgeExpiredTrash(root: string): Promise<string[]> {
+async function purgeExpiredTrashUnlocked(root: string): Promise<string[]> {
   const trash = join(root, TRASH_DIR)
   await ensureDir(trash)
   const items = await loadIndex(root)
@@ -153,7 +155,7 @@ export async function listTrashItems(root: string): Promise<TrashListing[]> {
   })
 }
 
-export async function emptyTrash(root: string): Promise<string[]> {
+async function emptyTrashUnlocked(root: string): Promise<string[]> {
   const items = await loadIndex(root)
   const originals = items.map((item) => item.originalPath)
   const trash = join(root, TRASH_DIR)
@@ -171,7 +173,7 @@ export async function emptyTrash(root: string): Promise<string[]> {
   return [...new Set(originals)]
 }
 
-export async function forgetTrashPath(root: string, trashPath: string): Promise<string | undefined> {
+async function forgetTrashPathUnlocked(root: string, trashPath: string): Promise<string | undefined> {
   const items = await loadIndex(root)
   const rec = items.find((item) => item.trashPath === trashPath)
   await saveIndex(
@@ -180,3 +182,18 @@ export async function forgetTrashPath(root: string, trashPath: string): Promise<
   )
   return rec?.originalPath
 }
+
+export const trashEntry = (...args: Parameters<typeof trashEntryUnlocked>): ReturnType<typeof trashEntryUnlocked> =>
+  withLock(args[0] + ':trash', () => trashEntryUnlocked(...args))
+
+export const restoreTrash = (...args: Parameters<typeof restoreTrashUnlocked>): ReturnType<typeof restoreTrashUnlocked> =>
+  withLock(args[0] + ':trash', () => restoreTrashUnlocked(...args))
+
+export const purgeExpiredTrash = (...args: Parameters<typeof purgeExpiredTrashUnlocked>): ReturnType<typeof purgeExpiredTrashUnlocked> =>
+  withLock(args[0] + ':trash', () => purgeExpiredTrashUnlocked(...args))
+
+export const emptyTrash = (...args: Parameters<typeof emptyTrashUnlocked>): ReturnType<typeof emptyTrashUnlocked> =>
+  withLock(args[0] + ':trash', () => emptyTrashUnlocked(...args))
+
+export const forgetTrashPath = (...args: Parameters<typeof forgetTrashPathUnlocked>): ReturnType<typeof forgetTrashPathUnlocked> =>
+  withLock(args[0] + ':trash', () => forgetTrashPathUnlocked(...args))

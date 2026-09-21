@@ -1,4 +1,6 @@
-import { readFile, writeFile } from 'node:fs/promises'
+import { withLock } from './concurrency.ts'
+import { atomicWriteFile } from './atomic-json.ts'
+import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { ServerConfig } from './config.ts'
 import { entryAt, listPath, openDownload, resolveSafe, type DriveEntry } from './storage.ts'
@@ -53,7 +55,7 @@ async function loadAll(config: ServerConfig): Promise<ShareRecord[]> {
 }
 
 async function writeShares(config: ServerConfig, shares: ShareRecord[]): Promise<void> {
-  await writeFile(filePath(config), `${JSON.stringify({ shares }, null, 2)}\n`)
+  await atomicWriteFile(filePath(config), `${JSON.stringify({ shares }, null, 2)}\n`)
 }
 
 function covers(sharePath: string, relPath: string): boolean {
@@ -86,7 +88,7 @@ export async function pathIsShared(config: ServerConfig, ownerId: string, path: 
   return shares.some((share) => share.ownerId === ownerId && covers(share.path, path))
 }
 
-export async function createShare(config: ServerConfig, owner: UserRecord, path: string, email: string): Promise<ShareRecord> {
+async function createShareUnlocked(config: ServerConfig, owner: UserRecord, path: string, email: string): Promise<ShareRecord> {
   if (!path || path.startsWith('.')) throw new ShareError('Cannot share that path', 400)
   const root = await ensureUserDrive(config, owner.id)
   const item = await entryAt(root, path)
@@ -114,7 +116,7 @@ export async function createShare(config: ServerConfig, owner: UserRecord, path:
   return next
 }
 
-export async function acceptShare(config: ServerConfig, actor: UserRecord, id: string): Promise<ShareRecord> {
+async function acceptShareUnlocked(config: ServerConfig, actor: UserRecord, id: string): Promise<ShareRecord> {
   const shares = await loadAll(config)
   const found = shares.find((share) => share.id === id)
   if (!found) throw new ShareError('Share not found', 404)
@@ -128,7 +130,7 @@ export async function acceptShare(config: ServerConfig, actor: UserRecord, id: s
   return next.find((share) => share.id === id) as ShareRecord
 }
 
-export async function deleteShare(config: ServerConfig, actor: UserRecord, id: string): Promise<void> {
+async function deleteShareUnlocked(config: ServerConfig, actor: UserRecord, id: string): Promise<void> {
   const shares = await loadAll(config)
   const found = shares.find((share) => share.id === id)
   if (!found) throw new ShareError('Share not found', 404)
@@ -141,13 +143,13 @@ export async function deleteShare(config: ServerConfig, actor: UserRecord, id: s
   )
 }
 
-export async function dropSharesForPath(config: ServerConfig, ownerId: string, path: string): Promise<void> {
+async function dropSharesForPathUnlocked(config: ServerConfig, ownerId: string, path: string): Promise<void> {
   const shares = await loadAll(config)
   const next = shares.filter((share) => !(share.ownerId === ownerId && covers(path, share.path)))
   if (next.length !== shares.length) await writeShares(config, next)
 }
 
-export async function rewriteShares(config: ServerConfig, ownerId: string, from: string, to: string): Promise<void> {
+async function rewriteSharesUnlocked(config: ServerConfig, ownerId: string, from: string, to: string): Promise<void> {
   const shares = await loadAll(config)
   let changed = false
   const next = shares.map((share) => {
@@ -325,3 +327,18 @@ export class ShareError extends Error {
     this.status = status
   }
 }
+
+export const createShare = (...args: Parameters<typeof createShareUnlocked>): ReturnType<typeof createShareUnlocked> =>
+  withLock(args[0].dataDir + ':shares', () => createShareUnlocked(...args))
+
+export const acceptShare = (...args: Parameters<typeof acceptShareUnlocked>): ReturnType<typeof acceptShareUnlocked> =>
+  withLock(args[0].dataDir + ':shares', () => acceptShareUnlocked(...args))
+
+export const deleteShare = (...args: Parameters<typeof deleteShareUnlocked>): ReturnType<typeof deleteShareUnlocked> =>
+  withLock(args[0].dataDir + ':shares', () => deleteShareUnlocked(...args))
+
+export const dropSharesForPath = (...args: Parameters<typeof dropSharesForPathUnlocked>): ReturnType<typeof dropSharesForPathUnlocked> =>
+  withLock(args[0].dataDir + ':shares', () => dropSharesForPathUnlocked(...args))
+
+export const rewriteShares = (...args: Parameters<typeof rewriteSharesUnlocked>): ReturnType<typeof rewriteSharesUnlocked> =>
+  withLock(args[0].dataDir + ':shares', () => rewriteSharesUnlocked(...args))
