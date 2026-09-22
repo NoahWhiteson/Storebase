@@ -3,6 +3,7 @@ import { mkdtemp, readFile, readdir, rename, rm, writeFile } from 'node:fs/promi
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { promisify } from 'node:util'
+import { findExecutable } from './executables.ts'
 
 const execFileAsync = promisify(execFile)
 const SCAN_FILE = '.storebase-virus.json'
@@ -53,7 +54,9 @@ export async function scannerAvailable(): Promise<boolean> {
   const now = Date.now()
   if (scannerCache !== null && now - scannerCacheAt < 30_000) return scannerCache
   try {
-    await execFileAsync('clamscan', ['--version'], { timeout: 5000 })
+    const scanner = await findExecutable('clamscan')
+    if (!scanner) throw new Error('clamscan not found')
+    await execFileAsync(scanner, ['--version'], { timeout: 5000 })
     scannerCache = true
   } catch {
     scannerCache = false
@@ -74,12 +77,14 @@ function signatureFrom(output: string): string | undefined {
 
 export async function scanUpload(bytes: Buffer, filename: string): Promise<VirusScanResult> {
   const scannedAt = new Date().toISOString()
+  const scanner = await findExecutable('clamscan')
+  if (!scanner) return { status: 'unavailable', score: null, scannedAt, engine: 'clamav' }
   const dir = await mkdtemp(join(tmpdir(), 'storebase-scan-'))
   const target = join(dir, basename(filename).replace(/[^a-zA-Z0-9._-]/g, '_') || 'upload')
   try {
     await writeFile(target, bytes)
     try {
-      const result = await execFileAsync('clamscan', ['--stdout', '--no-summary', target], {
+      const result = await execFileAsync(scanner, ['--stdout', '--no-summary', target], {
         timeout: 5 * 60_000,
         maxBuffer: 1024 * 1024,
       })

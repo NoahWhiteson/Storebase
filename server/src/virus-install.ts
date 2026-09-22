@@ -3,6 +3,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { platform as osPlatform, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
+import { findExecutable } from './executables.ts'
 import { resetScannerAvailabilityCache } from './virus.ts'
 
 const execFileAsync = promisify(execFile)
@@ -63,9 +64,10 @@ async function performInstall(): Promise<void> {
     }
     step(`Installing ClamAV with ${manager.name}`, 35)
     await run(await privileged(manager.install, manager.needsRoot))
-    if (manager.refresh && await hasBinary(manager.refresh[0])) {
+    const refresher = manager.refresh ? await findExecutable(manager.refresh[0]) : null
+    if (manager.refresh && refresher) {
       step('Updating virus definitions', 80)
-      try { await run(await privileged(manager.refresh, manager.needsRoot)) } catch { /* freshclam may be locked by its service */ }
+      try { await run(await privileged([refresher, ...manager.refresh.slice(1)], manager.needsRoot)) } catch { /* freshclam may be locked by its service */ }
     }
     step('Verifying the scanner and definitions', 95)
     const version = await scannerVersion()
@@ -90,7 +92,9 @@ function step(message: string, percent: number): void { state.step = message; st
 
 async function scannerVersion(): Promise<string | null> {
   try {
-    const result = await execFileAsync('clamscan', ['--version'], { timeout: 5000 })
+    const scanner = await findExecutable('clamscan')
+    if (!scanner) return null
+    const result = await execFileAsync(scanner, ['--version'], { timeout: 5000 })
     return `${result.stdout}${result.stderr}`.split(/\r?\n/)[0]?.trim() || null
   } catch { return null }
 }
@@ -100,7 +104,9 @@ async function scannerCanScan(): Promise<boolean> {
   const file = join(dir, 'empty.txt')
   try {
     await writeFile(file, '')
-    await execFileAsync('clamscan', ['--no-summary', file], { timeout: 30_000 })
+    const scanner = await findExecutable('clamscan')
+    if (!scanner) return false
+    await execFileAsync(scanner, ['--no-summary', file], { timeout: 30_000 })
     return true
   } catch { return false }
   finally { await rm(dir, { recursive: true, force: true }).catch(() => {}) }
@@ -110,30 +116,29 @@ type Manager = { name: string; update: string[] | null; install: string[]; refre
 
 async function detectManager(): Promise<Manager | null> {
   const platform = osPlatform()
-  if (platform === 'darwin' && await hasBinary('brew')) return { name: 'Homebrew', update: null, install: ['brew', 'install', 'clamav'], refresh: ['freshclam'], needsRoot: false }
+  const brew = await findExecutable('brew')
+  if (platform === 'darwin' && brew) return { name: 'Homebrew', update: null, install: [brew, 'install', 'clamav'], refresh: ['freshclam'], needsRoot: false }
   if (platform !== 'linux') return null
-  if (await hasBinary('apt-get')) return { name: 'APT', update: ['apt-get', 'update'], install: ['apt-get', 'install', '-y', 'clamav', 'clamav-daemon'], refresh: ['freshclam'], needsRoot: true }
-  if (await hasBinary('dnf')) return { name: 'DNF', update: null, install: ['dnf', 'install', '-y', 'clamav', 'clamav-update'], refresh: ['freshclam'], needsRoot: true }
-  if (await hasBinary('yum')) return { name: 'YUM', update: null, install: ['yum', 'install', '-y', 'clamav', 'clamav-update'], refresh: ['freshclam'], needsRoot: true }
-  if (await hasBinary('zypper')) return { name: 'zypper', update: null, install: ['zypper', '--non-interactive', 'install', 'clamav'], refresh: ['freshclam'], needsRoot: true }
-  if (await hasBinary('pacman')) return { name: 'pacman', update: null, install: ['pacman', '-S', '--noconfirm', 'clamav'], refresh: ['freshclam'], needsRoot: true }
-  if (await hasBinary('apk')) return { name: 'APK', update: null, install: ['apk', 'add', 'clamav', 'clamav-daemon'], refresh: ['freshclam'], needsRoot: true }
+  const apt = await findExecutable('apt-get')
+  if (apt) return { name: 'APT', update: [apt, 'update'], install: [apt, 'install', '-y', 'clamav', 'clamav-daemon'], refresh: ['freshclam'], needsRoot: true }
+  const dnf = await findExecutable('dnf')
+  if (dnf) return { name: 'DNF', update: null, install: [dnf, 'install', '-y', 'clamav', 'clamav-update'], refresh: ['freshclam'], needsRoot: true }
+  const yum = await findExecutable('yum')
+  if (yum) return { name: 'YUM', update: null, install: [yum, 'install', '-y', 'clamav', 'clamav-update'], refresh: ['freshclam'], needsRoot: true }
+  const zypper = await findExecutable('zypper')
+  if (zypper) return { name: 'zypper', update: null, install: [zypper, '--non-interactive', 'install', 'clamav'], refresh: ['freshclam'], needsRoot: true }
+  const pacman = await findExecutable('pacman')
+  if (pacman) return { name: 'pacman', update: null, install: [pacman, '-S', '--noconfirm', 'clamav'], refresh: ['freshclam'], needsRoot: true }
+  const apk = await findExecutable('apk')
+  if (apk) return { name: 'APK', update: null, install: [apk, 'add', 'clamav', 'clamav-daemon'], refresh: ['freshclam'], needsRoot: true }
   return null
 }
 
 async function privileged(command: string[], needsRoot: boolean): Promise<string[]> {
   if (!needsRoot || (typeof process.getuid === 'function' && process.getuid() === 0)) return command
-  if (!(await hasBinary('sudo'))) throw new Error(`Storebase cannot install system packages as this user. Run “${command.join(' ')}” on the server.`)
-  return ['sudo', '-n', ...command]
-}
-
-async function hasBinary(binary: string): Promise<boolean> {
-  return new Promise((resolve) => {
-    const child = spawn(binary, ['--version'], { stdio: 'ignore' })
-    const timer = setTimeout(() => { child.kill(); resolve(false) }, 3000)
-    child.once('error', () => { clearTimeout(timer); resolve(false) })
-    child.once('close', (code) => { clearTimeout(timer); resolve(code === 0) })
-  })
+  const sudo = await findExecutable('sudo')
+  if (!sudo) throw new Error(`Storebase cannot install system packages as this user. Run “${command.join(' ')}” on the server.`)
+  return [sudo, '-n', ...command]
 }
 
 function run(command: string[]): Promise<void> {
@@ -152,7 +157,7 @@ function run(command: string[]): Promise<void> {
     child.once('error', (error) => finish(new Error(`Could not run ${command[0]}: ${error.message}`)))
     child.once('close', (code) => {
       if (code === 0) return finish()
-      if (command[0] === 'sudo' && /password|terminal is required|not allowed/i.test(stderr)) {
+      if (command[0].replaceAll('\\', '/').endsWith('/sudo') && /password|terminal is required|not allowed/i.test(stderr)) {
         return finish(new Error(`Storebase needs passwordless sudo to install ClamAV. Run “${command.slice(2).join(' ')}” on the server instead.`))
       }
       finish(new Error(stderr.trim() || `${command.join(' ')} exited with code ${code}`))

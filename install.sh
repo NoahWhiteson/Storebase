@@ -164,7 +164,7 @@ STOREBASE_DATA_DIR=$INSTALL/data
 STOREBASE_HOME=$INSTALL
 STOREBASE_APP_DIST=$INSTALL/app/dist
 STOREBASE_AUTO_UPDATE=$AUTO_UPDATE
-PATH=$(dirname "$NODE_BIN"):\$PATH
+PATH=$(dirname "$NODE_BIN"):/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/homebrew/bin
 EOF
 
 START_SH="$INSTALL/start.sh"
