@@ -491,3 +491,34 @@ export function rawUrl(path: string): string {
   }
   return `/api/files/raw?path=${encodeURIComponent(path)}`
 }
+
+type FileAvailability = {
+  available: boolean
+  remote: boolean
+  provider: 'local' | 'backblaze' | 'remote' | 'unknown'
+}
+
+const availabilityChecks = new Map<string, { at: number; request: Promise<FileAvailability> }>()
+
+export async function reportFileLoadFailure(path: string): Promise<void> {
+  const prior = availabilityChecks.get(path)
+  const now = Date.now()
+  let request: Promise<FileAvailability>
+  if (prior && now - prior.at < 30_000) request = prior.request
+  else {
+    const parsed = parseSharePath(path)
+    const qs = parsed
+      ? new URLSearchParams({ share: parsed.shareId, ...(parsed.sub ? { path: parsed.sub } : {}) })
+      : new URLSearchParams({ path })
+    request = api<FileAvailability>(`/api/files/availability?${qs}`)
+    availabilityChecks.set(path, { at: now, request })
+  }
+  try {
+    const result = await request
+    if (!result.available && result.provider === 'backblaze') {
+      window.dispatchEvent(new Event('storebase:backblaze-unavailable'))
+    }
+  } catch {
+    // The availability check is advisory and should not replace the file error.
+  }
+}

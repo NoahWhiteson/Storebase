@@ -2,7 +2,7 @@ import { StorebaseLogo } from '@/components/StorebaseLogo'
 import { Button } from '@/components/ui/button'
 import { VideoPlayer } from '@/components/VideoPlayer'
 import { delimiterFor, parseCsv, serializeCsv } from '@/lib/csv'
-import { listFileVersions, restoreFileVersion, saveOriginalFromUrl, type FileVersion } from '@/lib/api'
+import { listFileVersions, reportFileLoadFailure, restoreFileVersion, saveOriginalFromUrl, type FileVersion } from '@/lib/api'
 import { formatBytes, formatDateTime } from '@/lib/format'
 import { previewKind, renderMarkdown } from '@/lib/preview'
 import { Download, Eye, History, Pencil, Plus, Save, Undo2, X } from 'lucide-react'
@@ -19,6 +19,7 @@ export function FilePreview({
   editable = false,
   onSave,
   filePath,
+  sourcePath,
   onRestored,
 }: {
   name: string
@@ -29,6 +30,7 @@ export function FilePreview({
   editable?: boolean
   onSave?: (content: string) => Promise<void>
   filePath?: string
+  sourcePath?: string
   onRestored?: () => Promise<void> | void
 }) {
   const kind = previewKind(name)
@@ -46,6 +48,9 @@ export function FilePreview({
   const [bust, setBust] = useState(0)
   const src = bust ? `${url}${url.includes('?') ? '&' : '?'}v=${bust}` : url
   const dl = bust ? `${downloadUrl}${downloadUrl.includes('?') ? '&' : '?'}v=${bust}` : downloadUrl
+  const reportLoadError = () => {
+    if (sourcePath) void reportFileLoadFailure(sourcePath)
+  }
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -103,12 +108,13 @@ export function FilePreview({
       })
       .catch((err: unknown) => {
         if (!gone) setError(err instanceof Error ? err.message : 'Could not load file')
+        reportLoadError()
       })
     return () => {
       gone = true
       controller.abort()
     }
-  }, [kind, src])
+  }, [kind, src, sourcePath])
 
   useEffect(() => {
     if (!filePath || !historyOpen) return
@@ -221,16 +227,17 @@ export function FilePreview({
             alt={name}
             draggable={false}
             className="mx-auto max-h-full max-w-full object-contain"
+            onError={reportLoadError}
             onContextMenu={(e) => {
               e.preventDefault()
               void saveOriginalFromUrl(dl, name)
             }}
           />
         ) : null}
-        {kind === 'video' ? <VideoPlayer src={src} title={name} /> : null}
+        {kind === 'video' ? <VideoPlayer src={src} title={name} onLoadError={reportLoadError} /> : null}
         {kind === 'audio' ? (
           <div className="flex h-full items-center justify-center">
-            <audio src={src} controls className="w-full max-w-xl" />
+            <audio src={src} controls className="w-full max-w-xl" onError={reportLoadError} />
           </div>
         ) : null}
         {kind === 'pdf' ? (

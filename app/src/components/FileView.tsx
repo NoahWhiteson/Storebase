@@ -12,7 +12,7 @@ import {
 } from '@/components/ui/context-menu'
 import { formatBytes, formatDate, formatRemaining } from '@/lib/format'
 import { isZipName, previewKind } from '@/lib/preview'
-import { isTempId, rawUrl } from '@/lib/api'
+import { isTempId, rawUrl, reportFileLoadFailure } from '@/lib/api'
 import type { DriveItem, SectionId } from '@/types'
 import { cn } from 'cn'
 import type { DragEvent, ReactNode } from 'react'
@@ -393,12 +393,13 @@ function ItemThumb({ item, size }: { item: DriveItem; size: 'sm' | 'lg' }) {
     return (
       <VideoThumb
         url={rawUrl(item.id)}
+        path={item.id}
         className={size === 'lg' ? 'h-full w-full' : 'size-8 shrink-0 rounded-md'}
       />
     )
   }
   if (image && size === 'lg') {
-    return <img loading="lazy" decoding="async" src={rawUrl(item.id)} alt="" className="h-full w-full object-cover" />
+    return <img loading="lazy" decoding="async" src={rawUrl(item.id)} alt="" className="h-full w-full object-cover" onError={() => void reportFileLoadFailure(item.id)} />
   }
   return <FileGlyph kind={item.kind} size={size} />
 }

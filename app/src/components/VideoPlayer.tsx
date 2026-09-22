@@ -14,7 +14,7 @@ function clock(seconds: number): string {
   return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`
 }
 
-export function VideoPlayer({ src, title }: { src: string; title: string }) {
+export function VideoPlayer({ src, title, onLoadError }: { src: string; title: string; onLoadError?: () => void }) {
   const wrapRef = useRef<HTMLDivElement>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
   const hideRef = useRef<number>(0)
@@ -135,6 +135,7 @@ export function VideoPlayer({ src, title }: { src: string; title: string }) {
         }}
         onDurationChange={(e) => setDuration(e.currentTarget.duration || 0)}
         onLoadedMetadata={(e) => setDuration(e.currentTarget.duration || 0)}
+        onError={onLoadError}
       />
 
       {!playing ? (

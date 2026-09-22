@@ -133,6 +133,7 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
   const [toast, setToast] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
+  const [backblazeUnavailable, setBackblazeUnavailable] = useState(false)
   const [dialog, setDialog] = useState<null | { mode: 'create' | 'create-file' | 'rename'; id?: string }>(null)
   const [nameDraft, setNameDraft] = useState('')
   const [shareLabel, setShareLabel] = useState('Shared')
@@ -159,6 +160,12 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
     const t = window.setTimeout(() => setToast(null), 2800)
     return () => window.clearTimeout(t)
   }, [toast])
+
+  useEffect(() => {
+    const show = () => setBackblazeUnavailable(true)
+    window.addEventListener('storebase:backblaze-unavailable', show)
+    return () => window.removeEventListener('storebase:backblaze-unavailable', show)
+  }, [])
 
   const crumbs = useMemo(() => {
     if (!folderPath) return []
@@ -770,6 +777,11 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
         onOpenTerminals={openTerminals}
         onSignOut={() => void signOut()}
       />
+      {backblazeUnavailable ? (
+        <div role="alert" className="shrink-0 border-b border-amber-400/25 bg-amber-400/10 px-4 py-3 text-center text-sm text-amber-100">
+          Backblaze may have reached 100% of its bandwidth cap, which is restricting access to your files. Upgrade Backblaze or move your files to another node.
+        </div>
+      ) : null}
       {settingsOpen ? (
         <div className="flex min-h-0 flex-1 overflow-hidden">
           <Settings
@@ -998,6 +1010,7 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
           name={preview.name}
           url={rawUrl(preview.id)}
           downloadUrl={downloadUrl(preview.id)}
+          sourcePath={preview.id}
           editable={preview.owned !== false && !preview.trashed}
           filePath={
             preview.owned !== false && !preview.trashed && !preview.id.startsWith('share:') && !preview.spam

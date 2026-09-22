@@ -35,6 +35,8 @@ import {
 import { mimeFor } from './mime.ts'
 import {
   deleteInbound,
+  findBackend,
+  getBlob,
   inboundOk,
   inboundStoreUsed,
   loadNetwork,
@@ -1227,6 +1229,40 @@ export function createApp(config: ServerConfig) {
     } catch (err) {
       if (err instanceof ShareError) return c.json({ error: err.message }, err.status)
       throw err
+    }
+  })
+
+  app.get('/api/files/availability', async (c) => {
+    const user = c.get('user')
+    const root = c.get('root')
+    const shareId = c.req.query('share')
+    const path = c.req.query('path') ?? ''
+    if (!path && !shareId) return c.json({ error: 'path required' }, 400)
+    try {
+      let file: OpenedFile
+      if (shareId) file = await openSharedDownload(config, user, shareId, path)
+      else {
+        const parsed = parseSharePath(path)
+        file = parsed
+          ? await openSharedDownload(config, user, parsed.shareId, parsed.sub)
+          : await openDownload(root, path)
+      }
+      if (!file.pointer) return c.json({ available: true, remote: false, provider: 'local' })
+      const backend = await findBackend(config, file.pointer.backend)
+      if (!backend) return c.json({ available: false, remote: true, provider: 'remote' })
+      const provider = backend.type === 's3' && /backblazeb2\.com/i.test(backend.endpoint ?? '')
+        ? 'backblaze'
+        : 'remote'
+      if (file.size === 0) return c.json({ available: true, remote: true, provider })
+      try {
+        const blob = await getBlob(backend, file.pointer.key, { start: 0, end: 0 })
+        await blob.body.cancel().catch(() => {})
+        return c.json({ available: true, remote: true, provider })
+      } catch {
+        return c.json({ available: false, remote: true, provider })
+      }
+    } catch {
+      return c.json({ available: false, remote: false, provider: 'unknown' })
     }
   })
 
