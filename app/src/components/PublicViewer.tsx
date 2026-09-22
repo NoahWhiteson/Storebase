@@ -1,11 +1,14 @@
 import { FileGlyph } from '@/components/FileGlyph'
 import { FilePreview } from '@/components/FilePreview'
+import { SafetyGauge } from '@/components/SafetyGauge'
 import { StorebaseLogo } from '@/components/StorebaseLogo'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { VideoThumb } from '@/components/VideoThumb'
 import { formatBytes } from '@/lib/format'
 import { previewKind } from '@/lib/preview'
+import { saveOriginalFromUrl } from '@/lib/api'
 import { ChevronRight } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
@@ -16,7 +19,10 @@ type PublicMeta = {
   size: number
   modifiedAt: string
   ownerName: string
+  virusScan?: VirusScan | null
 }
+
+type VirusScan = { status: string; score: number | null; signature?: string }
 
 type PublicItem = {
   path: string
@@ -24,6 +30,7 @@ type PublicItem = {
   type: 'file' | 'folder'
   size: number
   modifiedAt: string
+  virusScan?: VirusScan | null
 }
 
 export function PublicViewer({ token }: { token: string }) {
@@ -35,6 +42,7 @@ export function PublicViewer({ token }: { token: string }) {
   const [folderPath, setFolderPath] = useState('')
   const [items, setItems] = useState<PublicItem[]>([])
   const [preview, setPreview] = useState<PublicItem | null>(null)
+  const [unsafeDownload, setUnsafeDownload] = useState<{ name: string; url: string } | null>(null)
 
   async function loadMeta() {
     const res = await fetch(`/api/public/${token}`, { credentials: 'include' })
@@ -115,6 +123,37 @@ export function PublicViewer({ token }: { token: string }) {
     return `/api/public/${token}/download${qs}`
   }
 
+  function download(name: string, url: string, scan?: VirusScan | null) {
+    if (scan?.score != null && scan.score < 50) {
+      setUnsafeDownload({ name, url })
+      return
+    }
+    void saveOriginalFromUrl(url, name)
+  }
+
+  const warning = (
+    <Dialog open={unsafeDownload !== null} onOpenChange={(open) => !open && setUnsafeDownload(null)}>
+      <DialogContent showCloseButton={false}>
+        <DialogHeader>
+          <DialogTitle>Potentially unsafe file</DialogTitle>
+          <DialogDescription className="text-[#8d8d8d]">This file is potentially a virus. Download it only if you trust where it came from.</DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button variant="ghost" className="rounded-full" onClick={() => setUnsafeDownload(null)}>Cancel</Button>
+          <Button
+            variant="destructive"
+            className="rounded-full bg-[#c5221f] text-white hover:bg-[#a50e0e]"
+            onClick={() => {
+              const target = unsafeDownload
+              setUnsafeDownload(null)
+              if (target) void saveOriginalFromUrl(target.url, target.name)
+            }}
+          >Download anyway</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+
   if (locked) {
     return (
       <Shell>
@@ -167,24 +206,32 @@ export function PublicViewer({ token }: { token: string }) {
 
   if (preview) {
     return (
+      <>
       <FilePreview
         name={preview.name}
         url={raw(preview.path)}
         downloadUrl={dl(preview.path)}
         onClose={() => setPreview(null)}
+        onDownload={() => download(preview.name, dl(preview.path), preview.virusScan)}
       />
+      {warning}
+      </>
     )
   }
 
   if (meta.type === 'file') {
     return (
-      <FilePreview name={meta.name} url={raw()} downloadUrl={dl()} onClose={() => undefined} closable={false} />
+      <>
+        <FilePreview name={meta.name} url={raw()} downloadUrl={dl()} onClose={() => undefined} closable={false} onDownload={() => download(meta.name, dl(), meta.virusScan)} />
+        {warning}
+      </>
     )
   }
 
   const crumbs = folderPath ? folderPath.split('/') : []
 
   return (
+    <>
     <div className="flex min-h-full flex-col bg-[#1a1a1a] text-white">
       <header className="flex h-14 items-center gap-3 px-4">
         <StorebaseLogo className="size-7" />
@@ -228,12 +275,15 @@ export function PublicViewer({ token }: { token: string }) {
             >
               <PublicMark token={token} item={item} folderPath={folderPath} />
               <span className="min-w-0 flex-1 truncate text-sm">{item.name}</span>
+              {item.type === 'file' ? <SafetyGauge score={item.virusScan?.score} status={item.virusScan?.status} signature={item.virusScan?.signature} /> : null}
               <span className="text-xs text-[#8d8d8d]">{item.type === 'folder' ? '' : formatBytes(item.size)}</span>
             </button>
           ))}
         </div>
       </main>
     </div>
+    {warning}
+    </>
   )
 }
 

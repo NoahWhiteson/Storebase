@@ -13,6 +13,8 @@ import {
   deleteUser,
   fetchPairing,
   fetchSettings,
+  fetchVirusInstall,
+  installVirusEngine,
   patchUser,
   refreshDomain,
   reconnectStorageBackend,
@@ -531,7 +533,34 @@ function GeneralPanel({
   const [signInMessage, setSignInMessage] = useState(data.platform.signInMessage ?? '')
   const [defaultView, setDefaultView] = useState(data.platform.defaultView)
   const [virusScanPolicy, setVirusScanPolicy] = useState(data.platform.virusScanPolicy ?? 'user')
+  const [virusInstall, setVirusInstall] = useState(data.virusInstall)
+  const [installingEngine, setInstallingEngine] = useState(false)
   const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    if (virusInstall?.status !== 'installing') return
+    const timer = window.setInterval(() => {
+      void fetchVirusInstall()
+        .then((next) => {
+          setVirusInstall(next)
+          if (next.status === 'done') onToast('ClamAV is ready')
+          if (next.status === 'error') onToast(next.error ?? 'Could not install ClamAV')
+        })
+        .catch(() => {})
+    }, 1500)
+    return () => window.clearInterval(timer)
+  }, [onToast, virusInstall?.status])
+
+  async function startInstall() {
+    setInstallingEngine(true)
+    try {
+      setVirusInstall(await installVirusEngine())
+    } catch (error) {
+      onToast(error instanceof Error ? error.message : 'Could not start the ClamAV install')
+    } finally {
+      setInstallingEngine(false)
+    }
+  }
 
   async function save() {
     setBusy(true)
@@ -596,6 +625,40 @@ function GeneralPanel({
           </button>
         ))}
       </div>
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-sm text-[#e8e8e8]">
+            {virusInstall?.status === 'installing'
+              ? 'Installing ClamAV…'
+              : virusInstall?.status === 'error'
+                ? 'ClamAV is not installed'
+                : virusInstall?.status === 'done'
+                  ? `ClamAV installed${virusInstall.engineVersion ? ` (${virusInstall.engineVersion})` : ''}`
+                  : `ClamAV is not installed (about ${formatBytes(virusInstall?.estimateBytes ?? 480 * 1024 ** 2)}).`}
+          </p>
+          {virusInstall?.status === 'error' && virusInstall.error ? (
+            <p className="text-xs text-[#e8a8a8]">{virusInstall.error}</p>
+          ) : null}
+        </div>
+        <Button
+          className="h-9 shrink-0 rounded-full bg-white text-[#1a1a1a] hover:bg-[#f2f2f2]"
+          disabled={installingEngine || virusInstall?.status === 'installing' || virusInstall?.status === 'done'}
+          onClick={() => void startInstall()}
+        >
+          {virusInstall?.status === 'done' ? 'Installed' : installingEngine || virusInstall?.status === 'installing' ? 'Installing…' : virusInstall?.status === 'error' ? 'Try again' : 'Install ClamAV'}
+        </Button>
+      </div>
+      {virusInstall?.status === 'installing' ? (
+        <div className="mb-4">
+          <p className="mb-1 text-xs text-[#8d8d8d]">{virusInstall.step}</p>
+          <div className="h-1 overflow-hidden rounded-full bg-white/[0.08]">
+            <div
+              className="h-full rounded-full bg-[#6fbf73] transition-[width] duration-500"
+              style={{ width: `${virusInstall.percent ?? 0}%` }}
+            />
+          </div>
+        </div>
+      ) : null}
       <p className="mb-6 text-xs text-[#8d8d8d]">Always on and Always off override every user’s preference.</p>
       <Button className="h-11 rounded-full bg-white text-[#1a1a1a] hover:bg-[#f2f2f2]" disabled={busy} onClick={() => void save()}>
         {busy ? 'Saving…' : 'Save'}

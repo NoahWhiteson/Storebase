@@ -48,7 +48,7 @@ import {
 } from './network.ts'
 import { dropPath, loadMeta, rewritePath, setStarred, touchRecent } from './meta.ts'
 import { loadPlatform, terminalsAllowed, virusScanEnabled } from './platform.ts'
-import { copyScanPath, dropScanPath, loadScanResults, rewriteScanPath, scanResultFrom, scanUpload, setScanResult } from './virus.ts'
+import { copyScanPath, copyScanToTree, dropScanPath, loadScanResults, rewriteScanPath, scanResultFor, scanResultFrom, scanUpload, setScanResult } from './virus.ts'
 import { requirePool } from './pool.ts'
 import { QuotaError, cachedFolderSize } from './quota.ts'
 import { clearSession, issueLinkUnlock, issueSession, linkUnlocked, readSessionUserId } from './session.ts'
@@ -426,7 +426,7 @@ export function createApp(config: ServerConfig) {
   app.get('/api/public/:token', async (c) => {
     try {
       const token = c.req.param('token')
-      const { owner, item, link } = await resolveLink(config, token)
+      const { owner, item, link, root } = await resolveLink(config, token)
       const unlocked = await linkUnlocked(c, config, token)
       if (link.expiresAt && Date.parse(link.expiresAt) <= Date.now()) {
         return c.json({ error: 'This link has expired', code: 'EXPIRED' }, 401)
@@ -443,6 +443,7 @@ export function createApp(config: ServerConfig) {
         ownerName: owner.name,
         expiresAt: link.expiresAt ?? null,
         passwordProtected: Boolean(link.passwordHash),
+        virusScan: await scanResultFor(root, item.path, item.type),
       })
     } catch (err) {
       if (err instanceof LinkError) return c.json({ error: err.message, code: err.code }, err.status)
@@ -774,11 +775,11 @@ export function createApp(config: ServerConfig) {
           return c.json({
             path: path ? `share:${shareId}/${path}` : `share:${shareId}`,
             shareName: listed.shareName,
-            items: listed.items.map((item) => ({ ...item, starred: false, trashed: false, virusScan: null })),
+            items: listed.items.map((item) => ({ ...item, starred: false, trashed: false })),
           })
         }
         const items = await listIncoming(config, user)
-        return c.json({ path: '', items: items.map((item) => ({ ...item, starred: false, trashed: false, virusScan: null })) })
+        return c.json({ path: '', items: items.map((item) => ({ ...item, starred: false, trashed: false })) })
       } catch (err) {
         if (err instanceof ShareError) return c.json({ error: err.message }, err.status)
         throw err
@@ -946,7 +947,7 @@ export function createApp(config: ServerConfig) {
         const send = (event: unknown) => output.write(JSON.stringify(event) + '\n').catch(() => {})
         try {
           const item = await unzipArchive(root, path, await quotaGate(config, c.get('user')), (detail, progress) => { void send({ detail, progress }) })
-          await copyScanPath(root, path, item.path)
+          await copyScanToTree(root, path, item.path)
           if (isTempPath(item.path)) await trackTemp(root, item.path)
           pingDrive(c.get('user').id)
           await send({ result: { item: { ...item, starred: false, trashed: false } } })
@@ -957,7 +958,7 @@ export function createApp(config: ServerConfig) {
     }
     try {
       const item = await unzipArchive(root, body.path, await quotaGate(config, c.get('user')))
-      await copyScanPath(root, body.path, item.path)
+      await copyScanToTree(root, body.path, item.path)
       if (isTempPath(item.path)) await trackTemp(root, item.path)
       return c.json({ item: { ...item, starred: false, trashed: false } }, 201)
     } catch (err) {

@@ -76,6 +76,7 @@ export type SettingsPayload = {
     lastError: string | null
     autoUpdate: boolean
   }
+  virusInstall?: VirusInstallProgress
   domain?: DomainInfo
 }
 
@@ -154,6 +155,30 @@ export async function checkUpdate() {
 
 export async function applyUpdate() {
   return api<NonNullable<SettingsPayload['update']>>('/api/update?force=1', { method: 'POST' })
+}
+
+export type VirusInstallProgress = {
+  status: 'idle' | 'installing' | 'done' | 'error'
+  step: string
+  engine: 'clamav'
+  engineVersion: string | null
+  percent: number
+  estimateBytes: number
+  error: string | null
+  startedAt: string | null
+  finishedAt: string | null
+}
+
+export async function installVirusEngine(): Promise<VirusInstallProgress> {
+  const res = await api<{ virusInstall: VirusInstallProgress }>('/api/settings/virus/install', {
+    method: 'POST',
+  })
+  return res.virusInstall
+}
+
+export async function fetchVirusInstall(): Promise<VirusInstallProgress> {
+  const res = await api<{ virusInstall: VirusInstallProgress }>('/api/settings/virus/install')
+  return res.virusInstall
 }
 
 export type PairedDevice = {

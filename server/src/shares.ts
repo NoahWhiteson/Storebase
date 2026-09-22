@@ -5,6 +5,16 @@ import { join } from 'node:path'
 import type { ServerConfig } from './config.ts'
 import { entryAt, listPath, openDownload, resolveSafe, type DriveEntry } from './storage.ts'
 import { ensureUserDrive, findByEmail, findById, loadUsers, type UserRecord } from './users.ts'
+import { loadScanResults, scanResultFrom, type VirusScanResult } from './virus.ts'
+
+type SharedDriveEntry = DriveEntry & {
+  shareId: string
+  shareName: string
+  owner: string
+  ownerId: string
+  shared: true
+  virusScan: VirusScanResult | null
+}
 
 export type ShareStatus = 'ok' | 'pending'
 
@@ -202,18 +212,21 @@ export async function listSharesForPath(config: ServerConfig, owner: UserRecord,
 export async function listIncoming(
   config: ServerConfig,
   user: UserRecord,
-): Promise<Array<DriveEntry & { shareId: string; shareName: string; owner: string; ownerId: string; shared: true }>> {
+): Promise<SharedDriveEntry[]> {
   const shares = (await loadAll(config)).filter(
     (share) => share.toUserId === user.id && shareStatus(share) === 'ok',
   )
   const users = await loadUsers(config)
-  const out: Array<DriveEntry & { shareId: string; shareName: string; owner: string; ownerId: string; shared: true }> = []
+  const out: SharedDriveEntry[] = []
+  const scanCache = new Map<string, Record<string, VirusScanResult>>()
   for (const share of shares) {
     const owner = findById(users, share.ownerId)
     if (!owner) continue
     const root = await ensureUserDrive(config, owner.id)
     const item = await entryAt(root, share.path)
     if (!item) continue
+    const scans = scanCache.get(root) ?? await loadScanResults(root)
+    scanCache.set(root, scans)
     out.push({
       ...item,
       path: virtualPath(share.id, item.path, share.path),
@@ -222,6 +235,7 @@ export async function listIncoming(
       owner: owner.name,
       ownerId: owner.id,
       shared: true,
+      virusScan: scanResultFrom(scans, item.path, item.type),
     })
   }
   return out.sort((a, b) => a.name.localeCompare(b.name))
@@ -230,18 +244,21 @@ export async function listIncoming(
 export async function listPendingIncoming(
   config: ServerConfig,
   user: UserRecord,
-): Promise<Array<DriveEntry & { shareId: string; shareName: string; owner: string; ownerId: string; shared: true; spam: true }>> {
+): Promise<Array<SharedDriveEntry & { spam: true }>> {
   const shares = (await loadAll(config)).filter(
     (share) => share.toUserId === user.id && shareStatus(share) === 'pending',
   )
   const users = await loadUsers(config)
-  const out: Array<DriveEntry & { shareId: string; shareName: string; owner: string; ownerId: string; shared: true; spam: true }> = []
+  const out: Array<SharedDriveEntry & { spam: true }> = []
+  const scanCache = new Map<string, Record<string, VirusScanResult>>()
   for (const share of shares) {
     const owner = findById(users, share.ownerId)
     if (!owner) continue
     const root = await ensureUserDrive(config, owner.id)
     const item = await entryAt(root, share.path)
     if (!item) continue
+    const scans = scanCache.get(root) ?? await loadScanResults(root)
+    scanCache.set(root, scans)
     out.push({
       ...item,
       path: virtualPath(share.id, item.path, share.path),
@@ -251,6 +268,7 @@ export async function listPendingIncoming(
       ownerId: owner.id,
       shared: true,
       spam: true,
+      virusScan: scanResultFrom(scans, item.path, item.type),
     })
   }
   return out.sort((a, b) => a.name.localeCompare(b.name))
@@ -261,7 +279,7 @@ export async function listSharedFolder(
   user: UserRecord,
   shareId: string,
   sub = '',
-): Promise<{ shareName: string; items: Array<DriveEntry & { shareId: string; shareName: string; owner: string; ownerId: string; shared: true }> }> {
+): Promise<{ shareName: string; items: SharedDriveEntry[] }> {
   const share = (await loadAll(config)).find((item) => item.id === shareId)
   if (!share || share.toUserId !== user.id || shareStatus(share) !== 'ok') throw new ShareError('Share not found', 404)
   const users = await loadUsers(config)
@@ -275,6 +293,7 @@ export async function listSharedFolder(
   resolveSafe(root, rel)
   if (!covers(share.path, rel)) throw new ShareError('Path escapes the share', 400)
   const items = await listPath(root, rel)
+  const scans = await loadScanResults(root)
   return {
     shareName: base.name,
     items: items.map((item) => ({
@@ -285,6 +304,7 @@ export async function listSharedFolder(
       owner: owner.name,
       ownerId: owner.id,
       shared: true as const,
+      virusScan: scanResultFrom(scans, item.path, item.type),
     })),
   }
 }

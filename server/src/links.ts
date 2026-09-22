@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import type { ServerConfig } from './config.ts'
 import { entryAt, listPath, openDownload, resolveSafe } from './storage.ts'
 import { ensureUserDrive, findById, hashPassword, loadUsers, type UserRecord, verifyPasswordHash } from './users.ts'
+import { loadScanResults, scanResultFrom } from './virus.ts'
 
 export type LinkRecord = {
   id: string
@@ -227,11 +228,12 @@ export async function listPublicFolder(config: ServerConfig, token: string, sub 
   resolveSafe(root, rel)
   if (!(rel === link.path || rel.startsWith(`${link.path}/`))) throw new LinkError('Path escapes the share', 400)
   const items = await listPath(root, rel)
+  const scans = await loadScanResults(root)
   return {
     name: item.name,
     ownerName: owner.name,
     path: sub,
-    items,
+    items: items.map((entry) => ({ ...entry, virusScan: scanResultFrom(scans, entry.path, entry.type) })),
   }
 }
 

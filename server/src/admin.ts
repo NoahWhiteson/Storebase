@@ -6,6 +6,7 @@ import { bytesToGb, gbToBytes, type ServerConfig } from './config.ts'
 import { diskInfo } from './disk.ts'
 import { loadPlatform, savePlatform, type PlatformSettings } from './platform.ts'
 import { scannerAvailable } from './virus.ts'
+import { startClamAVInstall, virusInstallProgress } from './virus-install.ts'
 import { requirePool, writeManifest } from './pool.ts'
 import {
   addBackend,
@@ -118,6 +119,7 @@ export function mountAdmin(app: Hono<{ Variables: Vars }>, config: ServerConfig,
       admin: true,
       account,
       platform,
+      virusInstall: await virusInstallProgress(),
       server: {
         liveHost: config.host,
         livePort: config.port,
@@ -206,6 +208,18 @@ export function mountAdmin(app: Hono<{ Variables: Vars }>, config: ServerConfig,
     }
 
     return c.json({ ok: true })
+  })
+
+  app.post('/api/settings/virus/install', async (c) => {
+    const denied = adminOnly(c.get('user'))
+    if (denied) return c.json({ error: denied }, 403)
+    return c.json({ virusInstall: await startClamAVInstall() }, 202)
+  })
+
+  app.get('/api/settings/virus/install', async (c) => {
+    const denied = adminOnly(c.get('user'))
+    if (denied) return c.json({ error: denied }, 403)
+    return c.json({ virusInstall: await virusInstallProgress() })
   })
 
   app.put('/api/settings/domain', async (c) => {

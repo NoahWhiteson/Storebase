@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process'
-import { mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { promisify } from 'node:util'
@@ -60,6 +60,11 @@ export async function scannerAvailable(): Promise<boolean> {
   }
   scannerCacheAt = now
   return scannerCache
+}
+
+export function resetScannerAvailabilityCache(): void {
+  scannerCache = null
+  scannerCacheAt = 0
 }
 
 function signatureFrom(output: string): string | undefined {
@@ -129,6 +134,29 @@ export async function copyScanPath(root: string, from: string, to: string): Prom
       changed = true
     }
     return changed
+  })
+}
+
+export async function copyScanToTree(root: string, from: string, to: string): Promise<void> {
+  const source = cleanPath(from)
+  const target = cleanPath(to)
+  const paths = [target]
+  async function walk(rel: string): Promise<void> {
+    let entries
+    try { entries = await readdir(join(root, rel), { withFileTypes: true }) } catch { return }
+    for (const entry of entries) {
+      if (entry.name.startsWith('.')) continue
+      const child = `${rel}/${entry.name}`
+      paths.push(child)
+      if (entry.isDirectory()) await walk(child)
+    }
+  }
+  await walk(target)
+  await mutate(root, (store) => {
+    const result = store.results[source]
+    if (!result) return false
+    for (const path of paths) store.results[path] = result
+    return true
   })
 }
 
