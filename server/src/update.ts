@@ -15,6 +15,7 @@ export type UpdateState = {
   latestSha: string | null
   latestMessage: string | null
   available: boolean
+  behindBy: number | null
   updating: boolean
   lastCheckedAt: string | null
   lastError: string | null
@@ -25,6 +26,7 @@ const state: UpdateState = {
   latestSha: null,
   latestMessage: null,
   available: false,
+  behindBy: null,
   updating: false,
   lastCheckedAt: null,
   lastError: null,
@@ -120,6 +122,18 @@ export async function checkGithub(config: ServerConfig): Promise<UpdateState> {
       }
     }
     state.available = Boolean(state.latestSha && state.currentSha && state.latestSha !== state.currentSha)
+    state.behindBy = 0
+    if (state.available && state.currentSha && state.latestSha) {
+      try {
+        const res = await fetch(`https://api.github.com/repos/${REPO}/compare/${state.currentSha}...${state.latestSha}`, { headers })
+        if (res.ok) {
+          const body = (await res.json()) as { ahead_by?: number }
+          state.behindBy = Number.isFinite(body.ahead_by) ? Number(body.ahead_by) : null
+        } else state.behindBy = null
+      } catch {
+        state.behindBy = null
+      }
+    }
     state.lastError = null
   } catch (err) {
     state.lastError = err instanceof Error ? err.message : 'Update check failed'
@@ -148,6 +162,7 @@ export async function applyUpdate(
     state.currentSha = current
     if (incoming === current && !force) {
       state.available = false
+      state.behindBy = 0
       state.lastError = null
       state.lastCheckedAt = new Date().toISOString()
       return updateStatus()
@@ -160,6 +175,7 @@ export async function applyUpdate(
     await npm(join(config.homeDir, 'app'), ['run', 'build'])
     state.currentSha = await localSha(config.homeDir)
     state.available = false
+    state.behindBy = 0
     state.lastError = null
     state.lastCheckedAt = new Date().toISOString()
     if (restart) setTimeout(() => process.exit(0), 400)

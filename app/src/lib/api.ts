@@ -94,8 +94,11 @@ export type Me = {
   terminalsEnabled?: boolean
 }
 
+export type SystemAlert = { id: string; tone: 'warning' | 'danger'; message: string }
+
 function kindFromName(name: string): FileKind {
   const ext = name.split('.').pop()?.toLowerCase() ?? ''
+  if (['exe', 'msi', 'dll', 'lnk', 'scr', 'com', 'app', 'dmg', 'pkg', 'apk', 'aab', 'xapk', 'ipa', 'appimage', 'deb', 'rpm', 'iso', 'jar', 'war', 'bat', 'cmd', 'ps1'].includes(ext)) return 'app'
   if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico', 'heic', 'heif', 'avif'].includes(ext)) return 'image'
   if (['mp4', 'm4v', 'webm', 'mov', 'ogv', 'mkv', 'avi', 'mpeg', 'mpg', '3gp'].includes(ext)) return 'video'
   if (['mp3', 'wav', 'aac', 'ogg', 'oga', 'flac', 'm4a'].includes(ext)) return 'audio'
@@ -233,6 +236,11 @@ export async function fetchMe(): Promise<Me | null> {
   const res = await fetch('/api/me', { credentials: 'include' })
   if (res.status === 401) return null
   return parse<Me>(res)
+}
+
+export async function fetchAlerts(): Promise<SystemAlert[]> {
+  const body = await api<{ alerts: SystemAlert[] }>('/api/alerts')
+  return body.alerts
 }
 
 export async function login(email: string, password: string): Promise<Me> {

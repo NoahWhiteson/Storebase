@@ -367,7 +367,7 @@ function GridView({
                     </>
                   ) : (
                     <>
-                      <FileGlyph kind={item.kind} size="sm" />
+                      <FileGlyph kind={item.kind} name={item.name} size="sm" />
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-sm font-medium">{item.name}</span>
                         <span className="block truncate text-xs text-[#8d8d8d]">{when(item)}</span>
@@ -401,7 +401,7 @@ function ItemThumb({ item, size }: { item: DriveItem; size: 'sm' | 'lg' }) {
   if (image && size === 'lg') {
     return <img loading="lazy" decoding="async" src={rawUrl(item.id)} alt="" className="h-full w-full object-cover" onError={() => void reportFileLoadFailure(item.id)} />
   }
-  return <FileGlyph kind={item.kind} size={size} />
+  return <FileGlyph kind={item.kind} name={item.name} size={size} />
 }
 
 function movable(item: DriveItem): boolean {

@@ -8,6 +8,7 @@ export type FileKind =
   | 'video'
   | 'audio'
   | 'zip'
+  | 'app'
 
 export type SectionId =
   | 'home'

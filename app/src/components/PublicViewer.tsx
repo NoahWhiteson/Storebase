@@ -259,7 +259,9 @@ function PublicMark({
     return <VideoThumb url={`/api/public/${token}/raw${qs}`} className="size-8 shrink-0 rounded-md" />
   }
   if (kind === 'image') return <FileGlyph kind="image" size="sm" />
-  return <FileGlyph kind="doc" size="sm" />
+  const ext = item.name.split('.').pop()?.toLowerCase() ?? ''
+  const app = ['exe', 'msi', 'dll', 'lnk', 'scr', 'com', 'app', 'dmg', 'pkg', 'apk', 'aab', 'xapk', 'ipa', 'appimage', 'deb', 'rpm', 'iso', 'jar', 'war', 'bat', 'cmd', 'ps1'].includes(ext)
+  return <FileGlyph kind={app ? 'app' : 'doc'} name={item.name} size="sm" />
 }
 
 function Shell({ children }: { children: React.ReactNode }) {

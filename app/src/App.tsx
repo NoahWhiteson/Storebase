@@ -1,5 +1,6 @@
-import { runBatch } from '@/lib/operations'
+import { beginOperation, runBatch } from '@/lib/operations'
 import { OperationPanel } from '@/components/OperationPanel'
+import { AlertBanner } from '@/components/AlertBanner'
 import { FilePreview } from '@/components/FilePreview'
 import { FileView, sortItems, type SortKey } from '@/components/FileView'
 import { Settings, Terminals, type SettingsSection } from '@/components/DeferredPanels'
@@ -25,6 +26,7 @@ import {
   deleteShare,
   downloadUrl,
   emptyTrash,
+  fetchAlerts,
   fetchTempSettings,
   initials,
   isTempId,
@@ -47,6 +49,7 @@ import {
   unzipFile,
   uploadFile,
   type FileEntry,
+  type SystemAlert,
 } from '@/lib/api'
 import { formatTtl } from '@/lib/format'
 import type { DriveItem, FileKind, SectionId } from '@/types'
@@ -107,6 +110,12 @@ type Account = {
   terminalsEnabled?: boolean
 }
 
+type UploadBatch = {
+  files: File[]
+  dir: string
+  operation: ReturnType<typeof beginOperation>
+}
+
 function joinPath(dir: string, name: string): string {
   return dir ? `${dir}/${name}` : name
 }
@@ -133,7 +142,8 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
   const [toast, setToast] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
-  const [backblazeUnavailable, setBackblazeUnavailable] = useState(false)
+  const [alerts, setAlerts] = useState<SystemAlert[]>([])
+  const dismissedAlerts = useRef(new Set<string>())
   const [dialog, setDialog] = useState<null | { mode: 'create' | 'create-file' | 'rename'; id?: string }>(null)
   const [nameDraft, setNameDraft] = useState('')
   const [shareLabel, setShareLabel] = useState('Shared')
@@ -147,6 +157,10 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
   const [ttlHours, setTtlHours] = useState(24)
   const [customDays, setCustomDays] = useState('')
   const uploadRef = useRef<HTMLInputElement>(null)
+  const uploadQueue = useRef<UploadBatch[]>([])
+  const uploadWorker = useRef(false)
+  const dragDepth = useRef(0)
+  const [fileDragActive, setFileDragActive] = useState(false)
   const refreshing = useRef(false)
   const refreshPending = useRef(false)
   const refreshSequence = useRef(0)
@@ -161,11 +175,38 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
     return () => window.clearTimeout(t)
   }, [toast])
 
-  useEffect(() => {
-    const show = () => setBackblazeUnavailable(true)
-    window.addEventListener('storebase:backblaze-unavailable', show)
-    return () => window.removeEventListener('storebase:backblaze-unavailable', show)
+  const refreshAlerts = useCallback(async () => {
+    try {
+      const next = await fetchAlerts()
+      setAlerts(next.filter((alert) => !dismissedAlerts.current.has(alert.id)))
+    } catch {
+      // Alerts should never interrupt file access.
+    }
   }, [])
+
+  useEffect(() => {
+    const showBackblaze = () => {
+      if (dismissedAlerts.current.has('backblaze-unavailable')) return
+      setAlerts((current) => current.some((alert) => alert.id === 'backblaze-unavailable') ? current : [
+        ...current,
+        {
+          id: 'backblaze-unavailable',
+          tone: 'warning',
+          message: 'Backblaze may have reached 100% of its bandwidth cap, which is restricting access to your files. Upgrade Backblaze or move your files to another node.',
+        },
+      ])
+    }
+    const refresh = () => { void refreshAlerts() }
+    window.addEventListener('storebase:backblaze-unavailable', showBackblaze)
+    window.addEventListener('storebase:files-changed', refresh)
+    void refreshAlerts()
+    const timer = window.setInterval(refresh, 5 * 60_000)
+    return () => {
+      window.removeEventListener('storebase:backblaze-unavailable', showBackblaze)
+      window.removeEventListener('storebase:files-changed', refresh)
+      window.clearInterval(timer)
+    }
+  }, [refreshAlerts])
 
   const crumbs = useMemo(() => {
     if (!folderPath) return []
@@ -586,6 +627,7 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
       video: 'Untitled.txt',
       audio: 'Untitled.txt',
       zip: 'Untitled.txt',
+      app: 'Untitled.txt',
     }
     const dir = section === 'temp' ? tempDir(folderPath) : folderPath
     try {
@@ -602,17 +644,46 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
     }
   }
 
-  async function onUpload(files: FileList | null, dest?: string) {
+  function onUpload(files: FileList | null, dest?: string) {
     if (!files?.length) return
     const dir = dest ?? (section === 'temp' ? tempDir(folderPath) : folderPath)
+    const batch = Array.from(files)
+    const operation = beginOperation('Upload queue', `${batch.length} file${batch.length === 1 ? '' : 's'} queued`)
+    operation.progress(`${batch.length} file${batch.length === 1 ? '' : 's'} queued`, 0)
+    uploadQueue.current.push({ files: batch, dir, operation })
+    void drainUploads()
+  }
+
+  async function drainUploads() {
+    if (uploadWorker.current) return
+    uploadWorker.current = true
     try {
-      await runBatch(Array.from(files), file => uploadFile(dir, file))
-      if (section !== 'temp') setSection(isTempId(dir) ? 'temp' : 'my-drive')
-      if (dest) setFolderPath(dest)
-      notify(files.length === 1 ? `Uploaded ${files[0].name}` : `Uploaded ${files.length} files`)
-      await refreshCurrent.current({ silent: true })
-    } catch (err) {
-      notify(err instanceof Error ? err.message : 'Upload failed')
+      while (uploadQueue.current.length) {
+        const batch = uploadQueue.current.shift()!
+        let firstError: unknown
+        let uploaded = 0
+        const uploadedNames: string[] = []
+        for (const [index, file] of batch.files.entries()) {
+          batch.operation.progress(`Uploading ${index + 1} of ${batch.files.length} · ${file.name}`, index / batch.files.length * 100)
+          try {
+            await uploadFile(batch.dir, file)
+            uploaded += 1
+            uploadedNames.push(file.name)
+          } catch (error) {
+            firstError ??= error
+          }
+        }
+        if (firstError) batch.operation.finish(firstError)
+        else batch.operation.finish()
+        if (uploaded > 0) {
+          setSection(isTempId(batch.dir) ? 'temp' : 'my-drive')
+          setFolderPath(batch.dir)
+          notify(uploaded === 1 ? `Uploaded ${uploadedNames[0]}` : `Uploaded ${uploaded} files`)
+          await refreshCurrent.current({ silent: true })
+        } else notify(firstError instanceof Error ? firstError.message : 'Upload failed')
+      }
+    } finally {
+      uploadWorker.current = false
     }
   }
 
@@ -760,8 +831,53 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
     }
   }
 
+  function hasDraggedFiles(event: DragEvent): boolean {
+    return Array.from(event.dataTransfer.types).includes('Files')
+  }
+
+  function appDragEnter(event: DragEvent) {
+    if (!hasDraggedFiles(event)) return
+    event.preventDefault()
+    dragDepth.current += 1
+    setFileDragActive(true)
+  }
+
+  function appDragLeave(event: DragEvent) {
+    if (!hasDraggedFiles(event)) return
+    dragDepth.current = Math.max(0, dragDepth.current - 1)
+    if (dragDepth.current === 0) setFileDragActive(false)
+  }
+
+  function appDrop(event: DragEvent) {
+    if (!event.dataTransfer.files.length) return
+    event.preventDefault()
+    dragDepth.current = 0
+    setFileDragActive(false)
+    const dir = section === 'temp' ? tempDir(folderPath) : section === 'my-drive' ? folderPath : ''
+    onUpload(event.dataTransfer.files, dir)
+  }
+
   return (
-    <div className="flex h-full min-h-0 flex-col bg-[#1a1a1a] text-foreground">
+    <div
+      className="flex h-full min-h-0 flex-col bg-[#1a1a1a] text-foreground"
+      onDragEnter={appDragEnter}
+      onDragOver={(event) => {
+        if (!hasDraggedFiles(event)) return
+        event.preventDefault()
+        event.dataTransfer.dropEffect = 'copy'
+      }}
+      onDragLeave={appDragLeave}
+      onDropCapture={() => {
+        dragDepth.current = 0
+        setFileDragActive(false)
+      }}
+      onDrop={appDrop}
+    >
+      {fileDragActive ? (
+        <div className="pointer-events-none fixed inset-3 z-[70] flex items-center justify-center rounded-3xl border-2 border-dashed border-blue-300 bg-[#1a1a1a]/90 text-lg font-medium text-white shadow-2xl backdrop-blur-sm">
+          Drop files to add them to the upload queue
+        </div>
+      ) : null}
       <TopBar
         search={search}
         view={view}
@@ -777,11 +893,16 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
         onOpenTerminals={openTerminals}
         onSignOut={() => void signOut()}
       />
-      {backblazeUnavailable ? (
-        <div role="alert" className="shrink-0 border-b border-amber-400/25 bg-amber-400/10 px-4 py-3 text-center text-sm text-amber-100">
-          Backblaze may have reached 100% of its bandwidth cap, which is restricting access to your files. Upgrade Backblaze or move your files to another node.
-        </div>
-      ) : null}
+      {alerts.map((alert) => (
+        <AlertBanner
+          key={alert.id}
+          alert={alert}
+          onClose={() => {
+            dismissedAlerts.current.add(alert.id)
+            setAlerts((current) => current.filter((item) => item.id !== alert.id))
+          }}
+        />
+      ))}
       {settingsOpen ? (
         <div className="flex min-h-0 flex-1 overflow-hidden">
           <Settings

@@ -68,6 +68,7 @@ export type SettingsPayload = {
     latestSha: string | null
     latestMessage: string | null
     available: boolean
+    behindBy?: number | null
     updating: boolean
     lastCheckedAt: string | null
     lastError: string | null

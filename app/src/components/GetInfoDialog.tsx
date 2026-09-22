@@ -79,7 +79,7 @@ export function GetInfoDialog({ item, onClose }: { item: DriveItem; onClose: () 
       <DialogContent className="sm:max-w-sm">
         <DialogHeader>
           <div className="flex items-center gap-3">
-            <FileGlyph kind={item.kind} size="sm" />
+            <FileGlyph kind={item.kind} name={item.name} size="sm" />
             <div className="min-w-0">
               <DialogTitle className="truncate">{item.name}</DialogTitle>
               <DialogDescription className="truncate text-[#8d8d8d]">{kindLine}</DialogDescription>

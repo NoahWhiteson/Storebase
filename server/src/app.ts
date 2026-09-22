@@ -41,6 +41,7 @@ import {
   inboundStoreUsed,
   loadNetwork,
   openRemote,
+  probeBackend,
   putInbound,
   readInbound,
   remoteCapacity,
@@ -257,6 +258,27 @@ export function createApp(config: ServerConfig) {
   attachNetwork(config)
   const app = new Hono<{ Variables: Vars }>()
   const terminals = createTerminalHub(config)
+  let backblazeHealth: { at: number; unavailable: boolean } | null = null
+  let backblazeHealthCheck: Promise<boolean> | null = null
+
+  async function isBackblazeUnavailable(): Promise<boolean> {
+    if (backblazeHealth && Date.now() - backblazeHealth.at < 60_000) return backblazeHealth.unavailable
+    if (backblazeHealthCheck) return backblazeHealthCheck
+    backblazeHealthCheck = (async () => {
+      const network = await loadNetwork(config)
+      const backblaze = network.backends.filter(
+        (backend) => backend.type === 's3' && /backblazeb2\.com/i.test(backend.endpoint ?? ''),
+      )
+      const results = await Promise.allSettled(backblaze.map((backend) => Promise.race([
+        probeBackend(backend),
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Store check timed out')), 8_000)),
+      ])))
+      const unavailable = results.some((result) => result.status === 'rejected')
+      backblazeHealth = { at: Date.now(), unavailable }
+      return unavailable
+    })().finally(() => { backblazeHealthCheck = null })
+    return backblazeHealthCheck
+  }
   app.use('/api/*', cors({ origin: (origin) => origin || '*', credentials: true }))
 
   app.get('/.well-known/acme-challenge/:token', (c) => {
@@ -1232,6 +1254,43 @@ export function createApp(config: ServerConfig) {
     }
   })
 
+  app.get('/api/alerts', async (c) => {
+    const user = c.get('user')
+    const root = c.get('root')
+    const manifest = await requirePool(config)
+    const pool = manifest.reservedBytes + (await remoteCapacity(config))
+    const limit = effectiveReserved(user, pool)
+    const used = await folderSize(root)
+    const alerts: Array<{ id: string; tone: 'warning' | 'danger'; message: string }> = []
+    if (limit > 0 && used / limit >= 0.85) {
+      alerts.push({
+        id: 'storage-85',
+        tone: used >= limit ? 'danger' : 'warning',
+        message: `Storage is ${Math.min(100, Math.round(used / limit * 100))}% full. Free space or add another storage node.`,
+      })
+    }
+    if (await isBackblazeUnavailable()) {
+      alerts.push({
+        id: 'backblaze-unavailable',
+        tone: 'warning',
+        message: 'Backblaze may have reached 100% of its bandwidth cap, which is restricting access to your files. Upgrade Backblaze or move your files to another node.',
+      })
+    }
+    if (user.role === 'admin') {
+      const current = updateStatus()
+      const checkedAt = current.lastCheckedAt ? Date.parse(current.lastCheckedAt) : 0
+      const update = Date.now() - checkedAt < 10 * 60_000 ? current : await checkGithub(config)
+      if ((update.behindBy ?? 0) >= 3) {
+        alerts.push({
+          id: 'updates-behind',
+          tone: 'warning',
+          message: `Storebase is ${update.behindBy} updates behind. Open Settings to install the latest version.`,
+        })
+      }
+    }
+    return c.json({ alerts })
+  })
+
   app.get('/api/files/availability', async (c) => {
     const user = c.get('user')
     const root = c.get('root')
@@ -1259,6 +1318,7 @@ export function createApp(config: ServerConfig) {
         await blob.body.cancel().catch(() => {})
         return c.json({ available: true, remote: true, provider })
       } catch {
+        if (provider === 'backblaze') backblazeHealth = { at: Date.now(), unavailable: true }
         return c.json({ available: false, remote: true, provider })
       }
     } catch {
