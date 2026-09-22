@@ -16,6 +16,8 @@ export type UserRecord = {
   password: string
   createdAt: string
   quotaBytes?: number | null
+  virusScanEnabled?: boolean
+  operationNotifications?: boolean
 }
 
 export type PublicUser = {
@@ -25,6 +27,8 @@ export type PublicUser = {
   role: UserRole
   createdAt: string
   quotaBytes: number | null
+  virusScanEnabled: boolean
+  operationNotifications: boolean
 }
 
 function normalizeEmail(email: string): string {
@@ -59,6 +63,8 @@ export function toPublic(user: UserRecord): PublicUser {
     role: user.role,
     createdAt: user.createdAt,
     quotaBytes: personalQuota(user),
+    virusScanEnabled: user.virusScanEnabled === true,
+    operationNotifications: user.operationNotifications !== false,
   }
 }
 

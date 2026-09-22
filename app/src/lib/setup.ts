@@ -10,6 +10,8 @@ export type PublicUser = {
   role: 'admin' | 'user'
   createdAt?: string
   quotaBytes?: number | null
+  virusScanEnabled?: boolean
+  operationNotifications?: boolean
 }
 
 export type SetupState =

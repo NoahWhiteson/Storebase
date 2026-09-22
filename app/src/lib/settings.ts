@@ -26,6 +26,7 @@ export type SettingsPayload = {
     reservedBytes: number
     quotaBytes?: number | null
     nodeReservedBytes?: number
+    virusScannerAvailable?: boolean
   }
   platform: {
     nodeName: string
@@ -38,6 +39,7 @@ export type SettingsPayload = {
     terminalMax?: number
     terminalIdleMinutes?: number
     terminalUsers?: boolean
+    virusScanPolicy?: 'user' | 'on' | 'off'
   }
   server?: {
     liveHost: string
@@ -112,6 +114,8 @@ export async function saveAccount(body: {
   email?: string
   currentPassword?: string
   newPassword?: string
+  virusScanEnabled?: boolean
+  operationNotifications?: boolean
 }): Promise<PublicUser> {
   const res = await api<{ user: PublicUser }>('/api/me', { method: 'PATCH', body: JSON.stringify(body) })
   return res.user

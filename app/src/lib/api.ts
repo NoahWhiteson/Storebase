@@ -19,6 +19,11 @@ export type FileEntry = {
   expiresAt?: string
   daysLeft?: number
   spam?: boolean
+  virusScan?: {
+    status: 'clean' | 'infected' | 'unavailable' | 'error' | 'disabled'
+    score: number | null
+    signature?: string
+  } | null
 }
 
 export const HARD_DELETE_BYTES = 20 * 1024 ** 3
@@ -92,6 +97,8 @@ export type Me = {
   nodeName?: string
   defaultView?: 'grid' | 'list'
   terminalsEnabled?: boolean
+  virusScanPolicy?: 'user' | 'on' | 'off'
+  virusScanEnabled?: boolean
 }
 
 export type SystemAlert = { id: string; tone: 'warning' | 'danger'; message: string }
@@ -143,6 +150,9 @@ export function toDriveItem(entry: FileEntry, owner: { name: string }): DriveIte
     expiresAt: entry.expiresAt,
     shareId: entry.shareId,
     shareName: entry.shareName,
+    safetyScore: entry.virusScan?.score ?? null,
+    scanStatus: entry.virusScan?.status ?? null,
+    scanSignature: entry.virusScan?.signature,
   }
 }
 
@@ -254,6 +264,8 @@ export async function login(email: string, password: string): Promise<Me> {
     nodeName?: string
     defaultView?: 'grid' | 'list'
     terminalsEnabled?: boolean
+    virusScanPolicy?: 'user' | 'on' | 'off'
+    virusScanEnabled?: boolean
   }>('/api/login', {
     method: 'POST',
     body: JSON.stringify({ email, password }),
@@ -268,6 +280,8 @@ export async function login(email: string, password: string): Promise<Me> {
     nodeName: body.nodeName,
     defaultView: body.defaultView,
     terminalsEnabled: body.terminalsEnabled,
+    virusScanPolicy: body.virusScanPolicy,
+    virusScanEnabled: body.virusScanEnabled,
   }
 }
 

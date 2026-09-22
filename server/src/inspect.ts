@@ -25,7 +25,7 @@ export type DriveInfo = {
   storedOn: string
 }
 
-const SKIP = new Set(['.versions', '.trash', '.storebase-meta.json', '.temp-index.json', '.trash-index.json'])
+const SKIP = new Set(['.versions', '.trash', '.storebase-meta.json', '.storebase-virus.json', '.temp-index.json', '.trash-index.json'])
 
 export function kindLabel(name: string, type: 'file' | 'folder'): string {
   if (type === 'folder') return 'Folder'

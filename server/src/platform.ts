@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import type { ServerConfig } from './config.ts'
 
 export type DefaultView = 'grid' | 'list'
+export type VirusScanPolicy = 'user' | 'on' | 'off'
 
 export type PlatformSettings = {
   nodeName: string
@@ -16,6 +17,7 @@ export type PlatformSettings = {
   terminalMax: number
   terminalIdleMinutes: number
   terminalUsers: boolean
+  virusScanPolicy: VirusScanPolicy
 }
 
 export function defaultPlatform(config: ServerConfig): PlatformSettings {
@@ -30,6 +32,7 @@ export function defaultPlatform(config: ServerConfig): PlatformSettings {
     terminalMax: 4,
     terminalIdleMinutes: 30,
     terminalUsers: true,
+    virusScanPolicy: 'user',
   }
 }
 
@@ -57,6 +60,7 @@ export async function loadPlatform(config: ServerConfig): Promise<PlatformSettin
       terminalMax: clampInt(parsed.terminalMax, fallback.terminalMax, 1, 32),
       terminalIdleMinutes: clampInt(parsed.terminalIdleMinutes, fallback.terminalIdleMinutes, 0, 10080),
       terminalUsers: typeof parsed.terminalUsers === 'boolean' ? parsed.terminalUsers : fallback.terminalUsers,
+      virusScanPolicy: parsed.virusScanPolicy === 'on' || parsed.virusScanPolicy === 'off' ? parsed.virusScanPolicy : 'user',
     }
   } catch {
     return fallback
@@ -65,6 +69,12 @@ export async function loadPlatform(config: ServerConfig): Promise<PlatformSettin
 
 export function terminalsAllowed(user: { role: string }, platform: PlatformSettings): boolean {
   return platform.terminalEnabled && (user.role === 'admin' || platform.terminalUsers)
+}
+
+export function virusScanEnabled(user: { virusScanEnabled?: boolean }, platform: PlatformSettings): boolean {
+  if (platform.virusScanPolicy === 'on') return true
+  if (platform.virusScanPolicy === 'off') return false
+  return user.virusScanEnabled === true
 }
 
 export async function savePlatform(config: ServerConfig, settings: PlatformSettings): Promise<void> {

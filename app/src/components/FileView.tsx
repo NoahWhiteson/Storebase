@@ -1,4 +1,5 @@
 import { FileGlyph } from '@/components/FileGlyph'
+import { SafetyGauge } from '@/components/SafetyGauge'
 import { GetInfoDialog } from '@/components/GetInfoDialog'
 import { VideoThumb } from '@/components/VideoThumb'
 import {
@@ -15,7 +16,7 @@ import { isZipName, previewKind } from '@/lib/preview'
 import { isTempId, rawUrl, reportFileLoadFailure } from '@/lib/api'
 import type { DriveItem, SectionId } from '@/types'
 import { cn } from 'cn'
-import type { DragEvent, ReactNode } from 'react'
+import type { DragEvent, PointerEvent as ReactPointerEvent, ReactNode } from 'react'
 import { useMemo, useRef, useState } from 'react'
 import {
   ArchiveRestore,
@@ -69,6 +70,7 @@ type FileViewProps = {
   onNewFile: () => void
   onUpload: () => void
   onSelect: (id: string, mods: SelectMods) => void
+  onSelectMany: (ids: string[], append: boolean) => void
   onOpen: (item: DriveItem) => void
   onStar: (ids: string[]) => void
   onShare: (id: string) => void
@@ -97,6 +99,42 @@ export function FileView(props: FileViewProps) {
   const [overId, setOverId] = useState<string | null>(null)
   const [infoItem, setInfoItem] = useState<DriveItem | null>(null)
   const draggingRef = useRef(false)
+  const marqueeStart = useRef<{ x: number; y: number; append: boolean } | null>(null)
+  const [marquee, setMarquee] = useState<{ left: number; top: number; width: number; height: number } | null>(null)
+
+  function beginMarquee(e: ReactPointerEvent<HTMLDivElement>) {
+    if (e.button !== 0 || (e.target as HTMLElement).closest('[data-file-id],button,input,textarea,a')) return
+    marqueeStart.current = { x: e.clientX, y: e.clientY, append: e.metaKey || e.ctrlKey }
+    setMarquee({ left: e.clientX, top: e.clientY, width: 0, height: 0 })
+    const move = (event: PointerEvent) => {
+      const start = marqueeStart.current
+      if (!start) return
+      const rect = {
+        left: Math.min(start.x, event.clientX),
+        top: Math.min(start.y, event.clientY),
+        width: Math.abs(event.clientX - start.x),
+        height: Math.abs(event.clientY - start.y),
+      }
+      setMarquee(rect)
+      const right = rect.left + rect.width
+      const bottom = rect.top + rect.height
+      const ids = Array.from(document.querySelectorAll<HTMLElement>('[data-file-id]'))
+        .filter((element) => {
+          const box = element.getBoundingClientRect()
+          return box.left < right && box.right > rect.left && box.top < bottom && box.bottom > rect.top
+        })
+        .map((element) => element.dataset.fileId!)
+      props.onSelectMany([...new Set(ids)], start.append)
+    }
+    const up = () => {
+      marqueeStart.current = null
+      setMarquee(null)
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up, { once: true })
+  }
 
   function beginDrag(item: DriveItem, e: DragEvent) {
     if (!props.canMove || !movable(item)) {
@@ -208,7 +246,7 @@ export function FileView(props: FileViewProps) {
       {blankMenu}
     </ContextMenu>
   ) : (
-    <div className="relative min-h-[320px]">
+    <div className="relative min-h-[320px] select-none" onPointerDown={beginMarquee}>
       <ContextMenu>
         <ContextMenuTrigger asChild>
           <div className="absolute inset-0 z-0" />
@@ -229,6 +267,7 @@ export function FileView(props: FileViewProps) {
           />
         )}
       </div>
+      {marquee ? <div className="pointer-events-none fixed z-50 rounded border border-blue-300 bg-blue-400/15" style={marquee} /> : null}
     </div>
   )
 
@@ -436,6 +475,7 @@ function Tile({
     <button
       type="button"
       data-drive-item
+      data-file-id={item.id}
       draggable={false}
       onMouseDown={(e) => {
         e.currentTarget.draggable = drag.canMove && movable(item) && e.button === 0
@@ -510,6 +550,7 @@ function when(item: DriveItem): string {
 function Marks({ item, className }: { item: DriveItem; className?: string }) {
   return (
     <span className={cn('flex shrink-0 items-center gap-1', className)}>
+      {item.kind !== 'folder' || item.scanStatus ? <SafetyGauge score={item.safetyScore} status={item.scanStatus} signature={item.scanSignature} /> : null}
       {item.shared && item.owned !== false ? <Users className="size-3.5 text-[#8d8d8d]" /> : null}
       {item.starred ? <Star className="size-3.5 fill-[#fdd663] text-[#fdd663]" /> : null}
     </span>

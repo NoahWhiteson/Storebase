@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from 'react'
 
-export type Operation = { id: number; label: string; detail: string; progress?: number; state: 'running' | 'done' | 'error' }
+export type Operation = { id: number; label: string; detail: string; progress?: number; state: 'running' | 'done' | 'error' | 'leaving' }
 let operations: Operation[] = []
 let sequence = 0
 const listeners = new Set<() => void>()
@@ -22,8 +22,14 @@ export function beginOperation(label: string, detail = '') {
   }
 }
 export function dismissOperation(id: number) {
-  operations = operations.filter(op => op.id !== id || op.state === 'running')
+  const target = operations.find(op => op.id === id)
+  if (!target || target.state === 'running' || target.state === 'leaving') return
+  operations = operations.map(op => op.id === id ? { ...op, state: 'leaving' } : op)
   emit()
+  window.setTimeout(() => {
+    operations = operations.filter(op => op.id !== id)
+    emit()
+  }, 280)
 }
 export function useOperations() {
   return useSyncExternalStore(listener => { listeners.add(listener); return () => { listeners.delete(listener) } }, () => operations)

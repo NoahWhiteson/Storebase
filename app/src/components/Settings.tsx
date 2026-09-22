@@ -66,7 +66,7 @@ export type SettingsSection =
   | 'terminals'
   | 'domain'
 
-type Account = { id: string; name: string; email: string; role: 'admin' | 'user' }
+type Account = { id: string; name: string; email: string; role: 'admin' | 'user'; virusScanEnabled?: boolean; operationNotifications?: boolean }
 
 export function Settings({
   account,
@@ -79,7 +79,7 @@ export function Settings({
   account: Account
   initialSection?: SettingsSection
   onClose: () => void
-  onAccount: (next: { name: string; email: string }) => void
+  onAccount: (next: { name: string; email: string; virusScanEnabled?: boolean; operationNotifications?: boolean }) => void
   onPlatform?: (next: { defaultView?: 'grid' | 'list'; terminalsEnabled?: boolean }) => void
   onToast: (message: string) => void
 }) {
@@ -428,13 +428,15 @@ function AccountPanel({
   onToast,
 }: {
   data: SettingsPayload
-  onSaved: (next: { name: string; email: string }) => void
+  onSaved: (next: { name: string; email: string; virusScanEnabled?: boolean; operationNotifications?: boolean }) => void
   onToast: (message: string) => void
 }) {
   const [name, setName] = useState(data.account.name)
   const [email, setEmail] = useState(data.account.email)
   const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
+  const [virusScan, setVirusScan] = useState(data.account.virusScanEnabled === true)
+  const [operationNotifications, setOperationNotifications] = useState(data.account.operationNotifications !== false)
   const [busy, setBusy] = useState(false)
 
   async function save() {
@@ -445,8 +447,10 @@ function AccountPanel({
         email,
         currentPassword: newPassword ? currentPassword : undefined,
         newPassword: newPassword || undefined,
+        virusScanEnabled: virusScan,
+        operationNotifications,
       })
-      onSaved({ name: user.name, email: user.email })
+      onSaved({ name: user.name, email: user.email, virusScanEnabled: user.virusScanEnabled, operationNotifications: user.operationNotifications })
       setCurrentPassword('')
       setNewPassword('')
       onToast('Account saved')
@@ -487,6 +491,24 @@ function AccountPanel({
         Your files use {formatBytes(data.account.usedBytes)} of {formatBytes(data.account.reservedBytes)}
         {data.account.quotaBytes ? ' (your cap)' : ' on this node'}.
       </p>
+      <div className="mb-6 rounded-xl bg-white/[0.04] px-4 py-3">
+        <Toggle
+          on={data.platform.virusScanPolicy === 'on' ? true : data.platform.virusScanPolicy === 'off' ? false : virusScan}
+          onChange={setVirusScan}
+          label="Scan uploads for viruses"
+          disabled={data.platform.virusScanPolicy !== 'user'}
+        />
+        <p className="text-xs text-[#8d8d8d]">
+          {data.platform.virusScanPolicy === 'on'
+            ? 'Required by this node’s administrator.'
+            : data.platform.virusScanPolicy === 'off'
+              ? 'Disabled by this node’s administrator.'
+              : data.account.virusScannerAvailable === false
+                ? 'ClamAV is not installed on this node. Uploads will show as not scanned.'
+                : 'New uploads are checked by ClamAV and receive a safety rating.'}
+        </p>
+        <Toggle on={operationNotifications} onChange={setOperationNotifications} label="Show operation notifications" />
+      </div>
       <Button className="h-11 rounded-full bg-white text-[#1a1a1a] hover:bg-[#f2f2f2]" disabled={busy} onClick={() => void save()}>
         {busy ? 'Saving…' : 'Save'}
       </Button>
@@ -508,12 +530,13 @@ function GeneralPanel({
   const [nodeName, setNodeName] = useState(data.platform.nodeName)
   const [signInMessage, setSignInMessage] = useState(data.platform.signInMessage ?? '')
   const [defaultView, setDefaultView] = useState(data.platform.defaultView)
+  const [virusScanPolicy, setVirusScanPolicy] = useState(data.platform.virusScanPolicy ?? 'user')
   const [busy, setBusy] = useState(false)
 
   async function save() {
     setBusy(true)
     try {
-      await saveSettings({ platform: { nodeName, signInMessage, defaultView } })
+      await saveSettings({ platform: { nodeName, signInMessage, defaultView, virusScanPolicy } })
       onPlatform?.({ defaultView })
       await onSaved()
       onToast('Platform saved')
@@ -556,6 +579,24 @@ function GeneralPanel({
           </button>
         ))}
       </div>
+      <p className="mb-2 text-sm text-[#8d8d8d]">Virus checks</p>
+      <div className="mb-2 flex flex-wrap gap-2">
+        {([
+          ['user', 'Let users choose'],
+          ['on', 'Always on'],
+          ['off', 'Always off'],
+        ] as const).map(([value, label]) => (
+          <button
+            key={value}
+            type="button"
+            onClick={() => setVirusScanPolicy(value)}
+            className={cn('h-9 rounded-full px-4 text-sm', virusScanPolicy === value ? 'bg-white text-[#1a1a1a]' : 'bg-white/[0.08] text-[#e8e8e8]')}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      <p className="mb-6 text-xs text-[#8d8d8d]">Always on and Always off override every user’s preference.</p>
       <Button className="h-11 rounded-full bg-white text-[#1a1a1a] hover:bg-[#f2f2f2]" disabled={busy} onClick={() => void save()}>
         {busy ? 'Saving…' : 'Save'}
       </Button>

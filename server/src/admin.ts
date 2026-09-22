@@ -5,6 +5,7 @@ import type { Hono } from 'hono'
 import { bytesToGb, gbToBytes, type ServerConfig } from './config.ts'
 import { diskInfo } from './disk.ts'
 import { loadPlatform, savePlatform, type PlatformSettings } from './platform.ts'
+import { scannerAvailable } from './virus.ts'
 import { requirePool, writeManifest } from './pool.ts'
 import {
   addBackend,
@@ -90,12 +91,13 @@ export function mountAdmin(app: Hono<{ Variables: Vars }>, config: ServerConfig,
       reservedBytes: effectiveReserved(user, manifest.reservedBytes),
       quotaBytes: personalQuota(user),
       nodeReservedBytes: manifest.reservedBytes,
+      virusScannerAvailable: await scannerAvailable(),
     }
     if (user.role !== 'admin') {
       return c.json({
         admin: false,
         account,
-        platform: { nodeName: platform.nodeName, defaultView: platform.defaultView },
+        platform: { nodeName: platform.nodeName, defaultView: platform.defaultView, virusScanPolicy: platform.virusScanPolicy },
       })
     }
     const users = await loadUsers(config)
@@ -175,6 +177,10 @@ export function mountAdmin(app: Hono<{ Variables: Vars }>, config: ServerConfig,
         typeof body.platform?.terminalEnabled === 'boolean' ? body.platform.terminalEnabled : current.terminalEnabled,
       terminalUsers:
         typeof body.platform?.terminalUsers === 'boolean' ? body.platform.terminalUsers : current.terminalUsers,
+      virusScanPolicy:
+        body.platform?.virusScanPolicy === 'on' || body.platform?.virusScanPolicy === 'off' || body.platform?.virusScanPolicy === 'user'
+          ? body.platform.virusScanPolicy
+          : current.virusScanPolicy,
     }
     await savePlatform(config, next)
     if (current.terminalEnabled && !next.terminalEnabled) hub.killAll('disabled')
@@ -451,6 +457,8 @@ export function mountAdmin(app: Hono<{ Variables: Vars }>, config: ServerConfig,
       email?: string
       currentPassword?: string
       newPassword?: string
+      virusScanEnabled?: boolean
+      operationNotifications?: boolean
     }>()
     const users = await loadUsers(config)
     const person = findById(users, user.id)
@@ -469,6 +477,8 @@ export function mountAdmin(app: Hono<{ Variables: Vars }>, config: ServerConfig,
       }
       person.password = await hashPassword(body.newPassword)
     }
+    if (typeof body.virusScanEnabled === 'boolean') person.virusScanEnabled = body.virusScanEnabled
+    if (typeof body.operationNotifications === 'boolean') person.operationNotifications = body.operationNotifications
     await saveUsers(config, users)
     c.set('user', person)
     return c.json({ user: toPublic(person) })

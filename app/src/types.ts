@@ -39,4 +39,7 @@ export type DriveItem = {
   expiresAt?: string
   shareId?: string
   shareName?: string
+  safetyScore?: number | null
+  scanStatus?: 'clean' | 'infected' | 'unavailable' | 'error' | 'disabled' | null
+  scanSignature?: string
 }

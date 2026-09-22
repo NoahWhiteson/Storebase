@@ -118,7 +118,7 @@ export async function walkVisible(root: string): Promise<DriveEntry[]> {
   return out
 }
 
-const INDEX_SKIP = new Set(['.trash', '.versions', '.storebase-meta.json', '.temp-index.json', '.trash-index.json'])
+const INDEX_SKIP = new Set(['.trash', '.versions', '.storebase-meta.json', '.storebase-virus.json', '.temp-index.json', '.trash-index.json'])
 
 export async function walkLiveFilePaths(root: string): Promise<string[]> {
   const out: string[] = []

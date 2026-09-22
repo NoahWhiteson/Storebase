@@ -129,6 +129,26 @@ if ! node_ok; then
   export PATH="$bundle/bin:$PATH"
 fi
 
+if ! need_cmd clamscan; then
+  say "ClamAV was not found. Installing it for optional upload virus checks."
+  if [ "$os" = "linux" ] && need_cmd apt-get; then
+    sudo apt-get update
+    sudo apt-get install -y clamav
+  elif [ "$os" = "linux" ] && need_cmd dnf; then
+    sudo dnf install -y clamav clamav-update
+  elif [ "$os" = "linux" ] && need_cmd yum; then
+    sudo yum install -y clamav clamav-update
+  elif [ "$os" = "darwin" ] && need_cmd brew; then
+    brew install clamav
+  else
+    say "Could not install ClamAV automatically. Install clamscan before enabling virus checks."
+  fi
+fi
+if need_cmd freshclam; then
+  say "Updating ClamAV virus definitions"
+  sudo freshclam >/dev/null 2>&1 || freshclam >/dev/null 2>&1 || say "Could not refresh ClamAV definitions yet; the system updater may do it shortly."
+fi
+
 say "Installing app dependencies"
 (cd "$INSTALL/app" && "$NPM_BIN" install)
 say "Installing server dependencies"

@@ -112,6 +112,8 @@ function AppGate() {
           host: me.host,
           defaultView: me.defaultView,
           terminalsEnabled: me.terminalsEnabled !== false,
+          virusScanEnabled: me.virusScanEnabled,
+          operationNotifications: me.user.operationNotifications !== false,
         }}
         onSignedOut={() => {
           setMe(null)

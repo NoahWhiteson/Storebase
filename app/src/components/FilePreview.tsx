@@ -21,6 +21,7 @@ export function FilePreview({
   filePath,
   sourcePath,
   onRestored,
+  onDownload,
 }: {
   name: string
   url: string
@@ -32,6 +33,7 @@ export function FilePreview({
   filePath?: string
   sourcePath?: string
   onRestored?: () => Promise<void> | void
+  onDownload?: () => void
 }) {
   const kind = previewKind(name)
   const canEdit = Boolean(editable && onSave && (kind === 'text' || kind === 'markdown' || kind === 'sheet'))
@@ -213,7 +215,7 @@ export function FilePreview({
         ) : null}
         <Button
           className="h-9 rounded-full bg-white px-4 text-[#1a1a1a] hover:bg-[#f2f2f2]"
-          onClick={() => void saveOriginalFromUrl(dl, name)}
+          onClick={() => onDownload ? onDownload() : void saveOriginalFromUrl(dl, name)}
         >
           <Download className="size-4" />
           Download

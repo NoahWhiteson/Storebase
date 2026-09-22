@@ -93,6 +93,8 @@ function itemsMatch(a: DriveItem[], b: DriveItem[]): boolean {
       item.trashed === other.trashed &&
       item.shared === other.shared &&
       item.spam === other.spam
+      && item.safetyScore === other.safetyScore
+      && item.scanStatus === other.scanStatus
     )
   })
 }
@@ -108,6 +110,8 @@ type Account = {
   host: string
   defaultView?: 'grid' | 'list'
   terminalsEnabled?: boolean
+  virusScanEnabled?: boolean
+  operationNotifications?: boolean
 }
 
 type UploadBatch = {
@@ -130,6 +134,7 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('account')
   const [terminalsOpen, setTerminalsOpen] = useState(false)
   const [terminalsEnabled, setTerminalsEnabled] = useState(account.terminalsEnabled !== false)
+  const [operationNotifications, setOperationNotifications] = useState(account.operationNotifications !== false)
   const [section, setSection] = useState<SectionId>('home')
   const [folderPath, setFolderPath] = useState('')
   const [search, setSearch] = useState('')
@@ -154,6 +159,7 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
     | { mode: 'empty-trash' }
     | { mode: 'delete-forever'; ids: string[]; name: string }
   >(null)
+  const [downloadWarning, setDownloadWarning] = useState<DriveItem[] | null>(null)
   const [ttlHours, setTtlHours] = useState(24)
   const [customDays, setCustomDays] = useState('')
   const uploadRef = useRef<HTMLInputElement>(null)
@@ -654,6 +660,14 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
     void drainUploads()
   }
 
+  async function downloadItems(batch: DriveItem[], confirmed = false) {
+    if (!confirmed && batch.some((item) => item.safetyScore != null && item.safetyScore < 50)) {
+      setDownloadWarning(batch)
+      return
+    }
+    for (const item of batch) await saveOriginal(item.id, item.name)
+  }
+
   async function drainUploads() {
     if (uploadWorker.current) return
     uploadWorker.current = true
@@ -906,10 +920,13 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
       {settingsOpen ? (
         <div className="flex min-h-0 flex-1 overflow-hidden">
           <Settings
-            account={{ ...account, ...profile }}
+            account={{ ...account, ...profile, operationNotifications }}
             initialSection={settingsSection}
             onClose={() => setSettingsOpen(false)}
-            onAccount={(next) => setProfile(next)}
+            onAccount={(next) => {
+              setProfile({ name: next.name, email: next.email })
+              if (next.operationNotifications !== undefined) setOperationNotifications(next.operationNotifications)
+            }}
             onPlatform={(next) => {
               if (next.defaultView) setView(next.defaultView)
               if (next.terminalsEnabled !== undefined) setTerminalsEnabled(next.terminalsEnabled)
@@ -1046,6 +1063,7 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
                 }}
                 onUpload={() => uploadRef.current?.click()}
                 onSelect={select}
+                onSelectMany={(ids, append) => setSelectedIds((current) => append ? [...new Set([...current, ...ids])] : ids)}
                 onOpen={openItem}
                 onStar={(ids) => void star(ids)}
                 onShare={share}
@@ -1062,13 +1080,7 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
                   })
                 }}
                 onRemoveShare={(id) => void removeShare(id)}
-                onDownload={(batch) => {
-                  void (async () => {
-                    for (const item of batch) {
-                      await saveOriginal(item.id, item.name)
-                    }
-                  })()
-                }}
+                onDownload={(batch) => void downloadItems(batch)}
                 onUnzip={(ids) => void unzip(ids)}
                 onMove={(paths, dest) => void moveTo(paths, dest)}
                 onDropFiles={(files, dest) => void onUpload(files, dest)}
@@ -1151,6 +1163,7 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
                 }
               : undefined
           }
+          onDownload={() => void downloadItems([preview])}
           onClose={() => setPreview(null)}
         />
       ) : null}
@@ -1208,7 +1221,32 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
         </DialogContent>
       </Dialog>
 
-      <OperationPanel />
+      <Dialog open={downloadWarning !== null} onOpenChange={(open) => !open && setDownloadWarning(null)}>
+        <DialogContent showCloseButton={false}>
+          <DialogHeader>
+            <DialogTitle>Potentially unsafe file</DialogTitle>
+            <DialogDescription className="text-[#8d8d8d]">
+              This file is potentially a virus. Download it only if you trust where it came from.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="ghost" className="rounded-full" onClick={() => setDownloadWarning(null)}>Cancel</Button>
+            <Button
+              variant="destructive"
+              className="rounded-full bg-[#c5221f] text-white hover:bg-[#a50e0e]"
+              onClick={() => {
+                const batch = downloadWarning
+                setDownloadWarning(null)
+                if (batch) void downloadItems(batch, true)
+              }}
+            >
+              Download anyway
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <OperationPanel enabled={operationNotifications} />
       {toast ? (
         <div className="pointer-events-none fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-lg bg-[#e3e3e3] px-4 py-2.5 text-sm font-medium text-[#1a1a1a] shadow-lg">
           {toast}

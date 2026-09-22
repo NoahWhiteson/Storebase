@@ -47,7 +47,8 @@ import {
   remoteCapacity,
 } from './network.ts'
 import { dropPath, loadMeta, rewritePath, setStarred, touchRecent } from './meta.ts'
-import { loadPlatform, terminalsAllowed } from './platform.ts'
+import { loadPlatform, terminalsAllowed, virusScanEnabled } from './platform.ts'
+import { copyScanPath, dropScanPath, loadScanResults, rewriteScanPath, scanResultFrom, scanUpload, setScanResult } from './virus.ts'
 import { requirePool } from './pool.ts'
 import { QuotaError, folderSize } from './quota.ts'
 import { clearSession, issueLinkUnlock, issueSession, linkUnlocked, readSessionUserId } from './session.ts'
@@ -382,6 +383,8 @@ export function createApp(config: ServerConfig) {
       nodeName: platform.nodeName,
       defaultView: platform.defaultView,
       terminalsEnabled: terminalsAllowed(user, platform),
+      virusScanPolicy: platform.virusScanPolicy,
+      virusScanEnabled: virusScanEnabled(user, platform),
     })
   })
 
@@ -581,6 +584,8 @@ export function createApp(config: ServerConfig) {
       nodeName: platform.nodeName,
       defaultView: platform.defaultView,
       terminalsEnabled: terminalsAllowed(user, platform),
+      virusScanPolicy: platform.virusScanPolicy,
+      virusScanEnabled: virusScanEnabled(user, platform),
     })
   })
 
@@ -741,6 +746,7 @@ export function createApp(config: ServerConfig) {
     const shareId = c.req.query('share') ?? ''
     const q = (c.req.query('q') ?? '').trim().toLowerCase()
     const meta = await loadMeta(root)
+    const scans = await loadScanResults(root)
     const starred = new Set(meta.starred)
     const outgoing = await listOutgoing(config, user.id)
     const links = await listLinks(config, user.id)
@@ -751,6 +757,7 @@ export function createApp(config: ServerConfig) {
     function decorate(items: Awaited<ReturnType<typeof listPath>>, trashed = false) {
       return items.map((item) => ({
         ...item,
+        virusScan: scanResultFrom(scans, item.path, item.type),
         starred: starred.has(item.path),
         trashed,
         shared: !trashed && sharedFlag(item.path),
@@ -767,11 +774,11 @@ export function createApp(config: ServerConfig) {
           return c.json({
             path: path ? `share:${shareId}/${path}` : `share:${shareId}`,
             shareName: listed.shareName,
-            items: listed.items.map((item) => ({ ...item, starred: false, trashed: false })),
+            items: listed.items.map((item) => ({ ...item, starred: false, trashed: false, virusScan: null })),
           })
         }
         const items = await listIncoming(config, user)
-        return c.json({ path: '', items: items.map((item) => ({ ...item, starred: false, trashed: false })) })
+        return c.json({ path: '', items: items.map((item) => ({ ...item, starred: false, trashed: false, virusScan: null })) })
       } catch (err) {
         if (err instanceof ShareError) return c.json({ error: err.message }, err.status)
         throw err
@@ -788,13 +795,14 @@ export function createApp(config: ServerConfig) {
       const items = await listTrashItems(root)
       return c.json({
         path: '.trash',
-        items: items.map((item) => ({ ...item, starred: false, trashed: true, shared: false })),
+        items: items.map((item) => ({ ...item, starred: false, trashed: true, shared: false, virusScan: scanResultFrom(scans, item.path, item.type) })),
       })
     }
     if (view === 'temp') {
       const dropped = await purgeExpiredTemp(root)
       for (const rel of dropped) {
         await dropPath(root, rel)
+        await dropScanPath(root, rel)
         await dropSharesForPath(config, user.id, rel)
         await dropLinksForPath(config, user.id, rel)
         await dropVersionsForPath(root, rel)
@@ -806,6 +814,7 @@ export function createApp(config: ServerConfig) {
         ttlHours: listed.ttlHours,
         items: listed.items.map((item) => ({
           ...item,
+          virusScan: scanResultFrom(scans, item.path, item.type),
           starred: starred.has(item.path),
           trashed: false,
           shared: sharedFlag(item.path),
@@ -816,7 +825,7 @@ export function createApp(config: ServerConfig) {
       const items = []
       for (const rel of meta.starred) {
         const item = await entryAt(root, rel)
-        if (item) items.push({ ...item, starred: true, trashed: false, shared: sharedFlag(item.path) })
+        if (item) items.push({ ...item, starred: true, trashed: false, shared: sharedFlag(item.path), virusScan: scanResultFrom(scans, item.path, item.type) })
       }
       return c.json({ path: '', items })
     }
@@ -827,6 +836,7 @@ export function createApp(config: ServerConfig) {
         if (item && item.type === 'file') {
           items.push({
             ...item,
+            virusScan: scanResultFrom(scans, item.path, item.type),
             starred: starred.has(item.path),
             trashed: false,
             shared: sharedFlag(item.path),
@@ -877,6 +887,7 @@ export function createApp(config: ServerConfig) {
       const moved = await moveIntoTemp(root, paths)
       for (const entry of moved) {
         await rewritePath(root, entry.from, entry.to)
+        await rewriteScanPath(root, entry.from, entry.to)
         await rewriteShares(config, user.id, entry.from, entry.to)
         await rewriteLinks(config, user.id, entry.from, entry.to)
         await rewriteVersions(root, entry.from, entry.to)
@@ -904,6 +915,7 @@ export function createApp(config: ServerConfig) {
     try {
       const item = await keepFromTemp(root, body.path)
       await rewritePath(root, body.path, item.path)
+      await rewriteScanPath(root, body.path, item.path)
       await rewriteShares(config, user.id, body.path, item.path)
       await rewriteLinks(config, user.id, body.path, item.path)
       await rewriteVersions(root, body.path, item.path)
@@ -934,6 +946,7 @@ export function createApp(config: ServerConfig) {
         const send = (event: unknown) => output.write(JSON.stringify(event) + '\n').catch(() => {})
         try {
           const item = await unzipArchive(root, path, await quotaGate(config, c.get('user')), (detail, progress) => { void send({ detail, progress }) })
+          await copyScanPath(root, path, item.path)
           if (isTempPath(item.path)) await trackTemp(root, item.path)
           pingDrive(c.get('user').id)
           await send({ result: { item: { ...item, starred: false, trashed: false } } })
@@ -944,6 +957,7 @@ export function createApp(config: ServerConfig) {
     }
     try {
       const item = await unzipArchive(root, body.path, await quotaGate(config, c.get('user')))
+      await copyScanPath(root, body.path, item.path)
       if (isTempPath(item.path)) await trackTemp(root, item.path)
       return c.json({ item: { ...item, starred: false, trashed: false } }, 201)
     } catch (err) {
@@ -962,11 +976,14 @@ export function createApp(config: ServerConfig) {
     try {
       const quota = await quotaGate(config, c.get('user'))
       const rel = [dir.replaceAll('\\', '/').replace(/^\/+|\/+$/g, ''), file.name].filter(Boolean).join('/')
+      const platform = await loadPlatform(config)
+      const scan = virusScanEnabled(c.get('user'), platform) ? await scanUpload(buf, file.name) : null
       await snapshotExisting(root, rel, quota)
       const item = await saveFile(root, dir, file.name, buf, quota)
+      if (scan) await setScanResult(root, item.path, scan)
       await touchRecent(root, item.path)
       if (isTempPath(item.path)) await trackTemp(root, item.path)
-      return c.json({ item: { ...item, starred: false, trashed: false } }, 201)
+      return c.json({ item: { ...item, starred: false, trashed: false, virusScan: scan } }, 201)
     } catch (err) {
       if (err instanceof QuotaError) return c.json({ error: err.message, code: err.code }, 507)
       throw err
@@ -1008,6 +1025,7 @@ export function createApp(config: ServerConfig) {
       const moved = await moveEntries(root, paths, dest)
       for (const entry of moved) {
         await rewritePath(root, entry.from, entry.to)
+        await rewriteScanPath(root, entry.from, entry.to)
         await rewriteShares(config, user.id, entry.from, entry.to)
         await rewriteLinks(config, user.id, entry.from, entry.to)
         await rewriteVersions(root, entry.from, entry.to)
@@ -1043,6 +1061,7 @@ export function createApp(config: ServerConfig) {
       if (dest === TEMP_DIR) await ensureTemp(root)
       const copied = await copyEntries(root, paths, dest, await quotaGate(config, c.get('user')))
       for (const entry of copied) {
+        await copyScanPath(root, entry.from, entry.to)
         await touchRecent(root, entry.to)
         if (isTempPath(entry.to)) await trackTemp(root, entry.to)
       }
@@ -1131,6 +1150,7 @@ export function createApp(config: ServerConfig) {
     if (!body.path || !body.name) return c.json({ error: 'path and name required' }, 400)
     const item = await renameEntry(root, body.path, body.name)
     await rewritePath(root, body.path, item.path)
+    await rewriteScanPath(root, body.path, item.path)
     await rewriteShares(config, c.get('user').id, body.path, item.path)
     await rewriteLinks(config, c.get('user').id, body.path, item.path)
     await rewriteVersions(root, body.path, item.path)
@@ -1173,6 +1193,7 @@ export function createApp(config: ServerConfig) {
       }
       await removePath(root, body.path)
       await dropPath(root, body.path)
+      await dropScanPath(root, body.path)
       await dropTempPath(root, body.path)
       await dropSharesForPath(config, user.id, body.path)
       await dropLinksForPath(config, user.id, body.path)
@@ -1181,6 +1202,7 @@ export function createApp(config: ServerConfig) {
     }
     const { item, record } = await trashEntry(root, body.path)
     await dropPath(root, body.path)
+    await rewriteScanPath(root, body.path, item.path)
     await dropTempPath(root, body.path)
     await dropVersionsForPath(root, body.path)
     return c.json({
@@ -1194,6 +1216,7 @@ export function createApp(config: ServerConfig) {
     const body = await c.req.json<{ path?: string }>()
     if (!body.path) return c.json({ error: 'path required' }, 400)
     const item = await restoreTrash(root, body.path)
+    await rewriteScanPath(root, body.path, item.path)
     if (isTempPath(item.path)) await trackTemp(root, item.path)
     return c.json({ item: { ...item, starred: false, trashed: false, shared: await pathIsShared(config, c.get('user').id, item.path) } })
   })
@@ -1269,6 +1292,7 @@ export function createApp(config: ServerConfig) {
         message: `Storage is ${Math.min(100, Math.round(used / limit * 100))}% full. Free space or add another storage node.`,
       })
     }
+    await dropScanPath(root, '.trash')
     if (await isBackblazeUnavailable()) {
       alerts.push({
         id: 'backblaze-unavailable',
@@ -1337,6 +1361,7 @@ export function createApp(config: ServerConfig) {
     const original = await forgetTrashPath(root, path)
     await removePath(root, path)
     await dropPath(root, path)
+    await dropScanPath(root, path)
     if (original) {
       await dropSharesForPath(config, user.id, original)
       await dropLinksForPath(config, user.id, original)
