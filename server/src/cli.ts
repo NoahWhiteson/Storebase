@@ -20,6 +20,7 @@ function arg(name: string): string | undefined {
 
 function warmSizeCaches(config: ServerConfig, userIds: string[]): void {
   void cachedFolderSize(config.driveDir)
+  void cachedFolderSize(config.driveDir, { real: true })
   for (let i = 0; i < userIds.length; i += 4) {
     const batch = userIds.slice(i, i + 4)
     setTimeout(() => {

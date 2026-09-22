@@ -72,26 +72,30 @@ function queueRefresh(key: string, calc: () => Promise<number>): Promise<void> {
 }
 
 /**
- * Display-oriented drive size. Serves a cached value immediately and
- * refreshes in the background so hot endpoints never block on a full
- * tree walk. Quota enforcement still calls folderSize() directly (fresh).
+ * Display-oriented, cached numeric computation (stale-while-revalidate).
+ * Serves the last-known value immediately and refreshes in the background
+ * so hot endpoints never block on full-tree walks. Fresh-computed when a
+ * value has never been seen.
  */
-export async function cachedFolderSize(dir: string, opts?: { real?: boolean }): Promise<number> {
-  const key = `${opts?.real ? 'real:' : ''}${dir}`
+export async function cachedComputation(key: string, calc: () => Promise<number>): Promise<number> {
   const now = Date.now()
   const hit = sizeCache.get(key)
   if (hit) {
     if (now - hit.at < SIZE_MAX_AGE_MS) {
-      if (now - hit.at >= SIZE_TTL_MS) void queueRefresh(key, () => folderSize(dir, opts))
+      if (now - hit.at >= SIZE_TTL_MS) void queueRefresh(key, calc)
       return hit.bytes
     }
     sizeCache.delete(key)
   }
   const pending = refreshing.get(key)
-  await (pending ?? queueRefresh(key, () => folderSize(dir, opts)))
+  await (pending ?? queueRefresh(key, calc))
   const fresh = sizeCache.get(key)
   if (fresh) return fresh.bytes
-  return folderSize(dir, opts)
+  return calc()
+}
+
+export async function cachedFolderSize(dir: string, opts?: { real?: boolean }): Promise<number> {
+  return cachedComputation(`${opts?.real ? 'real:' : ''}${dir}`, () => folderSize(dir, opts))
 }
 
 export function invalidateSizeCache(dir: string): void {

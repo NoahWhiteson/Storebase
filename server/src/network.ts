@@ -6,6 +6,7 @@ import { Readable } from 'node:stream'
 import type { ServerConfig } from './config.ts'
 import { encodePointer, readPointerAt, type FilePointer } from './pointer.ts'
 import { s3Delete, s3Get, s3Probe, s3Put, type S3Target } from './s3.ts'
+import { cachedComputation } from './quota.ts'
 
 export type BackendKind = 's3' | 'node'
 
@@ -186,7 +187,9 @@ export async function remoteCapacity(config: ServerConfig): Promise<number> {
 export async function listBackends(config: ServerConfig): Promise<BackendPublic[]> {
   const state = await loadNetwork(config)
   return Promise.all(
-    state.backends.map(async (backend) => publicBackend(backend, await sumBackendUsed(config.driveDir, backend.id))),
+    state.backends.map(async (backend) =>
+      publicBackend(backend, await cachedComputation(`backend:${backend.id}`, () => sumBackendUsed(config.driveDir, backend.id))),
+    ),
   )
 }
 
