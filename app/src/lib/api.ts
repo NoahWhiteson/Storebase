@@ -177,7 +177,7 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
     headers.set('content-type', 'application/json')
   }
   const action = path.split('?')[0].split('/').pop() ?? ''
-  const labels: Record<string, string> = { unzip: 'Extracting archive', copy: 'Duplicating files', trash: 'Moving to trash', files: 'Deleting file', 'empty-trash': 'Emptying trash', upload: 'Uploading file', move: 'Moving files', keep: 'Keeping file', restore: 'Restoring file', rename: 'Renaming file', mkdir: 'Creating folder', content: 'Saving file', star: 'Updating star' }
+  const labels: Record<string, string> = { unzip: 'Extracting archive', copy: 'Duplicating files', trash: 'Moving to trash', files: 'Deleting file', 'empty-trash': 'Emptying trash', upload: 'Uploading file', move: 'Moving files', keep: 'Keeping file', restore: 'Restoring file', rename: 'Renaming file', mkdir: 'Creating folder', content: 'Saving file', star: 'Updating star', 'virus-scan': 'Checking for viruses' }
   const tracked = init.method && init.method !== 'GET' && (path.startsWith('/api/files') || path.startsWith('/api/temp/'))
   let detail = ''
   if (typeof init.body === 'string') {
@@ -512,6 +512,14 @@ export function rawUrl(path: string): string {
     return `/api/files/raw?${qs}`
   }
   return `/api/files/raw?path=${encodeURIComponent(path)}`
+}
+
+export async function scanFileForVirus(path: string): Promise<NonNullable<FileEntry['virusScan']>> {
+  const body = await api<{ virusScan: NonNullable<FileEntry['virusScan']> }>('/api/files/virus-scan', {
+    method: 'POST',
+    body: JSON.stringify({ path }),
+  })
+  return body.virusScan
 }
 
 type FileAvailability = {

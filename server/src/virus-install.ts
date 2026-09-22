@@ -27,6 +27,10 @@ const state: VirusInstallProgress = {
 }
 let installJob: Promise<void> | null = null
 
+export function virusInstallSnapshot(): VirusInstallProgress {
+  return { ...state }
+}
+
 export async function virusInstallProgress(): Promise<VirusInstallProgress> {
   if (state.status !== 'installing') {
     const installed = await scannerVersion()

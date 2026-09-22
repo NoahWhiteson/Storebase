@@ -34,6 +34,7 @@ import {
   List,
   Pencil,
   Share2,
+  ShieldCheck,
   Star,
   Timer,
   Trash2,
@@ -87,6 +88,7 @@ type FileViewProps = {
   onKeep: (ids: string[]) => void
   onCopy: (ids: string[]) => void
   onAcceptShare: (id: string) => void
+  onVirusScan: (ids: string[]) => void
 }
 
 export function FileView(props: FileViewProps) {
@@ -533,6 +535,7 @@ function handlers(props: FileViewProps & { onGetInfo: (item: DriveItem) => void 
     onKeep: props.onKeep,
     onCopy: props.onCopy,
     onAcceptShare: props.onAcceptShare,
+    onVirusScan: props.onVirusScan,
     onSelect: props.onSelect,
     section: props.section,
   }
@@ -577,6 +580,7 @@ function ItemMenu({
   onKeep,
   onCopy,
   onAcceptShare,
+  onVirusScan,
   onSelect,
   section,
 }: {
@@ -599,6 +603,7 @@ function ItemMenu({
   onKeep: (ids: string[]) => void
   onCopy: (ids: string[]) => void
   onAcceptShare: (id: string) => void
+  onVirusScan: (ids: string[]) => void
   onSelect: (id: string, mods: SelectMods) => void
   section: SectionId
 }) {
@@ -620,6 +625,7 @@ function ItemMenu({
   const huge = batch.some((entry) => entry.size != null && entry.size > 20 * 1024 ** 3)
   const spam = section === 'spam' || batch.every((entry) => entry.spam)
   const canCopy = batch.every((entry) => entry.owned !== false && !entry.trashed && !entry.spam && !entry.computer)
+  const canVirusScan = batch.every((entry) => entry.kind !== 'folder' && !entry.trashed && !entry.spam && !entry.computer)
 
   return (
     <ContextMenu>
@@ -702,6 +708,12 @@ function ItemMenu({
           <Download />
           {n > 1 ? `Download ${n} items` : 'Download'}
         </ContextMenuItem>
+        {canVirusScan ? (
+          <ContextMenuItem onSelect={() => onVirusScan(ids)}>
+            <ShieldCheck />
+            {n > 1 ? `Check ${n} files for viruses` : 'Check for viruses'}
+          </ContextMenuItem>
+        ) : null}
         {anyInbound || anyTrashed || batch.some((entry) => entry.computer) ? null : inTemp ? (
           <ContextMenuItem onSelect={() => onKeep(ids)}>
             <HardDrive />

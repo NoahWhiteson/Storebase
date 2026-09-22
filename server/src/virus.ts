@@ -53,14 +53,7 @@ async function mutate(root: string, update: (store: ScanStore) => boolean): Prom
 export async function scannerAvailable(): Promise<boolean> {
   const now = Date.now()
   if (scannerCache !== null && now - scannerCacheAt < 30_000) return scannerCache
-  try {
-    const scanner = await findExecutable('clamscan')
-    if (!scanner) throw new Error('clamscan not found')
-    await execFileAsync(scanner, ['--version'], { timeout: 5000 })
-    scannerCache = true
-  } catch {
-    scannerCache = false
-  }
+  scannerCache = Boolean(await findExecutable('clamscan'))
   scannerCacheAt = now
   return scannerCache
 }
@@ -75,29 +68,35 @@ function signatureFrom(output: string): string | undefined {
   return line?.replace(/^.*?:\s*/, '').replace(/\s+FOUND\s*$/, '').trim() || undefined
 }
 
-export async function scanUpload(bytes: Buffer, filename: string): Promise<VirusScanResult> {
+export async function scanFile(path: string): Promise<VirusScanResult> {
   const scannedAt = new Date().toISOString()
   const scanner = await findExecutable('clamscan')
   if (!scanner) return { status: 'unavailable', score: null, scannedAt, engine: 'clamav' }
+  try {
+    const result = await execFileAsync(scanner, ['--stdout', '--no-summary', path], {
+      timeout: 30 * 60_000,
+      maxBuffer: 1024 * 1024,
+    })
+    return { status: 'clean', score: 100, scannedAt, engine: 'clamav', signature: signatureFrom(result.stdout) }
+  } catch (error) {
+    const failure = error as NodeJS.ErrnoException & { code?: string | number; stdout?: string; stderr?: string }
+    if (Number(failure.code) === 1) {
+      const output = `${failure.stdout ?? ''}\n${failure.stderr ?? ''}`
+      return { status: 'infected', score: 0, scannedAt, engine: 'clamav', signature: signatureFrom(output) }
+    }
+    if (failure.code === 'ENOENT') return { status: 'unavailable', score: null, scannedAt, engine: 'clamav' }
+    return { status: 'error', score: null, scannedAt, engine: 'clamav' }
+  }
+}
+
+export async function scanUpload(bytes: Buffer, filename: string): Promise<VirusScanResult> {
+  const scanner = await findExecutable('clamscan')
+  if (!scanner) return { status: 'unavailable', score: null, scannedAt: new Date().toISOString(), engine: 'clamav' }
   const dir = await mkdtemp(join(tmpdir(), 'storebase-scan-'))
   const target = join(dir, basename(filename).replace(/[^a-zA-Z0-9._-]/g, '_') || 'upload')
   try {
     await writeFile(target, bytes)
-    try {
-      const result = await execFileAsync(scanner, ['--stdout', '--no-summary', target], {
-        timeout: 5 * 60_000,
-        maxBuffer: 1024 * 1024,
-      })
-      return { status: 'clean', score: 100, scannedAt, engine: 'clamav', signature: signatureFrom(result.stdout) }
-    } catch (error) {
-      const failure = error as NodeJS.ErrnoException & { code?: string | number; stdout?: string; stderr?: string }
-      if (Number(failure.code) === 1) {
-        const output = `${failure.stdout ?? ''}\n${failure.stderr ?? ''}`
-        return { status: 'infected', score: 0, scannedAt, engine: 'clamav', signature: signatureFrom(output) }
-      }
-      if (failure.code === 'ENOENT') return { status: 'unavailable', score: null, scannedAt, engine: 'clamav' }
-      return { status: 'error', score: null, scannedAt, engine: 'clamav' }
-    }
+    return await scanFile(target)
   } finally {
     await rm(dir, { recursive: true, force: true }).catch(() => {})
   }

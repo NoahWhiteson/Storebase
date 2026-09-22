@@ -1,6 +1,9 @@
-import { createReadStream } from 'node:fs'
-import { hostname } from 'node:os'
+import { createReadStream, createWriteStream } from 'node:fs'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { hostname, tmpdir } from 'node:os'
+import { basename, join } from 'node:path'
 import { Readable } from 'node:stream'
+import { pipeline } from 'node:stream/promises'
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { stream, streamSSE } from 'hono/streaming'
@@ -48,7 +51,7 @@ import {
 } from './network.ts'
 import { dropPath, loadMeta, rewritePath, setStarred, touchRecent } from './meta.ts'
 import { loadPlatform, terminalsAllowed, virusScanEnabled } from './platform.ts'
-import { copyScanPath, copyScanToTree, dropScanPath, loadScanResults, rewriteScanPath, scanResultFor, scanResultFrom, scanUpload, setScanResult } from './virus.ts'
+import { copyScanPath, copyScanToTree, dropScanPath, loadScanResults, rewriteScanPath, scanFile, scanResultFor, scanResultFrom, scanUpload, setScanResult, type VirusScanResult } from './virus.ts'
 import { requirePool } from './pool.ts'
 import { QuotaError, cachedFolderSize } from './quota.ts'
 import { clearSession, issueLinkUnlock, issueSession, linkUnlocked, readSessionUserId } from './session.ts'
@@ -247,6 +250,22 @@ async function sendFile(
       'x-content-type-options': 'nosniff',
     },
   })
+}
+
+async function scanOpenedFile(config: ServerConfig, file: OpenedFile): Promise<VirusScanResult> {
+  if (file.full) return scanFile(file.full)
+  if (!file.pointer) throw new Error('File is missing')
+  const backend = await findBackend(config, file.pointer.backend)
+  if (!backend) throw new Error('That file’s storage node is unavailable')
+  const dir = await mkdtemp(join(tmpdir(), 'storebase-manual-scan-'))
+  const target = join(dir, basename(file.name).replace(/[^a-zA-Z0-9._-]/g, '_') || 'file')
+  try {
+    const blob = await getBlob(backend, file.pointer.key)
+    await pipeline(Readable.fromWeb(blob.body as never), createWriteStream(target))
+    return await scanFile(target)
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {})
+  }
 }
 
 async function touchTempMove(root: string, from: string, to: string): Promise<void> {
@@ -1275,6 +1294,28 @@ export function createApp(config: ServerConfig) {
     } catch (err) {
       if (err instanceof ShareError) return c.json({ error: err.message }, err.status)
       throw err
+    }
+  })
+
+  app.post('/api/files/virus-scan', async (c) => {
+    const user = c.get('user')
+    const root = c.get('root')
+    const body = await c.req.json<{ path?: string }>()
+    if (!body.path) return c.json({ error: 'path required' }, 400)
+    try {
+      const shared = parseSharePath(body.path)
+      const target = shared ? await resolveSharedPath(config, user, shared.shareId, shared.sub) : { root, rel: body.path }
+      const item = await entryAt(target.root, target.rel)
+      if (!item) return c.json({ error: 'File not found' }, 404)
+      if (item.type === 'folder') return c.json({ error: 'Choose a file to scan' }, 400)
+      const result = await scanOpenedFile(config, await openDownload(target.root, target.rel))
+      await setScanResult(target.root, target.rel, result)
+      if (result.status === 'unavailable') return c.json({ error: 'ClamAV is not installed on this node' }, 503)
+      if (result.status === 'error') return c.json({ error: 'ClamAV could not scan this file' }, 500)
+      return c.json({ virusScan: result })
+    } catch (error) {
+      if (error instanceof ShareError) return c.json({ error: error.message }, error.status)
+      throw error
     }
   })
 

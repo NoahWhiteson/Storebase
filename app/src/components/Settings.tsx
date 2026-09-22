@@ -38,14 +38,17 @@ import { cn } from 'cn'
 import {
   ArrowLeft,
   ChevronDown,
+  ChevronRight,
   ChevronUp,
   Globe,
   HardDrive,
   KeyRound,
   Laptop,
   RefreshCw,
+  Search,
   Server,
   Shield,
+  ShieldCheck,
   SlidersHorizontal,
   SquareTerminal,
   UserRound,
@@ -60,6 +63,7 @@ export type SettingsSection =
   | 'account'
   | 'devices'
   | 'general'
+  | 'virus'
   | 'server'
   | 'storage'
   | 'users'
@@ -69,6 +73,50 @@ export type SettingsSection =
   | 'domain'
 
 type Account = { id: string; name: string; email: string; role: 'admin' | 'user'; virusScanEnabled?: boolean; operationNotifications?: boolean }
+
+type SettingsNavItem = {
+  id: SettingsSection
+  label: string
+  icon: typeof UserRound
+  admin?: boolean
+  keywords: string
+}
+
+const settingsGroups: { id: string; label: string; items: SettingsNavItem[] }[] = [
+  {
+    id: 'personal',
+    label: 'Personal',
+    items: [
+      { id: 'general', label: 'General', icon: SlidersHorizontal, keywords: 'preferences operations notifications view' },
+      { id: 'account', label: 'Account', icon: UserRound, keywords: 'profile name email password quota' },
+      { id: 'devices', label: 'Mac app', icon: Laptop, keywords: 'device pairing capture macos' },
+    ],
+  },
+  {
+    id: 'node',
+    label: 'Node',
+    items: [
+      { id: 'server', label: 'Server', icon: Server, admin: true, keywords: 'host port data drive install' },
+      { id: 'domain', label: 'Domain', icon: Globe, admin: true, keywords: 'hostname dns https ssl' },
+      { id: 'storage', label: 'Storage', icon: HardDrive, admin: true, keywords: 'capacity reserve backend disk' },
+      { id: 'users', label: 'Users', icon: Users, admin: true, keywords: 'members accounts quota roles' },
+    ],
+  },
+  {
+    id: 'protection',
+    label: 'Protection',
+    items: [
+      { id: 'virus', label: 'Virus scanning', icon: ShieldCheck, keywords: 'clamav malware upload scan antivirus' },
+      { id: 'security', label: 'Security', icon: Shield, admin: true, keywords: 'secret session encryption' },
+      { id: 'terminals', label: 'Terminals', icon: SquareTerminal, admin: true, keywords: 'shell command console' },
+    ],
+  },
+  {
+    id: 'maintenance',
+    label: 'Maintenance',
+    items: [{ id: 'updates', label: 'Updates', icon: RefreshCw, admin: true, keywords: 'version upgrade release automatic' }],
+  },
+]
 
 export function Settings({
   account,
@@ -86,7 +134,7 @@ export function Settings({
   onToast: (message: string) => void
 }) {
   const [section, setSection] = useState<SettingsSection>(
-    account.role === 'admin' || initialSection === 'account' || initialSection === 'devices'
+    account.role === 'admin' || ['account', 'devices', 'general', 'virus'].includes(initialSection)
       ? initialSection
       : 'account',
   )
@@ -113,21 +161,8 @@ export function Settings({
   const admin = Boolean(data?.admin ?? account.role === 'admin')
 
   useEffect(() => {
-    setSection(admin || initialSection === 'account' || initialSection === 'devices' ? initialSection : 'account')
+    setSection(admin || ['account', 'devices', 'general', 'virus'].includes(initialSection) ? initialSection : 'account')
   }, [admin, initialSection])
-
-  const nav: { id: SettingsSection; label: string; icon: typeof UserRound; admin?: boolean }[] = [
-    { id: 'account', label: 'Account', icon: UserRound },
-    { id: 'devices', label: 'Mac app', icon: Laptop },
-    { id: 'general', label: 'Platform', icon: SlidersHorizontal, admin: true },
-    { id: 'server', label: 'Server', icon: Server, admin: true },
-    { id: 'domain', label: 'Domain', icon: Globe, admin: true },
-    { id: 'storage', label: 'Storage', icon: HardDrive, admin: true },
-    { id: 'users', label: 'Users', icon: Users, admin: true },
-    { id: 'terminals', label: 'Terminals', icon: SquareTerminal, admin: true },
-    { id: 'updates', label: 'Updates', icon: RefreshCw, admin: true },
-    { id: 'security', label: 'Security', icon: Shield, admin: true },
-  ]
 
   return (
     <div className="flex h-full min-h-0 flex-1 overflow-hidden bg-[#1a1a1a]">
@@ -141,28 +176,7 @@ export function Settings({
           Back to files
         </button>
         <ScrollArea className="flex-1 px-3">
-          <nav className="flex flex-col gap-0.5 py-1">
-            {nav
-              .filter((item) => !item.admin || admin)
-              .map((item) => {
-                const Icon = item.icon
-                const active = section === item.id
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => setSection(item.id)}
-                    className={cn(
-                      'flex h-10 items-center gap-3 rounded-full px-4 text-sm font-medium',
-                      active ? 'bg-white/10 text-white' : 'text-[#b3b3b3] hover:bg-white/5 hover:text-white',
-                    )}
-                  >
-                    <Icon className="size-[18px]" />
-                    {item.label}
-                  </button>
-                )
-              })}
-          </nav>
+          <SettingsNavigation admin={admin} section={section} onSection={setSection} />
         </ScrollArea>
       </aside>
 
@@ -173,22 +187,8 @@ export function Settings({
             Files
           </Button>
         </div>
-        <div className="mb-6 flex flex-wrap gap-2 md:hidden">
-          {nav
-            .filter((item) => !item.admin || admin)
-            .map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                onClick={() => setSection(item.id)}
-                className={cn(
-                  'h-8 rounded-full px-3 text-sm',
-                  section === item.id ? 'bg-white text-[#1a1a1a]' : 'bg-white/[0.08] text-[#e8e8e8]',
-                )}
-              >
-                {item.label}
-              </button>
-            ))}
+        <div className="mb-6 md:hidden">
+          <SettingsNavigation admin={admin} section={section} onSection={setSection} />
         </div>
 
         {loading && !data ? <p className="text-sm text-[#8d8d8d]">Loading settings…</p> : null}
@@ -207,8 +207,11 @@ export function Settings({
           <AccountPanel data={data} onSaved={onAccount} onToast={onToast} />
         ) : null}
         {section === 'devices' ? <DevicesPanel onToast={onToast} /> : null}
-        {data && admin && section === 'general' ? (
-          <GeneralPanel data={data} onSaved={reload} onPlatform={onPlatform} onToast={onToast} />
+        {data && section === 'general' ? (
+          <GeneralPanel data={data} admin={admin} onSaved={reload} onAccount={onAccount} onPlatform={onPlatform} onToast={onToast} />
+        ) : null}
+        {data && section === 'virus' ? (
+          <VirusPanel data={data} admin={admin} onSaved={reload} onAccount={onAccount} onToast={onToast} />
         ) : null}
         {data && admin && section === 'server' ? (
           <ServerPanel data={data} onSaved={reload} onToast={onToast} />
@@ -240,12 +243,115 @@ export function Settings({
   )
 }
 
+function SettingsNavigation({
+  admin,
+  section,
+  onSection,
+}: {
+  admin: boolean
+  section: SettingsSection
+  onSection: (section: SettingsSection) => void
+}) {
+  const activeGroup = settingsGroups.find((group) => group.items.some((item) => item.id === section))?.id
+  const [query, setQuery] = useState('')
+  const [openGroups, setOpenGroups] = useState<Set<string>>(
+    () => new Set(['personal', 'protection', activeGroup].filter(Boolean) as string[]),
+  )
+
+  const normalizedQuery = query.trim().toLowerCase()
+  const groups = settingsGroups
+    .map((group) => ({
+      ...group,
+      items: group.items.filter((item) => {
+        if (item.admin && !admin) return false
+        if (!normalizedQuery) return true
+        return `${group.label} ${item.label} ${item.keywords}`.toLowerCase().includes(normalizedQuery)
+      }),
+    }))
+    .filter((group) => group.items.length > 0)
+
+  function toggleGroup(id: string) {
+    setOpenGroups((current) => {
+      const next = new Set(current)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  return (
+    <nav className="py-1" aria-label="Settings sections">
+      <label className="relative mb-3 block">
+        <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-[#777]" />
+        <Input
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          className="h-10 rounded-full border-0 bg-white/[0.06] pr-3 pl-9 text-sm text-white shadow-none placeholder:text-[#777] focus-visible:ring-1 focus-visible:ring-white/20"
+          placeholder="Search settings"
+          aria-label="Search settings"
+        />
+      </label>
+      <div className="space-y-1">
+        {groups.map((group) => {
+          const open = normalizedQuery.length > 0 || openGroups.has(group.id)
+          return (
+            <div key={group.id}>
+              <button
+                type="button"
+                onClick={() => toggleGroup(group.id)}
+                className="flex h-9 w-full items-center justify-between rounded-lg px-3 text-xs font-medium tracking-wide text-[#8d8d8d] uppercase hover:bg-white/[0.04] hover:text-[#bdbdbd]"
+                aria-expanded={open}
+              >
+                {group.label}
+                {open ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
+              </button>
+              {open ? (
+                <div className="mb-2 space-y-0.5">
+                  {group.items.map((item) => {
+                    const Icon = item.icon
+                    const active = section === item.id
+                    return (
+                      <button
+                        key={item.id}
+                        type="button"
+                        onClick={() => onSection(item.id)}
+                        className={cn(
+                          'flex h-10 w-full items-center gap-3 rounded-full px-4 text-sm font-medium',
+                          active ? 'bg-white/10 text-white' : 'text-[#b3b3b3] hover:bg-white/5 hover:text-white',
+                        )}
+                      >
+                        <Icon className="size-[18px]" />
+                        {item.label}
+                      </button>
+                    )
+                  })}
+                </div>
+              ) : null}
+            </div>
+          )
+        })}
+        {groups.length === 0 ? <p className="px-3 py-4 text-sm text-[#777]">No settings found.</p> : null}
+      </div>
+    </nav>
+  )
+}
+
 function Heading({ title, hint }: { title: string; hint: string }) {
   return (
     <div className="mb-6">
       <h1 className="text-2xl font-medium tracking-tight text-white">{title}</h1>
       <p className="mt-1 text-sm text-[#8d8d8d]">{hint}</p>
     </div>
+  )
+}
+
+function SettingsCard({ title, hint, children }: { title: string; hint: string; children: ReactNode }) {
+  return (
+    <section className="rounded-2xl border border-white/[0.08] bg-white/[0.035] p-5">
+      <h2 className="text-sm font-medium text-white">{title}</h2>
+      <p className="mt-1 mb-4 text-xs leading-5 text-[#8d8d8d]">{hint}</p>
+      {children}
+    </section>
   )
 }
 
@@ -437,8 +543,6 @@ function AccountPanel({
   const [email, setEmail] = useState(data.account.email)
   const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
-  const [virusScan, setVirusScan] = useState(data.account.virusScanEnabled === true)
-  const [operationNotifications, setOperationNotifications] = useState(data.account.operationNotifications !== false)
   const [busy, setBusy] = useState(false)
 
   async function save() {
@@ -449,8 +553,6 @@ function AccountPanel({
         email,
         currentPassword: newPassword ? currentPassword : undefined,
         newPassword: newPassword || undefined,
-        virusScanEnabled: virusScan,
-        operationNotifications,
       })
       onSaved({ name: user.name, email: user.email, virusScanEnabled: user.virusScanEnabled, operationNotifications: user.operationNotifications })
       setCurrentPassword('')
@@ -493,25 +595,7 @@ function AccountPanel({
         Your files use {formatBytes(data.account.usedBytes)} of {formatBytes(data.account.reservedBytes)}
         {data.account.quotaBytes ? ' (your cap)' : ' on this node'}.
       </p>
-      <div className="mb-6 rounded-xl bg-white/[0.04] px-4 py-3">
-        <Toggle
-          on={data.platform.virusScanPolicy === 'on' ? true : data.platform.virusScanPolicy === 'off' ? false : virusScan}
-          onChange={setVirusScan}
-          label="Scan uploads for viruses"
-          disabled={data.platform.virusScanPolicy !== 'user'}
-        />
-        <p className="text-xs text-[#8d8d8d]">
-          {data.platform.virusScanPolicy === 'on'
-            ? 'Required by this node’s administrator.'
-            : data.platform.virusScanPolicy === 'off'
-              ? 'Disabled by this node’s administrator.'
-              : data.account.virusScannerAvailable === false
-                ? 'ClamAV is not installed on this node. Uploads will show as not scanned.'
-                : 'New uploads are checked by ClamAV and receive a safety rating.'}
-        </p>
-        <Toggle on={operationNotifications} onChange={setOperationNotifications} label="Show operation notifications" />
-      </div>
-      <Button className="h-11 rounded-full bg-white text-[#1a1a1a] hover:bg-[#f2f2f2]" disabled={busy} onClick={() => void save()}>
+      <Button className="mt-6 h-11 rounded-full bg-white text-[#1a1a1a] hover:bg-[#f2f2f2]" disabled={busy} onClick={() => void save()}>
         {busy ? 'Saving…' : 'Save'}
       </Button>
     </div>
@@ -520,22 +604,107 @@ function AccountPanel({
 
 function GeneralPanel({
   data,
+  admin,
   onSaved,
+  onAccount,
   onPlatform,
   onToast,
 }: {
   data: SettingsPayload
+  admin: boolean
   onSaved: () => Promise<void>
+  onAccount: (next: { name: string; email: string; virusScanEnabled?: boolean; operationNotifications?: boolean }) => void
   onPlatform?: (next: { defaultView?: 'grid' | 'list'; terminalsEnabled?: boolean }) => void
   onToast: (message: string) => void
 }) {
   const [nodeName, setNodeName] = useState(data.platform.nodeName)
   const [signInMessage, setSignInMessage] = useState(data.platform.signInMessage ?? '')
   const [defaultView, setDefaultView] = useState(data.platform.defaultView)
+  const [operationNotifications, setOperationNotifications] = useState(data.account.operationNotifications !== false)
+  const [busy, setBusy] = useState(false)
+
+  async function save() {
+    setBusy(true)
+    try {
+      const user = await saveAccount({ operationNotifications })
+      onAccount({
+        name: user.name,
+        email: user.email,
+        virusScanEnabled: user.virusScanEnabled,
+        operationNotifications: user.operationNotifications,
+      })
+      if (admin) await saveSettings({ platform: { nodeName, signInMessage, defaultView } })
+      onPlatform?.({ defaultView })
+      await onSaved()
+      onToast('General settings saved')
+    } catch (err) {
+      onToast(err instanceof Error ? err.message : 'Could not save')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="max-w-2xl">
+      <Heading title="General" hint="Everyday behavior and how this Storebase node presents itself." />
+      <div className="space-y-4">
+        <SettingsCard title="Operations" hint="Control feedback for file uploads, copies, scans, and other actions.">
+          <Toggle on={operationNotifications} onChange={setOperationNotifications} label="Show operation notifications" />
+        </SettingsCard>
+        {admin ? (
+          <SettingsCard title="Node identity" hint="Shown to everyone who signs in to this node.">
+            <label className="mb-4 block text-sm text-[#8d8d8d]">
+              Node name
+              <Input className={`${fieldClass} mt-1.5`} value={nodeName} onChange={(event) => setNodeName(event.target.value)} />
+            </label>
+            <label className="block text-sm text-[#8d8d8d]">
+              Sign-in note
+              <Input className={`${fieldClass} mt-1.5`} value={signInMessage} onChange={(event) => setSignInMessage(event.target.value)} placeholder="Optional line under Sign in" />
+            </label>
+          </SettingsCard>
+        ) : null}
+        {admin ? (
+          <SettingsCard title="File view" hint="Choose the initial layout for files and folders.">
+            <div className="flex gap-2">
+              {(['grid', 'list'] as const).map((view) => (
+                <button key={view} type="button" onClick={() => setDefaultView(view)} className={cn('h-9 rounded-full px-4 text-sm capitalize', defaultView === view ? 'bg-white text-[#1a1a1a]' : 'bg-white/[0.08] text-[#e8e8e8]')}>
+                  {view}
+                </button>
+              ))}
+            </div>
+          </SettingsCard>
+        ) : null}
+      </div>
+      <Button className="mt-6 h-11 rounded-full bg-white text-[#1a1a1a] hover:bg-[#f2f2f2]" disabled={busy} onClick={() => void save()}>
+        {busy ? 'Saving…' : 'Save'}
+      </Button>
+    </div>
+  )
+}
+
+function VirusPanel({
+  data,
+  admin,
+  onSaved,
+  onAccount,
+  onToast,
+}: {
+  data: SettingsPayload
+  admin: boolean
+  onSaved: () => Promise<void>
+  onAccount: (next: { name: string; email: string; virusScanEnabled?: boolean; operationNotifications?: boolean }) => void
+  onToast: (message: string) => void
+}) {
+  const [virusScan, setVirusScan] = useState(data.account.virusScanEnabled === true)
   const [virusScanPolicy, setVirusScanPolicy] = useState(data.platform.virusScanPolicy ?? 'user')
   const [virusInstall, setVirusInstall] = useState(data.virusInstall)
   const [installingEngine, setInstallingEngine] = useState(false)
   const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    if (!admin) return
+    void fetchVirusInstall().then(setVirusInstall).catch(() => {})
+  }, [admin])
 
   useEffect(() => {
     if (virusInstall?.status !== 'installing') return
@@ -565,102 +734,76 @@ function GeneralPanel({
   async function save() {
     setBusy(true)
     try {
-      await saveSettings({ platform: { nodeName, signInMessage, defaultView, virusScanPolicy } })
-      onPlatform?.({ defaultView })
+      const user = await saveAccount({ virusScanEnabled: virusScan })
+      onAccount({ name: user.name, email: user.email, virusScanEnabled: user.virusScanEnabled, operationNotifications: user.operationNotifications })
+      if (admin) await saveSettings({ platform: { virusScanPolicy } })
       await onSaved()
-      onToast('Platform saved')
-    } catch (err) {
-      onToast(err instanceof Error ? err.message : 'Could not save')
+      onToast('Virus settings saved')
+    } catch (error) {
+      onToast(error instanceof Error ? error.message : 'Could not save virus settings')
     } finally {
       setBusy(false)
     }
   }
 
+  const effectiveScan = virusScanPolicy === 'on' ? true : virusScanPolicy === 'off' ? false : virusScan
+
   return (
-    <div className="max-w-lg">
-      <Heading title="Platform" hint="How this Storebase node presents itself." />
-      <label className="mb-4 block text-sm text-[#8d8d8d]">
-        Node name
-        <Input className={`${fieldClass} mt-1.5`} value={nodeName} onChange={(e) => setNodeName(e.target.value)} />
-      </label>
-      <label className="mb-4 block text-sm text-[#8d8d8d]">
-        Sign-in note
-        <Input
-          className={`${fieldClass} mt-1.5`}
-          value={signInMessage}
-          onChange={(e) => setSignInMessage(e.target.value)}
-          placeholder="Optional line under Sign in"
-        />
-      </label>
-      <p className="mb-2 text-sm text-[#8d8d8d]">Default file view</p>
-      <div className="mb-6 flex gap-2">
-        {(['grid', 'list'] as const).map((view) => (
-          <button
-            key={view}
-            type="button"
-            onClick={() => setDefaultView(view)}
-            className={cn(
-              'h-9 rounded-full px-4 text-sm capitalize',
-              defaultView === view ? 'bg-white text-[#1a1a1a]' : 'bg-white/[0.08] text-[#e8e8e8]',
-            )}
-          >
-            {view}
-          </button>
-        ))}
-      </div>
-      <p className="mb-2 text-sm text-[#8d8d8d]">Virus checks</p>
-      <div className="mb-2 flex flex-wrap gap-2">
-        {([
-          ['user', 'Let users choose'],
-          ['on', 'Always on'],
-          ['off', 'Always off'],
-        ] as const).map(([value, label]) => (
-          <button
-            key={value}
-            type="button"
-            onClick={() => setVirusScanPolicy(value)}
-            className={cn('h-9 rounded-full px-4 text-sm', virusScanPolicy === value ? 'bg-white text-[#1a1a1a]' : 'bg-white/[0.08] text-[#e8e8e8]')}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
-      <div className="mb-4 flex items-center justify-between gap-3">
-        <div className="min-w-0">
-          <p className="text-sm text-[#e8e8e8]">
-            {virusInstall?.status === 'installing'
-              ? 'Installing ClamAV…'
-              : virusInstall?.status === 'error'
-                ? 'ClamAV is not installed'
-                : virusInstall?.status === 'done'
-                  ? `ClamAV installed${virusInstall.engineVersion ? ` (${virusInstall.engineVersion})` : ''}`
-                  : `ClamAV is not installed (about ${formatBytes(virusInstall?.estimateBytes ?? 480 * 1024 ** 2)}).`}
+    <div className="max-w-2xl">
+      <Heading title="Virus scanning" hint="Check uploads and existing files with ClamAV." />
+      <div className="space-y-4">
+        <SettingsCard title="Your uploads" hint="This preference applies when the administrator lets each user choose.">
+          <Toggle on={effectiveScan} onChange={setVirusScan} label="Scan uploaded files for viruses" disabled={virusScanPolicy !== 'user'} />
+          <p className="mt-1 text-xs text-[#8d8d8d]">
+            {virusScanPolicy === 'on'
+              ? 'Required by this node’s administrator.'
+              : virusScanPolicy === 'off'
+                ? 'Disabled by this node’s administrator.'
+                : data.account.virusScannerAvailable === false
+                  ? 'ClamAV is not installed yet. Files will remain marked as not scanned.'
+                  : 'New uploads receive a safety rating after ClamAV checks them.'}
           </p>
-          {virusInstall?.status === 'error' && virusInstall.error ? (
-            <p className="text-xs text-[#e8a8a8]">{virusInstall.error}</p>
-          ) : null}
-        </div>
-        <Button
-          className="h-9 shrink-0 rounded-full bg-white text-[#1a1a1a] hover:bg-[#f2f2f2]"
-          disabled={installingEngine || virusInstall?.status === 'installing' || virusInstall?.status === 'done'}
-          onClick={() => void startInstall()}
-        >
-          {virusInstall?.status === 'done' ? 'Installed' : installingEngine || virusInstall?.status === 'installing' ? 'Installing…' : virusInstall?.status === 'error' ? 'Try again' : 'Install ClamAV'}
-        </Button>
+        </SettingsCard>
+        {admin ? (
+          <SettingsCard title="Node policy" hint="Choose whether users control scanning or the node enforces it.">
+            <div className="flex flex-wrap gap-2">
+              {([['user', 'Let users choose'], ['on', 'Always on'], ['off', 'Always off']] as const).map(([value, label]) => (
+                <button key={value} type="button" onClick={() => setVirusScanPolicy(value)} className={cn('h-9 rounded-full px-4 text-sm', virusScanPolicy === value ? 'bg-white text-[#1a1a1a]' : 'bg-white/[0.08] text-[#e8e8e8]')}>
+                  {label}
+                </button>
+              ))}
+            </div>
+          </SettingsCard>
+        ) : null}
+        {admin ? (
+          <SettingsCard title="ClamAV engine" hint="Install and monitor the scanner used by this node.">
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-sm text-[#e8e8e8]">
+                  {virusInstall?.status === 'installing'
+                    ? 'Installing ClamAV…'
+                    : virusInstall?.status === 'error'
+                      ? 'ClamAV is not ready'
+                      : virusInstall?.status === 'done'
+                        ? `ClamAV installed${virusInstall.engineVersion ? ` (${virusInstall.engineVersion})` : ''}`
+                        : `ClamAV is not installed (about ${formatBytes(virusInstall?.estimateBytes ?? 480 * 1024 ** 2)}).`}
+                </p>
+                {virusInstall?.status === 'error' && virusInstall.error ? <p className="mt-1 text-xs text-[#e8a8a8]">{virusInstall.error}</p> : null}
+              </div>
+              <Button className="h-9 shrink-0 rounded-full bg-white text-[#1a1a1a] hover:bg-[#f2f2f2]" disabled={installingEngine || virusInstall?.status === 'installing' || virusInstall?.status === 'done'} onClick={() => void startInstall()}>
+                {virusInstall?.status === 'done' ? 'Installed' : installingEngine || virusInstall?.status === 'installing' ? 'Installing…' : virusInstall?.status === 'error' ? 'Try again' : 'Install ClamAV'}
+              </Button>
+            </div>
+            {virusInstall?.status === 'installing' ? (
+              <div className="mt-4">
+                <p className="mb-1 text-xs text-[#8d8d8d]">{virusInstall.step}</p>
+                <div className="h-1 overflow-hidden rounded-full bg-white/[0.08]"><div className="h-full rounded-full bg-[#6fbf73] transition-[width] duration-500" style={{ width: `${virusInstall.percent ?? 0}%` }} /></div>
+              </div>
+            ) : null}
+          </SettingsCard>
+        ) : null}
       </div>
-      {virusInstall?.status === 'installing' ? (
-        <div className="mb-4">
-          <p className="mb-1 text-xs text-[#8d8d8d]">{virusInstall.step}</p>
-          <div className="h-1 overflow-hidden rounded-full bg-white/[0.08]">
-            <div
-              className="h-full rounded-full bg-[#6fbf73] transition-[width] duration-500"
-              style={{ width: `${virusInstall.percent ?? 0}%` }}
-            />
-          </div>
-        </div>
-      ) : null}
-      <p className="mb-6 text-xs text-[#8d8d8d]">Always on and Always off override every user’s preference.</p>
-      <Button className="h-11 rounded-full bg-white text-[#1a1a1a] hover:bg-[#f2f2f2]" disabled={busy} onClick={() => void save()}>
+      <Button className="mt-6 h-11 rounded-full bg-white text-[#1a1a1a] hover:bg-[#f2f2f2]" disabled={busy} onClick={() => void save()}>
         {busy ? 'Saving…' : 'Save'}
       </Button>
     </div>

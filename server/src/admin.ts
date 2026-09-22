@@ -6,7 +6,7 @@ import { bytesToGb, gbToBytes, type ServerConfig } from './config.ts'
 import { diskInfo } from './disk.ts'
 import { loadPlatform, savePlatform, type PlatformSettings } from './platform.ts'
 import { scannerAvailable } from './virus.ts'
-import { startClamAVInstall, virusInstallProgress } from './virus-install.ts'
+import { startClamAVInstall, virusInstallProgress, virusInstallSnapshot } from './virus-install.ts'
 import { requirePool, writeManifest } from './pool.ts'
 import {
   addBackend,
@@ -119,7 +119,7 @@ export function mountAdmin(app: Hono<{ Variables: Vars }>, config: ServerConfig,
       admin: true,
       account,
       platform,
-      virusInstall: await virusInstallProgress(),
+      virusInstall: virusInstallSnapshot(),
       server: {
         liveHost: config.host,
         livePort: config.port,

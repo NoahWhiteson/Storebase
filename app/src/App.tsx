@@ -42,6 +42,7 @@ import {
   restoreFile,
   saveContent,
   saveOriginal,
+  scanFileForVirus,
   setTempTtl,
   starFile,
   toDriveItem,
@@ -660,6 +661,23 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
     void drainUploads()
   }
 
+  async function scanForViruses(ids: string[]) {
+    const batch = ids.map((id) => items.find((entry) => entry.id === id)).filter((entry): entry is DriveItem => Boolean(entry))
+    if (!batch.length) return
+    let infected = 0
+    try {
+      await runBatch(batch, async (item) => {
+        const result = await scanFileForVirus(item.id)
+        if (result.status === 'infected') infected += 1
+      }, 2)
+      notify(infected ? `${infected} potentially unsafe ${infected === 1 ? 'file' : 'files'} found` : batch.length === 1 ? 'No viruses found' : `No viruses found in ${batch.length} files`)
+      await refreshCurrent.current({ silent: true })
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'Could not check for viruses')
+      await refreshCurrent.current({ silent: true })
+    }
+  }
+
   async function downloadItems(batch: DriveItem[], confirmed = false) {
     if (!confirmed && batch.some((item) => item.safetyScore != null && item.safetyScore < 50)) {
       setDownloadWarning(batch)
@@ -1088,6 +1106,7 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
                 onKeep={(ids) => void keepItem(ids)}
                 onCopy={(ids) => void duplicate(ids)}
                 onAcceptShare={(id) => void acceptIncoming(id)}
+                onVirusScan={(ids) => void scanForViruses(ids)}
               />
             )}
           </div>
