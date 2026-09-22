@@ -64,12 +64,13 @@ function AppGate() {
   const [phase, setPhase] = useState<'loading' | 'offline' | 'setup' | 'login' | 'ready'>('loading')
   const [setup, setSetup] = useState<SetupState | null>(null)
   const [me, setMe] = useState<Me | null>(null)
+  const [stalled, setStalled] = useState(false)
 
   const revalidate = useCallback(async () => {
     try {
       const [nextSetup, session] = await Promise.all([
-        withTimeout(fetchSetup(), 15000),
-        withTimeout(fetchMe(), 15000),
+        withTimeout(fetchSetup(), 30000),
+        withTimeout(fetchMe(), 30000),
       ])
       setSetup(nextSetup)
       if (!nextSetup.configured) {
@@ -92,22 +93,25 @@ function AppGate() {
 
   async function load() {
     setPhase('loading')
-    const cached = loadGateCache()
-    if (cached) {
-      setSetup(cached.setup)
-      setMe(cached.me)
-      setPhase('ready')
-      void revalidate()
-      return
-    }
+    setStalled(false)
+    const slow = window.setTimeout(() => setStalled(true), 6000)
     try {
-      const state = await withTimeout(fetchSetup(), 10000)
+      const cached = loadGateCache()
+      if (cached) {
+        setSetup(cached.setup)
+        setMe(cached.me)
+        setPhase('ready')
+        void revalidate()
+        window.clearTimeout(slow)
+        return
+      }
+      const state = await withTimeout(fetchSetup(), 50000)
       setSetup(state)
       if (!state.configured) {
         setPhase('setup')
         return
       }
-      const session = await withTimeout(fetchMe(), 10000)
+      const session = await withTimeout(fetchMe(), 50000)
       if (!session) {
         setPhase('login')
         return
@@ -117,6 +121,8 @@ function AppGate() {
       storeGateCache(state, session)
     } catch {
       setPhase('offline')
+    } finally {
+      window.clearTimeout(slow)
     }
   }
 
@@ -127,7 +133,11 @@ function AppGate() {
   if (phase === 'loading') {
     return (
       <Shell>
-        <p className="text-sm text-[#8d8d8d]">Talking to this node…</p>
+        <p className="text-sm text-[#8d8d8d]">
+          {stalled
+            ? 'Still talking to this node… this server is taking longer than usual to respond.'
+            : 'Talking to this node…'}
+        </p>
       </Shell>
     )
   }

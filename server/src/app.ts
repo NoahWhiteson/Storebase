@@ -1280,8 +1280,8 @@ export function createApp(config: ServerConfig) {
   app.get('/api/alerts', async (c) => {
     const user = c.get('user')
     const root = c.get('root')
-    const manifest = await requirePool(config)
-const pool = manifest.reservedBytes + (await remoteCapacity(config))
+const manifest = await requirePool(config)
+    const pool = manifest.reservedBytes + (await remoteCapacity(config))
     const limit = effectiveReserved(user, pool)
     const used = await cachedFolderSize(root)
     const alerts: Array<{ id: string; tone: 'warning' | 'danger'; message: string }> = []

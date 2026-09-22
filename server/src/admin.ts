@@ -20,7 +20,7 @@ import {
   setStoreOrder,
   updateBackendCredentials,
 } from './network.ts'
-import { cachedFolderSize, folderSize } from './quota.ts'
+import { cachedFolderSize } from './quota.ts'
 import { issueSession, rotateSecret } from './session.ts'
 import { updateStatus } from './update.ts'
 import { publicDomain } from './domain.ts'
@@ -103,14 +103,14 @@ export function mountAdmin(app: Hono<{ Variables: Vars }>, config: ServerConfig,
     const users = await loadUsers(config)
     const disk = await diskInfo(config.dataDir)
     const poolUsedBytes = await cachedFolderSize(config.driveDir)
-    const localUsedBytes = await folderSize(config.driveDir, { real: true })
+    const localUsedBytes = await cachedFolderSize(config.driveDir, { real: true })
     const network = await loadNetwork(config)
     const backends = await listBackends(config)
     const remoteBytes = await remoteCapacity(config)
     const people = await Promise.all(
       users.map(async (person) => ({
         ...toPublic(person),
-        usedBytes: await folderSize(join(config.driveDir, person.id)),
+        usedBytes: await cachedFolderSize(join(config.driveDir, person.id)),
         quotaBytes: personalQuota(person),
       })),
     )
@@ -190,7 +190,7 @@ export function mountAdmin(app: Hono<{ Variables: Vars }>, config: ServerConfig,
       if (!(gb > 0)) return c.json({ error: 'Reserve must be greater than 0' }, 400)
       const reservedBytes = gbToBytes(gb)
       const disk = await diskInfo(config.dataDir)
-      const poolUsed = await folderSize(config.driveDir)
+      const poolUsed = await cachedFolderSize(config.driveDir)
       if (reservedBytes < poolUsed) {
         return c.json({ error: 'Reserve is smaller than the files already stored' }, 400)
       }
@@ -257,7 +257,7 @@ export function mountAdmin(app: Hono<{ Variables: Vars }>, config: ServerConfig,
     const people = await Promise.all(
       users.map(async (person) => ({
         ...toPublic(person),
-        usedBytes: await folderSize(join(config.driveDir, person.id)),
+        usedBytes: await cachedFolderSize(join(config.driveDir, person.id)),
         quotaBytes: personalQuota(person),
       })),
     )
@@ -323,7 +323,7 @@ export function mountAdmin(app: Hono<{ Variables: Vars }>, config: ServerConfig,
       person.password = await hashPassword(body.password)
     }
     if ('quotaGb' in body) {
-      const used = await folderSize(join(config.driveDir, person.id))
+      const used = await cachedFolderSize(join(config.driveDir, person.id))
       const parsedQuota = await parseQuotaGb(config, body.quotaGb, used)
       if (parsedQuota.error) return c.json({ error: parsedQuota.error }, 400)
       person.quotaBytes = parsedQuota.bytes

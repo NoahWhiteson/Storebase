@@ -8,11 +8,24 @@ import { purgeExpiredTrash } from './trash.ts'
 import { purgeExpiredTemp } from './temp.ts'
 import { startDomainGateway } from './gateway.ts'
 import { ensureUserDrive, isConfigured, loadUsers } from './users.ts'
+import { cachedFolderSize } from './quota.ts'
+import { join } from 'node:path'
+import type { ServerConfig } from './config.ts'
 
 function arg(name: string): string | undefined {
   const i = process.argv.indexOf(name)
   if (i === -1) return undefined
   return process.argv[i + 1]
+}
+
+function warmSizeCaches(config: ServerConfig, userIds: string[]): void {
+  void cachedFolderSize(config.driveDir)
+  for (let i = 0; i < userIds.length; i += 4) {
+    const batch = userIds.slice(i, i + 4)
+    setTimeout(() => {
+      for (const id of batch) void cachedFolderSize(join(config.driveDir, id))
+    }, 1000 * (i / 4))
+  }
 }
 
 function hasFlag(name: string): boolean {
@@ -60,6 +73,7 @@ async function start(): Promise<void> {
         await purgeExpiredTrash(root)
         await purgeExpiredTemp(root)
       }
+      warmSizeCaches(config, users.map((user) => user.id))
     } else {
       console.log('Not configured. Open the app to finish onboarding.')
     }

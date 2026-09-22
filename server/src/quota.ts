@@ -31,18 +31,72 @@ export async function folderSize(dir: string, opts?: { real?: boolean }): Promis
 }
 
 const sizeCache = new Map<string, { at: number; bytes: number }>()
+const refreshing = new Map<string, Promise<void>>()
 const SIZE_TTL_MS = 3000
+const SIZE_MAX_AGE_MS = 300_000
+const refreshQueue: Array<() => void> = []
+let refreshInFlight = 0
+const REFRESH_MAX_CONCURRENT = 2
+
+function queueRefresh(key: string, calc: () => Promise<number>): Promise<void> {
+  const existing = refreshing.get(key)
+  if (existing) return existing
+  const run = new Promise<void>((resolve) => {
+    const start = async () => {
+      try {
+        const bytes = await calc()
+        sizeCache.set(key, { at: Date.now(), bytes })
+      } catch {
+        // Keep the previous value on failures; retry on the next request.
+      } finally {
+        refreshInFlight -= 1
+        const next = refreshQueue.shift()
+        if (next) next()
+        refreshing.delete(key)
+        resolve()
+      }
+    }
+    refreshInFlight += 1
+    if (refreshInFlight <= REFRESH_MAX_CONCURRENT) {
+      void start()
+    } else {
+      refreshQueue.push(() => {
+        refreshInFlight -= 1
+        if (refreshInFlight < 0) refreshInFlight = 0
+        start()
+      })
+    }
+  })
+  refreshing.set(key, run)
+  return run
+}
+
 /**
- * Estimatized drive size for display (status bars, "/api/me", alerts). Fresh
- * enough for UI; quota enforcement still calls folderSize() directly.
+ * Display-oriented drive size. Serves a cached value immediately and
+ * refreshes in the background so hot endpoints never block on a full
+ * tree walk. Quota enforcement still calls folderSize() directly (fresh).
  */
-export async function cachedFolderSize(dir: string): Promise<number> {
+export async function cachedFolderSize(dir: string, opts?: { real?: boolean }): Promise<number> {
+  const key = `${opts?.real ? 'real:' : ''}${dir}`
   const now = Date.now()
-  const hit = sizeCache.get(dir)
-  if (hit && now - hit.at < SIZE_TTL_MS) return hit.bytes
-  const bytes = await folderSize(dir)
-  sizeCache.set(dir, { at: now, bytes })
-  return bytes
+  const hit = sizeCache.get(key)
+  if (hit) {
+    if (now - hit.at < SIZE_MAX_AGE_MS) {
+      if (now - hit.at >= SIZE_TTL_MS) void queueRefresh(key, () => folderSize(dir, opts))
+      return hit.bytes
+    }
+    sizeCache.delete(key)
+  }
+  const pending = refreshing.get(key)
+  await (pending ?? queueRefresh(key, () => folderSize(dir, opts)))
+  const fresh = sizeCache.get(key)
+  if (fresh) return fresh.bytes
+  return folderSize(dir, opts)
+}
+
+export function invalidateSizeCache(dir: string): void {
+  sizeCache.delete(dir)
+  sizeCache.delete(`real:${dir}`)
 }
 
 export function assertFits(used: number, incoming: number, reserved: number, message?: string): void {
