@@ -1,9 +1,10 @@
+import { runBatch } from '@/lib/operations'
+import { OperationPanel } from '@/components/OperationPanel'
 import { FilePreview } from '@/components/FilePreview'
 import { FileView, sortItems, type SortKey } from '@/components/FileView'
-import { Settings, type SettingsSection } from '@/components/Settings'
+import { Settings, Terminals, type SettingsSection } from '@/components/DeferredPanels'
 import { ShareDialog } from '@/components/ShareDialog'
 import { Sidebar } from '@/components/Sidebar'
-import { Terminals } from '@/components/Terminals'
 import { TopBar } from '@/components/TopBar'
 import { Button } from '@/components/ui/button'
 import {
@@ -50,7 +51,7 @@ import {
 import { formatTtl } from '@/lib/format'
 import type { DriveItem, FileKind, SectionId } from '@/types'
 import { ChevronRight } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useLayoutEffect, type DragEvent } from 'react'
 
 const titles: Record<SectionId, string> = {
   home: 'Home',
@@ -146,6 +147,12 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
   const [customDays, setCustomDays] = useState('')
   const uploadRef = useRef<HTMLInputElement>(null)
   const refreshing = useRef(false)
+  const refreshPending = useRef(false)
+  const refreshSequence = useRef(0)
+  const currentView = useRef('')
+  const viewKey = JSON.stringify([folderPath, profile.name, search, section])
+  useLayoutEffect(() => { currentView.current = viewKey }, [viewKey])
+  const lastStatus = useRef(0)
 
   useEffect(() => {
     if (!toast) return
@@ -184,8 +191,10 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
 
   const refresh = useCallback(async (opts?: { silent?: boolean }) => {
     const silent = Boolean(opts?.silent)
-    if (silent && refreshing.current) return
+    if (silent && refreshing.current) { refreshPending.current = true; return }
     refreshing.current = true
+    const request = ++refreshSequence.current
+    const requestedView = viewKey
     if (!silent) {
       setLoadError(null)
       setLoading(true)
@@ -221,23 +230,35 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
       } else {
         entries = await listFiles({ path: folderPath })
       }
+      if (request !== refreshSequence.current || requestedView !== currentView.current) return
       const next = entries.map((entry) => toDriveItem(entry, { name: profile.name }))
       setItems((prev) => (itemsMatch(prev, next) ? prev : next))
-      const status = await fetch('/api/status', { credentials: 'include' }).then(
-        (res) => res.json() as Promise<{ usedBytes?: number }>,
-      )
-      if (typeof status.usedBytes === 'number') setUsedBytes(status.usedBytes)
+      setLoading(false)
+      if (Date.now() - lastStatus.current > 30000) {
+        lastStatus.current = Date.now()
+        void fetch('/api/status', { credentials: 'include' })
+          .then(res => res.ok ? res.json() as Promise<{ usedBytes?: number }> : { usedBytes: undefined })
+          .then(status => { if (typeof status.usedBytes === 'number') setUsedBytes(status.usedBytes) })
+          .catch(() => { lastStatus.current = 0 })
+      }
     } catch (err) {
-      if (!silent) setLoadError(err instanceof Error ? err.message : 'Could not load files')
+      if (request === refreshSequence.current && requestedView === currentView.current && !silent) setLoadError(err instanceof Error ? err.message : 'Could not load files')
     } finally {
-      refreshing.current = false
-      if (!silent) setLoading(false)
+      if (request === refreshSequence.current) {
+        refreshing.current = false
+        setLoading(false)
+        if (refreshPending.current) {
+          refreshPending.current = false
+          queueMicrotask(() => void refreshCurrent.current({ silent: true }))
+        }
+      }
     }
-  }, [folderPath, profile.name, search, section])
+  }, [folderPath, profile.name, search, section, viewKey])
 
   useEffect(() => {
-    void refresh()
-  }, [refresh])
+    const timer = window.setTimeout(() => void refresh(), search.trim() ? 250 : 0)
+    return () => window.clearTimeout(timer)
+  }, [refresh, search])
 
   useEffect(() => {
     let timer = 0
@@ -248,13 +269,14 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
       }, 200)
     }
     const src = new EventSource('/api/drive/events', { withCredentials: true })
+    window.addEventListener('storebase:files-changed', bump)
     src.addEventListener('drive', bump)
     src.addEventListener('hello', bump)
     src.addEventListener('message', bump)
     const poll = window.setInterval(() => {
       if (document.hidden) return
       bump()
-    }, 2000)
+    }, 30000)
     const onVis = () => {
       if (!document.hidden) bump()
     }
@@ -264,10 +286,14 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
       window.clearTimeout(timer)
       window.clearInterval(poll)
       src.close()
+      window.removeEventListener('storebase:files-changed', bump)
       document.removeEventListener('visibilitychange', onVis)
       window.removeEventListener('focus', onVis)
     }
   }, [refresh])
+
+  const refreshCurrent = useRef(refresh)
+  useLayoutEffect(() => { refreshCurrent.current = refresh }, [refresh])
 
   function notify(message: string) {
     setToast(message)
@@ -347,9 +373,7 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
     if (!batch.length) return
     const starred = !batch.every((entry) => entry.starred)
     try {
-      for (const item of batch) {
-        await starFile(item.id, starred)
-      }
+      await runBatch(batch, item => starFile(item.id, starred))
       notify(
         batch.length === 1
           ? starred
@@ -359,7 +383,7 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
             ? `Starred ${batch.length} items`
             : `Removed star from ${batch.length} items`,
       )
-      await refresh()
+      await refreshCurrent.current({ silent: true })
     } catch (err) {
       notify(err instanceof Error ? err.message : 'Could not star')
     }
@@ -383,11 +407,11 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
     try {
       let permanent = 0
       let trashed = 0
-      for (const item of batch) {
+      await runBatch(batch, async item => {
         const result = await trashFile(item.id, confirmed)
         if (result.permanent) permanent += 1
         else trashed += 1
-      }
+      })
       setSelectedIds([])
       notify(
         batch.length === 1
@@ -396,7 +420,7 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
             : `Moved ${batch[0].name} to trash`
           : `Moved ${trashed + permanent} items`,
       )
-      await refresh()
+      await refreshCurrent.current({ silent: true })
     } catch (err) {
       if (err instanceof ApiError && err.code === 'PERMANENT_DELETE') {
         setConfirm({
@@ -415,12 +439,10 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
     const batch = ids.map((id) => items.find((entry) => entry.id === id)).filter((entry): entry is DriveItem => Boolean(entry))
     if (!batch.length) return
     try {
-      for (const item of batch) {
-        await deleteFile(item.id)
-      }
+      await runBatch(batch, item => deleteFile(item.id))
       setSelectedIds([])
       notify(batch.length === 1 ? `Deleted ${batch[0].name}` : `Deleted ${batch.length} items`)
-      await refresh()
+      await refreshCurrent.current({ silent: true })
     } catch (err) {
       notify(err instanceof Error ? err.message : 'Could not delete')
     }
@@ -430,7 +452,7 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
     try {
       await emptyTrash()
       notify('Trash emptied')
-      await refresh()
+      await refreshCurrent.current({ silent: true })
     } catch (err) {
       notify(err instanceof Error ? err.message : 'Could not empty trash')
     }
@@ -443,7 +465,7 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
       await deleteShare(parsed.shareId)
       notify(section === 'spam' ? 'Removed from Spam' : 'Removed from Shared with me')
       setFolderPath('')
-      await refresh()
+      await refreshCurrent.current({ silent: true })
     } catch (err) {
       notify(err instanceof Error ? err.message : 'Could not remove')
     }
@@ -458,7 +480,7 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
       const copied = await copyFiles(batch.map((item) => item.id))
       notify(copied.length === 1 ? `Copied ${copied[0].name}` : `Copied ${copied.length} items`)
       setSelectedIds(copied.map((item) => item.path))
-      await refresh()
+      await refreshCurrent.current({ silent: true })
     } catch (err) {
       notify(err instanceof Error ? err.message : 'Could not copy')
     }
@@ -471,7 +493,7 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
       await acceptShare(parsed.shareId)
       notify('Accepted. It’s in Shared with me.')
       setSelectedIds([])
-      await refresh()
+      await refreshCurrent.current({ silent: true })
     } catch (err) {
       notify(err instanceof Error ? err.message : 'Could not accept')
     }
@@ -481,12 +503,10 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
     const batch = ids.map((id) => items.find((entry) => entry.id === id)).filter((entry): entry is DriveItem => Boolean(entry))
     if (!batch.length) return
     try {
-      for (const item of batch) {
-        await restoreFile(item.id)
-      }
+      await runBatch(batch, item => restoreFile(item.id))
       notify(batch.length === 1 ? `Restored ${batch[0].name}` : `Restored ${batch.length} items`)
       setSelectedIds([])
-      await refresh()
+      await refreshCurrent.current({ silent: true })
     } catch (err) {
       notify(err instanceof Error ? err.message : 'Could not restore')
     }
@@ -494,11 +514,9 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
 
   async function unzip(ids: string[]) {
     try {
-      for (const id of ids) {
-        await unzipFile(id)
-      }
+      await runBatch(ids, unzipFile, 2)
       notify(ids.length === 1 ? 'Unzipped' : `Unzipped ${ids.length} items`)
-      await refresh()
+      await refreshCurrent.current({ silent: true })
     } catch (err) {
       notify(err instanceof Error ? err.message : 'Could not unzip')
     }
@@ -544,7 +562,7 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
       }
       setDialog(null)
       setNameDraft('')
-      await refresh()
+      await refreshCurrent.current({ silent: true })
     } catch (err) {
       notify(err instanceof Error ? err.message : 'Could not save')
     }
@@ -571,7 +589,7 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
       }
       if (section !== 'temp') setSection('my-drive')
       notify(`Created ${names[kind]}`)
-      await refresh()
+      await refreshCurrent.current({ silent: true })
     } catch (err) {
       notify(err instanceof Error ? err.message : 'Could not create')
     }
@@ -581,13 +599,11 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
     if (!files?.length) return
     const dir = dest ?? (section === 'temp' ? tempDir(folderPath) : folderPath)
     try {
-      for (const file of Array.from(files)) {
-        await uploadFile(dir, file)
-      }
+      await runBatch(Array.from(files), file => uploadFile(dir, file))
       if (section !== 'temp') setSection(isTempId(dir) ? 'temp' : 'my-drive')
       if (dest) setFolderPath(dest)
       notify(files.length === 1 ? `Uploaded ${files[0].name}` : `Uploaded ${files.length} files`)
-      await refresh()
+      await refreshCurrent.current({ silent: true })
     } catch (err) {
       notify(err instanceof Error ? err.message : 'Upload failed')
     }
@@ -600,7 +616,7 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
       const moved = await moveToTemp(valid)
       notify(moved.length === 1 ? `Moved ${moved[0].name} to Temp` : `Moved ${moved.length} items to Temp`)
       setSelectedIds([])
-      await refresh()
+      await refreshCurrent.current({ silent: true })
     } catch (err) {
       notify(err instanceof Error ? err.message : 'Could not move to Temp')
     }
@@ -610,12 +626,10 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
     const batch = ids.map((id) => items.find((entry) => entry.id === id)).filter((entry): entry is DriveItem => Boolean(entry))
     if (!batch.length) return
     try {
-      for (const item of batch) {
-        await keepFromTemp(item.id)
-      }
+      await runBatch(batch, item => keepFromTemp(item.id))
       notify(batch.length === 1 ? `Kept ${batch[0].name} in My files` : `Kept ${batch.length} items in My files`)
       setSelectedIds([])
-      await refresh()
+      await refreshCurrent.current({ silent: true })
     } catch (err) {
       notify(err instanceof Error ? err.message : 'Could not keep')
     }
@@ -627,7 +641,7 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
       setTtlHours(next.ttlHours)
       setCustomDays('')
       notify(`Temp files now delete after ${formatTtl(next.ttlHours)}`)
-      await refresh()
+      await refreshCurrent.current({ silent: true })
     } catch (err) {
       notify(err instanceof Error ? err.message : 'Could not set timer')
     }
@@ -641,7 +655,7 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
       if (!moved.length) return
       notify(moved.length === 1 ? `Moved ${moved[0].name}` : `Moved ${moved.length} items`)
       setSelectedIds([])
-      await refresh()
+      await refreshCurrent.current({ silent: true })
     } catch (err) {
       notify(err instanceof Error ? err.message : 'Could not move')
     }
@@ -992,14 +1006,14 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
           }
           onRestored={async () => {
             notify(`Restored ${preview.name}`)
-            await refresh()
+            await refreshCurrent.current({ silent: true })
           }}
           onSave={
             preview.owned !== false && !preview.trashed
               ? async (content) => {
                   await saveContent(preview.id, content)
                   notify(`Saved ${preview.name}`)
-                  await refresh()
+                  await refreshCurrent.current({ silent: true })
                 }
               : undefined
           }
@@ -1060,6 +1074,7 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
         </DialogContent>
       </Dialog>
 
+      <OperationPanel />
       {toast ? (
         <div className="pointer-events-none fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-lg bg-[#e3e3e3] px-4 py-2.5 text-sm font-medium text-[#1a1a1a] shadow-lg">
           {toast}

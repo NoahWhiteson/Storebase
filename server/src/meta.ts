@@ -1,4 +1,6 @@
-import { readFile, writeFile } from 'node:fs/promises'
+import { withLock } from './concurrency.ts'
+import { atomicWriteFile } from './atomic-json.ts'
+import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 export type UserMeta = {
@@ -30,10 +32,10 @@ export async function loadMeta(root: string): Promise<UserMeta> {
 }
 
 export async function saveMeta(root: string, meta: UserMeta): Promise<void> {
-  await writeFile(metaPath(root), `${JSON.stringify(meta, null, 2)}\n`)
+  await atomicWriteFile(metaPath(root), `${JSON.stringify(meta, null, 2)}\n`)
 }
 
-export async function setStarred(root: string, path: string, starred: boolean): Promise<UserMeta> {
+async function setStarredUnlocked(root: string, path: string, starred: boolean): Promise<UserMeta> {
   const meta = await loadMeta(root)
   const next = new Set(meta.starred)
   if (starred) next.add(path)
@@ -43,7 +45,7 @@ export async function setStarred(root: string, path: string, starred: boolean): 
   return meta
 }
 
-export async function touchRecent(root: string, path: string): Promise<void> {
+async function touchRecentUnlocked(root: string, path: string): Promise<void> {
   if (!path) return
   const meta = await loadMeta(root)
   const at = new Date().toISOString()
@@ -51,7 +53,7 @@ export async function touchRecent(root: string, path: string): Promise<void> {
   await saveMeta(root, meta)
 }
 
-export async function rewritePath(root: string, from: string, to: string): Promise<void> {
+async function rewritePathUnlocked(root: string, from: string, to: string): Promise<void> {
   const meta = await loadMeta(root)
   const map = (path: string) => {
     if (path === from) return to
@@ -63,9 +65,21 @@ export async function rewritePath(root: string, from: string, to: string): Promi
   await saveMeta(root, meta)
 }
 
-export async function dropPath(root: string, path: string): Promise<void> {
+async function dropPathUnlocked(root: string, path: string): Promise<void> {
   const meta = await loadMeta(root)
   meta.starred = meta.starred.filter((item) => item !== path)
   meta.recents = meta.recents.filter((item) => item.path !== path)
   await saveMeta(root, meta)
 }
+
+export const setStarred = (...args: Parameters<typeof setStarredUnlocked>): ReturnType<typeof setStarredUnlocked> =>
+  withLock(args[0] + ':meta', () => setStarredUnlocked(...args))
+
+export const touchRecent = (...args: Parameters<typeof touchRecentUnlocked>): ReturnType<typeof touchRecentUnlocked> =>
+  withLock(args[0] + ':meta', () => touchRecentUnlocked(...args))
+
+export const rewritePath = (...args: Parameters<typeof rewritePathUnlocked>): ReturnType<typeof rewritePathUnlocked> =>
+  withLock(args[0] + ':meta', () => rewritePathUnlocked(...args))
+
+export const dropPath = (...args: Parameters<typeof dropPathUnlocked>): ReturnType<typeof dropPathUnlocked> =>
+  withLock(args[0] + ':meta', () => dropPathUnlocked(...args))

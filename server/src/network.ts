@@ -208,7 +208,7 @@ function nodeUrl(backend: StorageBackend, key: string): string {
   return `${base}/api/network/objects/${key.split('/').map(encodeURIComponent).join('/')}`
 }
 
-async function nodeHeaders(backend: StorageBackend, extra?: HeadersInit): Promise<Headers> {
+async function nodeHeaders(backend: StorageBackend, extra?: ConstructorParameters<typeof Headers>[0]): Promise<Headers> {
   const headers = new Headers(extra)
   headers.set('authorization', `Bearer ${backend.token ?? ''}`)
   return headers
@@ -217,13 +217,41 @@ async function nodeHeaders(backend: StorageBackend, extra?: HeadersInit): Promis
 export async function probeBackend(backend: StorageBackend): Promise<void> {
   if (backend.type === 's3') {
     await s3Probe(s3Of(backend))
-    return
+  } else {
+    const base = (backend.url ?? '').replace(/\/+$/, '')
+    if (!base) throw new NetworkError('Node URL is required', 400)
+    const res = await fetch(`${base}/api/network/status`, { headers: await nodeHeaders(backend) })
+    if (res.status === 401 || res.status === 403) throw new NetworkError('That node rejected the token', 403)
+    if (!res.ok) throw new NetworkError(`Could not reach that node (${res.status})`, 400)
   }
-  const base = (backend.url ?? '').replace(/\/+$/, '')
-  if (!base) throw new NetworkError('Node URL is required', 400)
-  const res = await fetch(`${base}/api/network/status`, { headers: await nodeHeaders(backend) })
-  if (res.status === 401 || res.status === 403) throw new NetworkError('That node rejected the token', 403)
-  if (!res.ok) throw new NetworkError(`Could not reach that node (${res.status})`, 400)
+
+  // Listing a bucket does not prove that Storebase can retrieve the files it
+  // writes. Verify every permission the pointer store depends on.
+  const key = `.storebase-probe/${randomBytes(16).toString('hex')}`
+  const expected = Buffer.from(`storebase:${key}`)
+  let readable = false
+  try {
+    try {
+      await putBlob(backend, key, expected)
+    } catch {
+      throw new NetworkError('The connected store cannot write files. Use a Read and Write key.', 403)
+    }
+    try {
+      const blob = await getBlob(backend, key)
+      const actual = Buffer.from(await new Response(blob.body).arrayBuffer())
+      if (!actual.equals(expected)) throw new Error('Probe contents did not match')
+      readable = true
+    } catch {
+      throw new NetworkError('The connected store cannot read files. Replace it with a Read and Write key.', 403)
+    }
+  } finally {
+    if (!readable) await deleteBlob(backend, key).catch(() => {})
+  }
+  try {
+    await deleteBlob(backend, key)
+  } catch {
+    throw new NetworkError('The connected store cannot delete files. Use a Read and Write key.', 403)
+  }
 }
 
 export async function putBlob(backend: StorageBackend, key: string, body: Buffer): Promise<void> {
@@ -482,6 +510,25 @@ export async function removeBackend(config: ServerConfig, id: string): Promise<v
   state.backends = next
   state.order = normalizeOrder(next, state.order)
   await saveNetwork(config, state)
+}
+
+export async function updateBackendCredentials(
+  config: ServerConfig,
+  id: string,
+  input: { accessKey?: string; secretKey?: string; token?: string },
+): Promise<BackendPublic> {
+  const state = await loadNetwork(config)
+  const index = state.backends.findIndex((item) => item.id === id)
+  if (index < 0) throw new NetworkError('Store not found', 404)
+  const current = state.backends[index]
+  const next: StorageBackend = current.type === 's3'
+    ? { ...current, ...normalizeS3Keys(input.accessKey ?? current.accessKey ?? '', input.secretKey ?? '') }
+    : { ...current, token: (input.token ?? '').trim() }
+  if (next.type === 'node' && !next.token) throw new NetworkError('Paste the other node’s inbound token')
+  await probeBackend(next)
+  state.backends[index] = next
+  await saveNetwork(config, state)
+  return publicBackend(next, await sumBackendUsed(config.driveDir, next.id))
 }
 
 export async function openRemote(
