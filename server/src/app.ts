@@ -50,7 +50,7 @@ import { dropPath, loadMeta, rewritePath, setStarred, touchRecent } from './meta
 import { loadPlatform, terminalsAllowed, virusScanEnabled } from './platform.ts'
 import { copyScanPath, dropScanPath, loadScanResults, rewriteScanPath, scanResultFrom, scanUpload, setScanResult } from './virus.ts'
 import { requirePool } from './pool.ts'
-import { QuotaError, folderSize } from './quota.ts'
+import { QuotaError, cachedFolderSize } from './quota.ts'
 import { clearSession, issueLinkUnlock, issueSession, linkUnlocked, readSessionUserId } from './session.ts'
 import { completeSetup, getSetupState, SetupError } from './setup.ts'
 import { pingDrive, startDriveWatch, subscribeDrive } from './drive-events.ts'
@@ -370,7 +370,7 @@ export function createApp(config: ServerConfig) {
     const root = await ensureUserDrive(config, user.id)
     await issueSession(c, config, user.id)
     const manifest = await requirePool(config)
-    const usedBytes = await folderSize(root)
+    const usedBytes = await cachedFolderSize(root)
     const platform = await loadPlatform(config)
     const pool = manifest.reservedBytes + (await remoteCapacity(config))
     return c.json({
@@ -405,7 +405,7 @@ export function createApp(config: ServerConfig) {
       if (!user) return c.json({ error: 'Unknown pairing code' }, 401)
       const root = await ensureUserDrive(config, user.id)
       const manifest = await requirePool(config)
-      const usedBytes = await folderSize(root)
+      const usedBytes = await cachedFolderSize(root)
       const platform = await loadPlatform(config)
       return c.json({
         token: paired.device.token,
@@ -569,7 +569,7 @@ export function createApp(config: ServerConfig) {
     const user = c.get('user')
     const root = c.get('root')
     const manifest = await requirePool(config)
-    const usedBytes = await folderSize(root)
+    const usedBytes = await cachedFolderSize(root)
     const platform = await loadPlatform(config)
     const pool = manifest.reservedBytes + (await remoteCapacity(config))
     return c.json({
@@ -619,8 +619,8 @@ export function createApp(config: ServerConfig) {
     const user = c.get('user')
     const root = c.get('root')
     const manifest = await requirePool(config)
-    const usedBytes = await folderSize(root)
-    const poolUsed = await folderSize(config.driveDir)
+    const usedBytes = await cachedFolderSize(root)
+    const poolUsed = await cachedFolderSize(config.driveDir)
     const platform = await loadPlatform(config)
     return c.json({
       host: hostname(),
@@ -1281,9 +1281,9 @@ export function createApp(config: ServerConfig) {
     const user = c.get('user')
     const root = c.get('root')
     const manifest = await requirePool(config)
-    const pool = manifest.reservedBytes + (await remoteCapacity(config))
+const pool = manifest.reservedBytes + (await remoteCapacity(config))
     const limit = effectiveReserved(user, pool)
-    const used = await folderSize(root)
+    const used = await cachedFolderSize(root)
     const alerts: Array<{ id: string; tone: 'warning' | 'danger'; message: string }> = []
     if (limit > 0 && used / limit >= 0.85) {
       alerts.push({

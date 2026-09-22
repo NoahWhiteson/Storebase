@@ -19,6 +19,9 @@ export type VirusScanResult = {
 type ScanStore = { results: Record<string, VirusScanResult> }
 const writes = new Map<string, Promise<void>>()
 
+let scannerCache: boolean | null = null
+let scannerCacheAt = 0
+
 function cleanPath(path: string): string {
   return path.replaceAll('\\', '/').replace(/^\/+|\/+$/g, '')
 }
@@ -32,11 +35,11 @@ async function load(root: string): Promise<ScanStore> {
   }
 }
 
-async function mutate(root: string, update: (store: ScanStore) => void): Promise<void> {
+async function mutate(root: string, update: (store: ScanStore) => boolean): Promise<void> {
   const previous = writes.get(root) ?? Promise.resolve()
   const next = previous.catch(() => {}).then(async () => {
     const store = await load(root)
-    update(store)
+    if (!update(store)) return
     const target = join(root, SCAN_FILE)
     const temp = `${target}.${process.pid}.${Date.now()}.tmp`
     await writeFile(temp, `${JSON.stringify(store, null, 2)}\n`)
@@ -47,12 +50,16 @@ async function mutate(root: string, update: (store: ScanStore) => void): Promise
 }
 
 export async function scannerAvailable(): Promise<boolean> {
+  const now = Date.now()
+  if (scannerCache !== null && now - scannerCacheAt < 30_000) return scannerCache
   try {
     await execFileAsync('clamscan', ['--version'], { timeout: 5000 })
-    return true
+    scannerCache = true
   } catch {
-    return false
+    scannerCache = false
   }
+  scannerCacheAt = now
+  return scannerCache
 }
 
 function signatureFrom(output: string): string | undefined {
@@ -87,7 +94,10 @@ export async function scanUpload(bytes: Buffer, filename: string): Promise<Virus
 }
 
 export async function setScanResult(root: string, path: string, result: VirusScanResult): Promise<void> {
-  await mutate(root, (store) => { store.results[cleanPath(path)] = result })
+  await mutate(root, (store) => {
+    store.results[cleanPath(path)] = result
+    return true
+  })
 }
 
 export async function scanResultFor(root: string, path: string, type: 'file' | 'folder'): Promise<VirusScanResult | null> {
@@ -112,10 +122,13 @@ export async function copyScanPath(root: string, from: string, to: string): Prom
   const source = cleanPath(from)
   const target = cleanPath(to)
   await mutate(root, (store) => {
+    let changed = false
     for (const [path, result] of Object.entries({ ...store.results })) {
       if (path !== source && !path.startsWith(`${source}/`)) continue
       store.results[`${target}${path.slice(source.length)}`] = result
+      changed = true
     }
+    return changed
   })
 }
 
@@ -123,17 +136,23 @@ export async function rewriteScanPath(root: string, from: string, to: string): P
   const source = cleanPath(from)
   const target = cleanPath(to)
   await mutate(root, (store) => {
+    let changed = false
     for (const [path, result] of Object.entries(store.results)) {
       if (path !== source && !path.startsWith(`${source}/`)) continue
       delete store.results[path]
       store.results[`${target}${path.slice(source.length)}`] = result
+      changed = true
     }
+    return changed
   })
 }
 
 export async function dropScanPath(root: string, path: string): Promise<void> {
   const rel = cleanPath(path)
   await mutate(root, (store) => {
-    for (const key of Object.keys(store.results)) if (key === rel || key.startsWith(`${rel}/`)) delete store.results[key]
+    const keys = Object.keys(store.results).filter((key) => key === rel || key.startsWith(`${rel}/`))
+    if (!keys.length) return false
+    for (const key of keys) delete store.results[key]
+    return true
   })
 }

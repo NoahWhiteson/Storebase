@@ -9,6 +9,7 @@ const exec = promisify(execFile)
 const REPO = 'NoahWhiteson/Storebase'
 const GITHUB_GIT = `https://github.com/${REPO}.git`
 const INTERVAL_MS = 6 * 60 * 60 * 1000
+const NET_TIMEOUT_MS = 8000
 
 export type UpdateState = {
   currentSha: string | null
@@ -86,6 +87,7 @@ async function remoteMainSha(): Promise<string | null> {
   try {
     const { stdout } = await exec('git', ['ls-remote', GITHUB_GIT, 'refs/heads/main'], {
       encoding: 'utf8',
+      timeout: NET_TIMEOUT_MS,
     })
     const sha = stdout.trim().split(/\s+/)[0]
     return sha || null
@@ -101,18 +103,19 @@ export async function checkGithub(config: ServerConfig): Promise<UpdateState> {
     'User-Agent': 'storebase',
   }
   if (process.env.GITHUB_TOKEN) headers.Authorization = `Bearer ${process.env.GITHUB_TOKEN}`
+  const ghFetch = (url: string) => fetch(url, { headers, signal: AbortSignal.timeout(NET_TIMEOUT_MS) })
   try {
     const remoteSha = await remoteMainSha()
     state.latestSha = remoteSha
     if (!remoteSha) {
-      const res = await fetch(`https://api.github.com/repos/${REPO}/commits/main`, { headers })
+      const res = await ghFetch(`https://api.github.com/repos/${REPO}/commits/main`)
       if (!res.ok) throw new Error(`GitHub ${res.status}`)
       const body = (await res.json()) as { sha?: string; commit?: { message?: string } }
       state.latestSha = body.sha ?? null
       state.latestMessage = body.commit?.message?.split('\n')[0] ?? null
     } else {
       try {
-        const res = await fetch(`https://api.github.com/repos/${REPO}/commits/${remoteSha}`, { headers })
+        const res = await ghFetch(`https://api.github.com/repos/${REPO}/commits/${remoteSha}`)
         if (res.ok) {
           const body = (await res.json()) as { commit?: { message?: string } }
           state.latestMessage = body.commit?.message?.split('\n')[0] ?? state.latestMessage
@@ -125,7 +128,7 @@ export async function checkGithub(config: ServerConfig): Promise<UpdateState> {
     state.behindBy = 0
     if (state.available && state.currentSha && state.latestSha) {
       try {
-        const res = await fetch(`https://api.github.com/repos/${REPO}/compare/${state.currentSha}...${state.latestSha}`, { headers })
+        const res = await ghFetch(`https://api.github.com/repos/${REPO}/compare/${state.currentSha}...${state.latestSha}`)
         if (res.ok) {
           const body = (await res.json()) as { ahead_by?: number }
           state.behindBy = Number.isFinite(body.ahead_by) ? Number(body.ahead_by) : null

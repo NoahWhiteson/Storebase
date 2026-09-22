@@ -30,6 +30,21 @@ export async function folderSize(dir: string, opts?: { real?: boolean }): Promis
   return total
 }
 
+const sizeCache = new Map<string, { at: number; bytes: number }>()
+const SIZE_TTL_MS = 3000
+/**
+ * Estimatized drive size for display (status bars, "/api/me", alerts). Fresh
+ * enough for UI; quota enforcement still calls folderSize() directly.
+ */
+export async function cachedFolderSize(dir: string): Promise<number> {
+  const now = Date.now()
+  const hit = sizeCache.get(dir)
+  if (hit && now - hit.at < SIZE_TTL_MS) return hit.bytes
+  const bytes = await folderSize(dir)
+  sizeCache.set(dir, { at: now, bytes })
+  return bytes
+}
+
 export function assertFits(used: number, incoming: number, reserved: number, message?: string): void {
   if (used + incoming > reserved) {
     const over = used + incoming - reserved

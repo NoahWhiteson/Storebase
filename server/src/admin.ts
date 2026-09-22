@@ -20,7 +20,7 @@ import {
   setStoreOrder,
   updateBackendCredentials,
 } from './network.ts'
-import { folderSize } from './quota.ts'
+import { cachedFolderSize, folderSize } from './quota.ts'
 import { issueSession, rotateSecret } from './session.ts'
 import { updateStatus } from './update.ts'
 import { publicDomain } from './domain.ts'
@@ -83,7 +83,7 @@ export function mountAdmin(app: Hono<{ Variables: Vars }>, config: ServerConfig,
     const user = c.get('user')
     const root = c.get('root')
     const manifest = await requirePool(config)
-    const usedBytes = await folderSize(root)
+    const usedBytes = await cachedFolderSize(root)
     const platform = await loadPlatform(config)
     const account = {
       ...toPublic(user),
@@ -102,7 +102,7 @@ export function mountAdmin(app: Hono<{ Variables: Vars }>, config: ServerConfig,
     }
     const users = await loadUsers(config)
     const disk = await diskInfo(config.dataDir)
-    const poolUsedBytes = await folderSize(config.driveDir)
+    const poolUsedBytes = await cachedFolderSize(config.driveDir)
     const localUsedBytes = await folderSize(config.driveDir, { real: true })
     const network = await loadNetwork(config)
     const backends = await listBackends(config)
