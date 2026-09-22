@@ -213,6 +213,17 @@ export async function testStorageBackend(id: string): Promise<void> {
   await api(`/api/settings/backends/${id}/test`, { method: 'POST' })
 }
 
+export async function reconnectStorageBackend(
+  id: string,
+  body: { accessKey?: string; secretKey?: string; token?: string },
+): Promise<StorageBackend> {
+  const res = await api<{ backend: StorageBackend }>(`/api/settings/backends/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  })
+  return res.backend
+}
+
 export async function deleteStorageBackend(id: string): Promise<void> {
   await api(`/api/settings/backends/${id}`, { method: 'DELETE' })
 }
