@@ -4,7 +4,6 @@ export function OperationPanel() {
   const operations = useOperations()
   if (!operations.length) return null
   return <aside aria-label="File operations" className="fixed bottom-5 right-5 z-[60] w-80 max-w-[calc(100vw-2.5rem)] rounded-xl border border-white/15 bg-[#202020] p-4 text-white shadow-2xl">
-    <h2 className="mb-3 text-sm font-medium">File operations · {operations.filter(op => op.state === 'running').length} running</h2>
     <div className="max-h-72 space-y-4 overflow-y-auto">
       {operations.map(op => <div key={op.id}>
         <div className="flex items-center justify-between gap-2 text-sm">

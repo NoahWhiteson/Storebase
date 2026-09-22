@@ -33,8 +33,19 @@ export async function folderSize(dir: string, opts?: { real?: boolean }): Promis
 export function assertFits(used: number, incoming: number, reserved: number, message?: string): void {
   if (used + incoming > reserved) {
     const over = used + incoming - reserved
-    throw new QuotaError(message ?? `Not enough reserved space (${over} bytes over cap)`)
+    throw new QuotaError(message ?? `Not enough reserved space (${formatBytes(over)} over cap)`)
   }
+}
+
+function formatBytes(bytes: number): string {
+  const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB']
+  let value = bytes
+  let unit = 0
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024
+    unit += 1
+  }
+  return `${value >= 10 || unit === 0 ? value.toFixed(0) : value.toFixed(2)} ${units[unit]}`
 }
 
 export async function assertWriteFits(opts: {

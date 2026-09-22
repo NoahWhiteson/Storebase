@@ -9,6 +9,28 @@ import { loadMeta, setStarred } from '../src/meta.ts'
 import { reserveWriteSpace } from '../src/quota.ts'
 import { listTrashItems, trashEntry } from '../src/trash.ts'
 import { mapConcurrent } from '../src/concurrency.ts'
+import { inspectZipArchive } from '../src/zip.ts'
+
+function usePerEntryZip64(zip: Uint8Array): Uint8Array {
+  const source = Buffer.from(zip)
+  const eocd = source.length - 22
+  const central = source.readUInt32LE(eocd + 16)
+  const nameLength = source.readUInt16LE(central + 28)
+  const extraLength = source.readUInt16LE(central + 30)
+  const extra = Buffer.alloc(20)
+  extra.writeUInt16LE(1, 0)
+  extra.writeUInt16LE(16, 2)
+  extra.writeBigUInt64LE(BigInt(source.readUInt32LE(central + 24)), 4)
+  extra.writeBigUInt64LE(BigInt(source.readUInt32LE(central + 20)), 12)
+  const insertAt = central + 46 + nameLength + extraLength
+  const patched = Buffer.concat([source.subarray(0, insertAt), extra, source.subarray(insertAt)])
+  patched.writeUInt16LE(extraLength + extra.length, central + 30)
+  patched.writeUInt32LE(0xffff_ffff, central + 20)
+  patched.writeUInt32LE(0xffff_ffff, central + 24)
+  const nextEocd = eocd + extra.length
+  patched.writeUInt32LE(source.readUInt32LE(eocd + 12) + extra.length, nextEocd + 12)
+  return patched
+}
 
 async function fixture(t: TestContext) {
   const pool = await mkdtemp(join(tmpdir(), 'storebase-test-'))
@@ -37,6 +59,17 @@ test('extraction filters traversal and rejects insufficient capacity before writ
   assert.deepEqual((await readdir(root)), ['safe.zip'])
   const item = await unzipArchive(root, 'safe.zip', quota)
   assert.deepEqual(await readdir(join(root, item.path)), ['ok.txt'])
+})
+
+test('per-entry ZIP64 sizes do not become fake 4 GiB quota charges', async t => {
+  const { root, quota } = await fixture(t)
+  const archive = usePerEntryZip64(zipSync({ 'small.txt': Buffer.from('small') }))
+  const normalized = inspectZipArchive(archive)
+  assert.equal(normalized.entries[0].size, 5)
+  assert.equal(inspectZipArchive(normalized.bytes).entries[0].size, 5)
+  await writeFile(join(root, 'zip64.zip'), archive)
+  const item = await unzipArchive(root, 'zip64.zip', { ...quota, nodeReserved: 1_000 })
+  assert.equal(await readFile(join(root, item.path, 'small.txt'), 'utf8'), 'small')
 })
 
 test('failed extraction waits for writes then removes its partial destination', async t => {

@@ -15,6 +15,7 @@ import {
 } from './network.ts'
 import { logicalFileSize, readPointerAt } from './pointer.ts'
 import { reserveWriteSpace, folderSize, QuotaError } from './quota.ts'
+import { inspectZipArchive } from './zip.ts'
 
 let networkConfig: ServerConfig | null = null
 
@@ -545,25 +546,26 @@ export async function unzipArchive(root: string, relPath: string, quota: QuotaGa
   } else {
     zipBytes = await readFile(full)
   }
-  const { unzipSync } = await import('fflate')
   const allowed = (name: string) => {
     const clean = name.replaceAll('\\', '/')
     return !!clean && !clean.startsWith('/') && !clean.startsWith('.') && !/^[a-z]:/i.test(clean) && !clean.endsWith('/') && !clean.split('/').some(part => part === '..' || part === '.') && !clean.startsWith('__MACOSX/')
   }
+  // Read real ZIP64 sizes without inflating anything; reject over-quota archives first.
+  const archive = inspectZipArchive(new Uint8Array(zipBytes))
+  const accepted = archive.entries.filter(entry => allowed(entry.name))
   let incoming = 0
-  const names: string[] = []
-  // Inspect the directory without inflating anything; reject over-quota archives first.
-  unzipSync(new Uint8Array(zipBytes), { filter: entry => {
-    if (allowed(entry.name)) { incoming += entry.originalSize; names.push(entry.name) }
-    return false
-  } })
+  for (const entry of accepted) {
+    if (entry.size > Number.MAX_SAFE_INTEGER - incoming) throw new Error('Archive is too large for this node')
+    incoming += entry.size
+  }
+  const names = accepted.map(entry => entry.name)
   const release = await reserveWriteSpace({ userRoot: root, poolRoot: quota.poolRoot, incoming, nodeReserved: quota.nodeReserved, userQuota: quota.userQuota, config: networkConfig ?? undefined })
   try {
     progress('Decompressing archive')
     const packed = await new Promise<Record<string, Uint8Array>>((resolve, reject) => {
-      const bytes = new Uint8Array(zipBytes)
+      const bytes = archive.bytes
       const worker = new Worker(new URL('./archive-worker.mjs', import.meta.url), {
-        workerData: { bytes, names }, transferList: [bytes.buffer],
+        workerData: { bytes, names }, transferList: [bytes.buffer as ArrayBuffer],
       })
       let received = false
       worker.once('message', files => { received = true; resolve(files) })
