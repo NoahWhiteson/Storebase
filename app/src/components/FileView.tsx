@@ -433,7 +433,6 @@ function Tile({
   const over = drag.overId === item.id && canDrop
   return (
     <button
-      style={{ contentVisibility: 'auto', containIntrinsicSize: 'auto 48px' }}
       type="button"
       data-drive-item
       draggable={false}
