@@ -3,7 +3,7 @@ import { hostname } from 'node:os'
 import { Readable } from 'node:stream'
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
-import { stream, streamSSE } from 'hono/streaming'
+import { streamSSE } from 'hono/streaming'
 import { mountAdmin } from './admin.ts'
 import { bytesToGb, type ServerConfig } from './config.ts'
 import {
@@ -901,23 +901,6 @@ export function createApp(config: ServerConfig) {
     const root = c.get('root')
     const body = await c.req.json<{ path?: string }>()
     if (!body.path) return c.json({ error: 'path required' }, 400)
-    if (c.req.header('accept')?.includes('application/x-ndjson')) {
-      const path = body.path
-      c.header('Content-Type', 'application/x-ndjson')
-      c.header('Cache-Control', 'no-store')
-      c.header('X-Accel-Buffering', 'no')
-      return stream(c, async output => {
-        const send = (event: unknown) => output.write(JSON.stringify(event) + '\n').catch(() => {})
-        try {
-          const item = await unzipArchive(root, path, await quotaGate(config, c.get('user')), (detail, progress) => { void send({ detail, progress }) })
-          if (isTempPath(item.path)) await trackTemp(root, item.path)
-          pingDrive(c.get('user').id)
-          await send({ result: { item: { ...item, starred: false, trashed: false } } })
-        } catch (error) {
-          await send({ error: error instanceof Error ? error.message : 'Extraction failed', code: error instanceof QuotaError ? error.code : undefined })
-        }
-      })
-    }
     try {
       const item = await unzipArchive(root, body.path, await quotaGate(config, c.get('user')))
       if (isTempPath(item.path)) await trackTemp(root, item.path)

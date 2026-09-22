@@ -17,7 +17,6 @@ import {
   rotateInbound,
   setInboundEnabled,
   setStoreOrder,
-  updateBackendCredentials,
 } from './network.ts'
 import { folderSize } from './quota.ts'
 import { issueSession, rotateSecret } from './session.ts'
@@ -394,19 +393,6 @@ export function mountAdmin(app: Hono<{ Variables: Vars }>, config: ServerConfig,
       return c.json({ ok: true })
     } catch (err) {
       return c.json({ error: err instanceof Error ? err.message : 'Unreachable' }, 400)
-    }
-  })
-
-  app.patch('/api/settings/backends/:id', async (c) => {
-    const denied = adminOnly(c.get('user'))
-    if (denied) return c.json({ error: denied }, 403)
-    const body = await c.req.json<{ accessKey?: string; secretKey?: string; token?: string }>()
-    try {
-      const backend = await updateBackendCredentials(config, c.req.param('id'), body)
-      return c.json({ backend })
-    } catch (err) {
-      if (err instanceof NetworkError) return c.json({ error: err.message }, err.status)
-      throw err
     }
   })
 

@@ -1,5 +1,3 @@
-import { Worker } from 'node:worker_threads'
-import { mapConcurrent } from './concurrency.ts'
 import type { Dirent } from 'node:fs'
 import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname, join, relative, resolve, sep } from 'node:path'
@@ -14,8 +12,7 @@ import {
   writePointerFile,
 } from './network.ts'
 import { logicalFileSize, readPointerAt } from './pointer.ts'
-import { reserveWriteSpace, folderSize, QuotaError } from './quota.ts'
-import { inspectZipArchive } from './zip.ts'
+import { assertWriteFits, folderSize, QuotaError } from './quota.ts'
 
 let networkConfig: ServerConfig | null = null
 
@@ -87,17 +84,13 @@ export async function listPath(root: string, relPath: string): Promise<DriveEntr
   const dir = resolveSafe(root, relPath)
   await ensureDir(dir)
   const entries = await readdir(dir, { withFileTypes: true })
-  const listed = await mapConcurrent(entries.filter(entry => !entry.name.startsWith('.')), 16, async entry => {
+  const out: DriveEntry[] = []
+  for (const entry of entries) {
+    if (entry.name.startsWith('.')) continue
     const full = join(dir, entry.name)
-    try {
-      const info = await stat(full)
-      return await entryFrom(root, full, info)
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
-      throw error
-    }
-  })
-  const out = listed.filter((entry): entry is DriveEntry => entry !== null)
+    const info = await stat(full)
+    out.push(await entryFrom(root, full, info))
+  }
   out.sort((a, b) => {
     if (a.type !== b.type) return a.type === 'folder' ? -1 : 1
     return a.name.localeCompare(b.name)
@@ -178,7 +171,7 @@ export async function saveFile(
   } catch {
     // new file
   }
-  const release = await reserveWriteSpace({
+  await assertWriteFits({
     userRoot: root,
     poolRoot: quota.poolRoot,
     incoming: extra,
@@ -186,40 +179,38 @@ export async function saveFile(
     userQuota: quota.userQuota,
     config: networkConfig ?? undefined,
   })
-  try {
-    if (networkConfig) {
-      const existing = await readPointerAt(full)
-      if (existing) {
-        const backend = await findBackend(networkConfig, existing.backend)
-        if (backend) {
-          await putBlob(backend, existing.key, bytes)
-          await writePointerFile(full, { ...existing, size: bytes.byteLength })
-          const info = await stat(full)
-          return toEntry(root, full, info, bytes.byteLength)
-        }
-      }
-      const localReal = await folderSize(quota.poolRoot, { real: true })
-      let target
-      try {
-        target = await pickTarget(networkConfig, extra, localReal, quota.nodeReserved)
-      } catch (err) {
-        if (err instanceof Error && err.message.includes('full')) {
-          throw new QuotaError(err.message)
-        }
-        throw err
-      }
-      if (target.kind === 'remote') {
-        const key = newObjectKey(quota.userId ?? 'drive')
-        await putBlob(target.backend, key, bytes)
-        await writePointerFile(full, { sb: 1, backend: target.backend.id, key, size: bytes.byteLength })
+  if (networkConfig) {
+    const existing = await readPointerAt(full)
+    if (existing) {
+      const backend = await findBackend(networkConfig, existing.backend)
+      if (backend) {
+        await putBlob(backend, existing.key, bytes)
+        await writePointerFile(full, { ...existing, size: bytes.byteLength })
         const info = await stat(full)
         return toEntry(root, full, info, bytes.byteLength)
       }
     }
-    await writeFile(full, bytes)
-    const info = await stat(full)
-    return entryFrom(root, full, info)
-  } finally { release() }
+    const localReal = await folderSize(quota.poolRoot, { real: true })
+    let target
+    try {
+      target = await pickTarget(networkConfig, extra, localReal, quota.nodeReserved)
+    } catch (err) {
+      if (err instanceof Error && err.message.includes('full')) {
+        throw new QuotaError(err.message)
+      }
+      throw err
+    }
+    if (target.kind === 'remote') {
+      const key = newObjectKey(quota.userId ?? 'drive')
+      await putBlob(target.backend, key, bytes)
+      await writePointerFile(full, { sb: 1, backend: target.backend.id, key, size: bytes.byteLength })
+      const info = await stat(full)
+      return toEntry(root, full, info, bytes.byteLength)
+    }
+  }
+  await writeFile(full, bytes)
+  const info = await stat(full)
+  return entryFrom(root, full, info)
 }
 
 export async function writeFileContent(
@@ -235,7 +226,7 @@ export async function writeFileContent(
   const buf = Buffer.from(content, 'utf8')
   if (buf.byteLength > 8_000_000) throw new Error('File is too large to edit in the browser')
   const extra = Math.max(0, buf.byteLength - await logicalFileSize(full, info.size))
-  const release = await reserveWriteSpace({
+  await assertWriteFits({
     userRoot: root,
     poolRoot: quota.poolRoot,
     incoming: extra,
@@ -243,21 +234,19 @@ export async function writeFileContent(
     userQuota: quota.userQuota,
     config: networkConfig ?? undefined,
   })
-  try {
-    const pointer = await readPointerAt(full)
-    if (pointer && networkConfig) {
-      const backend = await findBackend(networkConfig, pointer.backend)
-      if (backend) {
-        await putBlob(backend, pointer.key, buf)
-        await writePointerFile(full, { ...pointer, size: buf.byteLength })
-        const next = await stat(full)
-        return toEntry(root, full, next, buf.byteLength)
-      }
+  const pointer = await readPointerAt(full)
+  if (pointer && networkConfig) {
+    const backend = await findBackend(networkConfig, pointer.backend)
+    if (backend) {
+      await putBlob(backend, pointer.key, buf)
+      await writePointerFile(full, { ...pointer, size: buf.byteLength })
+      const next = await stat(full)
+      return toEntry(root, full, next, buf.byteLength)
     }
-    await writeFile(full, buf)
-    const next = await stat(full)
-    return entryFrom(root, full, next)
-  } finally { release() }
+  }
+  await writeFile(full, buf)
+  const next = await stat(full)
+  return entryFrom(root, full, next)
 }
 
 export type MovedEntry = { from: string; to: string; item: DriveEntry }
@@ -319,7 +308,7 @@ export async function copyEntries(
     if (isTrashPath(rel)) throw new Error('Cannot copy trash')
     incoming += await entrySize(root, rel)
   }
-  const release = await reserveWriteSpace({
+  await assertWriteFits({
     userRoot: root,
     poolRoot: quota.poolRoot,
     incoming,
@@ -327,42 +316,32 @@ export async function copyEntries(
     userQuota: quota.userQuota,
     config: networkConfig ?? undefined,
   })
-  try {
-    if (destDir != null) {
-      const destFull = resolveSafe(root, destDir)
-      const destInfo = await stat(destFull)
-      if (!destInfo.isDirectory()) throw new Error('Destination is not a folder')
-      for (const rel of top) {
-        const full = resolveSafe(root, rel)
-        if (full === destFull) throw new Error('Cannot copy a folder into itself')
-        if (destFull.startsWith(`${full}${sep}`)) throw new Error('Cannot copy a folder into itself')
-      }
-    }
 
-    const copied: MovedEntry[] = []
+  if (destDir != null) {
+    const destFull = resolveSafe(root, destDir)
+    const destInfo = await stat(destFull)
+    if (!destInfo.isDirectory()) throw new Error('Destination is not a folder')
     for (const rel of top) {
       const full = resolveSafe(root, rel)
-      const parent = destDir == null ? parentRel(rel) : destDir
-      const destParent = resolveSafe(root, parent)
-      await mkdir(destParent, { recursive: true })
-      const sourceInfo = await stat(full)
-      let dest: string
-      while (true) {
-        dest = join(destParent, await uniqueIn(destParent, basename(full)))
-        try {
-          if (sourceInfo.isDirectory()) await mkdir(dest)
-          else await writeFile(dest, '', { flag: 'wx' })
-          break
-        } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error }
-      }
-      try { await copyTree(full, dest, quota.userId ?? 'drive') }
-      catch (error) { await rm(dest, { recursive: true, force: true }); throw error }
-      const info = await stat(dest)
-      const item = await entryFrom(root, dest, info)
-      copied.push({ from: rel, to: item.path, item })
+      if (full === destFull) throw new Error('Cannot copy a folder into itself')
+      if (destFull.startsWith(`${full}${sep}`)) throw new Error('Cannot copy a folder into itself')
     }
-    return copied
-  } finally { release() }
+  }
+
+  const copied: MovedEntry[] = []
+  for (const rel of top) {
+    const full = resolveSafe(root, rel)
+    const parent = destDir == null ? parentRel(rel) : destDir
+    const destParent = resolveSafe(root, parent)
+    await mkdir(destParent, { recursive: true })
+    const name = await uniqueIn(destParent, basename(full))
+    const dest = join(destParent, name)
+    await copyTree(full, dest, quota.userId ?? 'drive')
+    const info = await stat(dest)
+    const item = await entryFrom(root, dest, info)
+    copied.push({ from: rel, to: item.path, item })
+  }
+  return copied
 }
 
 export async function renameEntry(root: string, relPath: string, nextName: string): Promise<DriveEntry> {
@@ -529,8 +508,7 @@ export async function openDownload(root: string, relPath: string): Promise<Opene
   }
 }
 
-export async function unzipArchive(root: string, relPath: string, quota: QuotaGate, progress: (detail: string, percent?: number) => void = () => {}): Promise<DriveEntry> {
-  progress('Reading archive')
+export async function unzipArchive(root: string, relPath: string, quota: QuotaGate): Promise<DriveEntry> {
   const full = resolveSafe(root, relPath)
   const info = await stat(full)
   if (info.isDirectory()) throw new Error('Not a zip file')
@@ -546,68 +524,40 @@ export async function unzipArchive(root: string, relPath: string, quota: QuotaGa
   } else {
     zipBytes = await readFile(full)
   }
-  const allowed = (name: string) => {
-    const clean = name.replaceAll('\\', '/')
-    return !!clean && !clean.startsWith('/') && !clean.startsWith('.') && !/^[a-z]:/i.test(clean) && !clean.endsWith('/') && !clean.split('/').some(part => part === '..' || part === '.') && !clean.startsWith('__MACOSX/')
-  }
-  // Read real ZIP64 sizes without inflating anything; reject over-quota archives first.
-  const archive = inspectZipArchive(new Uint8Array(zipBytes))
-  const accepted = archive.entries.filter(entry => allowed(entry.name))
+  const { unzipSync } = await import('fflate')
+  const packed = unzipSync(new Uint8Array(zipBytes))
   let incoming = 0
-  for (const entry of accepted) {
-    if (entry.size > Number.MAX_SAFE_INTEGER - incoming) throw new Error('Archive is too large for this node')
-    incoming += entry.size
+  const files: { rel: string; data: Uint8Array }[] = []
+  for (const [name, data] of Object.entries(packed)) {
+    const clean = name.replaceAll('\\', '/').replace(/^\/+/, '')
+    if (!clean || clean.endsWith('/') || clean.split('/').some((part) => part === '..' || part === '.')) continue
+    if (clean.startsWith('__MACOSX/') || clean.startsWith('.')) continue
+    incoming += data.byteLength
+    files.push({ rel: clean, data })
   }
-  const names = accepted.map(entry => entry.name)
-  const release = await reserveWriteSpace({ userRoot: root, poolRoot: quota.poolRoot, incoming, nodeReserved: quota.nodeReserved, userQuota: quota.userQuota, config: networkConfig ?? undefined })
+  if (!files.length) throw new Error('That zip is empty')
+  await assertWriteFits({
+    userRoot: root,
+    poolRoot: quota.poolRoot,
+    incoming,
+    nodeReserved: quota.nodeReserved,
+    userQuota: quota.userQuota,
+    config: networkConfig ?? undefined,
+  })
+  const parent = dirname(full)
+  const folderName = await uniqueIn(parent, basename(full).replace(/\.zip$/i, ''))
+  const destRoot = join(parent, folderName)
+  await mkdir(destRoot, { recursive: true })
   try {
-    progress('Decompressing archive')
-    const packed = await new Promise<Record<string, Uint8Array>>((resolve, reject) => {
-      const bytes = archive.bytes
-      const worker = new Worker(new URL('./archive-worker.mjs', import.meta.url), {
-        workerData: { bytes, names }, transferList: [bytes.buffer as ArrayBuffer],
-      })
-      let received = false
-      worker.once('message', files => { received = true; resolve(files) })
-      worker.once('error', reject)
-      worker.once('exit', code => { if (!received) reject(new Error('Archive worker exited before completing (' + code + ')')) })
-    })
-    const files: { rel: string; data: Uint8Array }[] = []
-    for (const [name, data] of Object.entries(packed)) {
-      const clean = name.replaceAll('\\', '/').replace(/^\/+/, '')
-      if (!clean || clean.endsWith('/') || clean.split('/').some((part) => part === '..' || part === '.')) continue
-      if (clean.startsWith('__MACOSX/') || clean.startsWith('.')) continue
-      files.push({ rel: clean, data })
+    for (const file of files) {
+      const dest = resolveSafe(destRoot, file.rel)
+      await mkdir(dirname(dest), { recursive: true })
+      await writeFile(dest, file.data)
     }
-    if (!files.length) throw new Error('That zip is empty')
-    const parent = dirname(full)
-    // Reserve a unique destination atomically, including simultaneous extractions.
-    const stem = basename(full).replace(/\.zip$/i, '') || 'Archive'
-    let destRoot: string
-    for (let suffix = 1; ; suffix++) {
-      destRoot = join(parent, suffix === 1 ? stem : stem + ' (' + suffix + ')')
-      try { await mkdir(destRoot); break }
-      catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error }
-    }
-    try {
-      let written = 0
-      let lastReport = 0
-      progress('Writing ' + files.length + ' files', 0)
-      await mapConcurrent(files, 16, async file => {
-        const dest = resolveSafe(destRoot, file.rel)
-        await mkdir(dirname(dest), { recursive: true })
-        await writeFile(dest, file.data)
-        written++
-        if (Date.now() - lastReport > 100 || written === files.length) {
-          progress('Wrote ' + written + ' of ' + files.length + ' files', Math.round(written / files.length * 100))
-          lastReport = Date.now()
-        }
-      })
-    } catch (err) {
-      await rm(destRoot, { recursive: true, force: true })
-      throw err
-    }
-    const destInfo = await stat(destRoot)
-    return toEntry(root, destRoot, destInfo)
-  } finally { release() }
+  } catch (err) {
+    await rm(destRoot, { recursive: true, force: true })
+    throw err
+  }
+  const destInfo = await stat(destRoot)
+  return toEntry(root, destRoot, destInfo)
 }

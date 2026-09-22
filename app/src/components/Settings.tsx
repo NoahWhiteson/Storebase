@@ -15,7 +15,6 @@ import {
   fetchSettings,
   patchUser,
   refreshDomain,
-  reconnectStorageBackend,
   revokeDevice,
   rotateNetworkToken,
   rotatePairCode,
@@ -972,9 +971,6 @@ function NetworkStores({
   const [token, setToken] = useState('')
   const [lostKey, setLostKey] = useState(false)
   const [preferFirst, setPreferFirst] = useState(true)
-  const [reconnect, setReconnect] = useState<{ id: string; type: 's3' | 'node'; accessKey?: string } | null>(null)
-  const [reconnectKey, setReconnectKey] = useState('')
-  const [reconnectSecret, setReconnectSecret] = useState('')
 
   if (!storage) return null
   const pool = storage.poolBytes ?? storage.reservedBytes
@@ -1128,17 +1124,6 @@ function NetworkStores({
                     </button>
                     <button
                       type="button"
-                      className="text-xs text-[#8d8d8d] hover:text-white"
-                      onClick={() => {
-                        setReconnect({ id: row.remote!.id, type: row.remote!.type, accessKey: row.remote!.accessKey })
-                        setReconnectKey(row.remote!.accessKey ?? '')
-                        setReconnectSecret('')
-                      }}
-                    >
-                      Reconnect
-                    </button>
-                    <button
-                      type="button"
                       className="text-xs text-[#8d8d8d] hover:text-[#f28b82]"
                       onClick={() => {
                         void deleteStorageBackend(row.remote!.id)
@@ -1156,56 +1141,6 @@ function NetworkStores({
               </div>
             </div>
           ))}
-          {reconnect ? (
-            <div className="rounded-2xl bg-white/[0.04] p-4">
-              <div className="mb-3 text-sm text-white">Reconnect store</div>
-              <p className="mb-3 text-xs text-[#8d8d8d]">
-                This keeps every existing file pointer. For Backblaze, create a Read and Write application key.
-              </p>
-              <div className="flex flex-wrap items-end gap-3">
-                {reconnect.type === 's3' ? (
-                  <>
-                    <Field label="keyID">
-                      <Input className={fieldClass} value={reconnectKey} onChange={(event) => setReconnectKey(event.target.value)} />
-                    </Field>
-                    <Field label="applicationKey">
-                      <Input className={fieldClass} type="password" value={reconnectSecret} onChange={(event) => setReconnectSecret(event.target.value)} />
-                    </Field>
-                  </>
-                ) : (
-                  <Field label="Inbound token">
-                    <Input className={fieldClass} value={reconnectSecret} onChange={(event) => setReconnectSecret(event.target.value)} />
-                  </Field>
-                )}
-                <Button
-                  className="rounded-full bg-white text-[#1a1a1a] hover:bg-[#f2f2f2]"
-                  disabled={busy || !reconnectSecret.trim() || (reconnect.type === 's3' && !reconnectKey.trim())}
-                  onClick={() => {
-                    setBusy(true)
-                    void reconnectStorageBackend(
-                      reconnect.id,
-                      reconnect.type === 's3'
-                        ? { accessKey: reconnectKey, secretKey: reconnectSecret }
-                        : { token: reconnectSecret },
-                    )
-                      .then(async () => {
-                        setReconnect(null)
-                        setReconnectSecret('')
-                        await onSaved()
-                        onToast('Store reconnected. Existing files are available again.')
-                      })
-                      .catch((err) => onToast(err instanceof Error ? err.message : 'Could not reconnect'))
-                      .finally(() => setBusy(false))
-                  }}
-                >
-                  {busy ? 'Checking…' : 'Save and test'}
-                </Button>
-                <Button variant="ghost" className="rounded-full" onClick={() => setReconnect(null)}>
-                  Cancel
-                </Button>
-              </div>
-            </div>
-          ) : null}
         </div>
       ) : null}
 
@@ -1257,7 +1192,7 @@ function NetworkStores({
                 {lostKey ? (
                   <ol className="mt-2 list-decimal space-y-1 pl-5 text-xs text-[#8d8d8d]">
                     <li>Add a New Application Key. Name it Storebase.</li>
-                    <li>Choose Read and Write access for this bucket (or all buckets).</li>
+                    <li>Allow access to this bucket (or all buckets).</li>
                     <li>Copy applicationKey immediately. Backblaze never shows it again.</li>
                     <li>Paste that new keyID + applicationKey here.</li>
                   </ol>
@@ -1361,7 +1296,7 @@ function NetworkStores({
             <ol className="mt-3 list-decimal space-y-1 pl-5 text-xs text-[#8d8d8d]">
               <li>Bucket name — the title on the card (Storebase), not Bucket ID.</li>
               <li>Endpoint — s3.us-east-005.backblazeb2.com, from that same card.</li>
-              <li>keyID — Your Application Keys → Storebase, with Read and Write access.</li>
+              <li>keyID — Your Application Keys → Storebase. Not Master Application Key.</li>
               <li>applicationKey — the secret Backblaze showed once. If you lost it, create a new key.</li>
             </ol>
           </div>

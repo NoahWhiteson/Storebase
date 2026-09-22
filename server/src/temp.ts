@@ -1,6 +1,4 @@
-import { withLock } from './concurrency.ts'
-import { atomicWriteFile } from './atomic-json.ts'
-import { mkdir, readdir, readFile, stat } from 'node:fs/promises'
+import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
   TEMP_DIR,
@@ -50,7 +48,7 @@ async function loadIndex(root: string): Promise<TempIndex> {
 }
 
 async function saveIndex(root: string, data: TempIndex): Promise<void> {
-  await atomicWriteFile(
+  await writeFile(
     indexPath(root),
     `${JSON.stringify({ ttlHours: data.ttlHours, items: data.items }, null, 2)}\n`,
   )
@@ -66,7 +64,7 @@ export async function getTempTtlHours(root: string): Promise<number> {
   return (await loadIndex(root)).ttlHours
 }
 
-async function setTempTtlHoursUnlocked(root: string, hours: number): Promise<number> {
+export async function setTempTtlHours(root: string, hours: number): Promise<number> {
   const data = await loadIndex(root)
   data.ttlHours = clampHours(hours)
   await saveIndex(root, data)
@@ -81,7 +79,7 @@ function isExpired(addedAt: string, ttlHours: number): boolean {
   return Date.now() >= new Date(addedAt).getTime() + ttlHours * HOUR_MS
 }
 
-async function trackTempUnlocked(root: string, relPath: string): Promise<void> {
+export async function trackTemp(root: string, relPath: string): Promise<void> {
   if (!isTempPath(relPath) || relPath === TEMP_DIR) return
   const data = await loadIndex(root)
   if (data.items.some((item) => item.path === relPath || relPath.startsWith(`${item.path}/`))) return
@@ -89,7 +87,7 @@ async function trackTempUnlocked(root: string, relPath: string): Promise<void> {
   await saveIndex(root, data)
 }
 
-async function dropTempPathUnlocked(root: string, relPath: string): Promise<void> {
+export async function dropTempPath(root: string, relPath: string): Promise<void> {
   const data = await loadIndex(root)
   const next = data.items.filter((item) => item.path !== relPath && !item.path.startsWith(`${relPath}/`))
   if (next.length !== data.items.length) {
@@ -98,7 +96,7 @@ async function dropTempPathUnlocked(root: string, relPath: string): Promise<void
   }
 }
 
-async function rewriteTempPathUnlocked(root: string, from: string, to: string): Promise<void> {
+export async function rewriteTempPath(root: string, from: string, to: string): Promise<void> {
   const data = await loadIndex(root)
   let changed = false
   data.items = data.items.map((item) => {
@@ -115,7 +113,7 @@ async function rewriteTempPathUnlocked(root: string, from: string, to: string): 
   if (changed) await saveIndex(root, data)
 }
 
-async function moveIntoTempUnlocked(root: string, paths: string[]): Promise<MovedEntry[]> {
+export async function moveIntoTemp(root: string, paths: string[]): Promise<MovedEntry[]> {
   await ensureTemp(root)
   const incoming = paths.filter((path) => path && !isTempPath(path))
   if (!incoming.length) return []
@@ -139,7 +137,7 @@ export async function keepFromTemp(root: string, relPath: string): Promise<Drive
   return moved[0].item
 }
 
-async function purgeExpiredTempUnlocked(root: string): Promise<string[]> {
+export async function purgeExpiredTemp(root: string): Promise<string[]> {
   await ensureTemp(root)
   const data = await loadIndex(root)
   const kept: TempRecord[] = []
@@ -209,21 +207,3 @@ export async function listTempTop(root: string) {
   }
   return listTempItems(root)
 }
-
-export const setTempTtlHours = (...args: Parameters<typeof setTempTtlHoursUnlocked>): ReturnType<typeof setTempTtlHoursUnlocked> =>
-  withLock(args[0] + ':temp', () => setTempTtlHoursUnlocked(...args))
-
-export const trackTemp = (...args: Parameters<typeof trackTempUnlocked>): ReturnType<typeof trackTempUnlocked> =>
-  withLock(args[0] + ':temp', () => trackTempUnlocked(...args))
-
-export const dropTempPath = (...args: Parameters<typeof dropTempPathUnlocked>): ReturnType<typeof dropTempPathUnlocked> =>
-  withLock(args[0] + ':temp', () => dropTempPathUnlocked(...args))
-
-export const rewriteTempPath = (...args: Parameters<typeof rewriteTempPathUnlocked>): ReturnType<typeof rewriteTempPathUnlocked> =>
-  withLock(args[0] + ':temp', () => rewriteTempPathUnlocked(...args))
-
-export const moveIntoTemp = (...args: Parameters<typeof moveIntoTempUnlocked>): ReturnType<typeof moveIntoTempUnlocked> =>
-  withLock(args[0] + ':temp', () => moveIntoTempUnlocked(...args))
-
-export const purgeExpiredTemp = (...args: Parameters<typeof purgeExpiredTempUnlocked>): ReturnType<typeof purgeExpiredTempUnlocked> =>
-  withLock(args[0] + ':temp', () => purgeExpiredTempUnlocked(...args))

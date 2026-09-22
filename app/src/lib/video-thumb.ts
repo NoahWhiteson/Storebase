@@ -25,7 +25,6 @@ export function cachedThumb(url: string): string | null {
 }
 
 function remember(url: string, data: string): void {
-  if (memory.size >= 150) memory.delete(memory.keys().next().value!)
   memory.set(url, data)
   try {
     sessionStorage.setItem(storageKey(url), data)
@@ -126,7 +125,6 @@ function grabFrame(url: string): Promise<string> {
     video.addEventListener('loadeddata', () => {
       const duration = Number.isFinite(video.duration) ? video.duration : 0
       const t = duration > 0.4 ? Math.min(1, duration * 0.08) : 0
-      if (t === 0) { done(); return }
       const onSeeked = () => {
         video.removeEventListener('seeked', onSeeked)
         done()

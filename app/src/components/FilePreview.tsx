@@ -71,29 +71,10 @@ export function FilePreview({
     setText(null)
     setError(null)
     setTruncated(false)
-    const controller = new AbortController()
-    void fetch(src, { credentials: 'include', signal: controller.signal, headers: { Range: `bytes=0-${TEXT_CAP}` } })
+    void fetch(src, { credentials: 'include' })
       .then(async (res) => {
-        if (res.status === 416 && res.headers.get('content-range') === 'bytes */0') {
-          if (!gone) { setText(''); setDraft('') }
-          return
-        }
         if (!res.ok) throw new Error('Could not load file')
-        // Bound reads even when a remote store ignores Range.
-        const reader = res.body?.getReader()
-        if (!reader) throw new Error('Empty file response')
-        const bytes = new Uint8Array(TEXT_CAP + 1)
-        let length = 0
-        try {
-          while (length < bytes.length) {
-            const { value, done } = await reader.read()
-            if (done) break
-            const take = Math.min(value.length, bytes.length - length)
-            bytes.set(value.subarray(0, take), length)
-            length += take
-          }
-        } finally { await reader.cancel(); reader.releaseLock() }
-        const buf = bytes.slice(0, length).buffer
+        const buf = await res.arrayBuffer()
         const slice = buf.byteLength > TEXT_CAP ? buf.slice(0, TEXT_CAP) : buf
         const decoded = new TextDecoder('utf-8', { fatal: false }).decode(slice)
         if (gone) return
@@ -106,7 +87,6 @@ export function FilePreview({
       })
     return () => {
       gone = true
-      controller.abort()
     }
   }, [kind, src])
 

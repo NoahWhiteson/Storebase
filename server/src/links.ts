@@ -1,7 +1,5 @@
-import { withLock } from './concurrency.ts'
-import { atomicWriteFile } from './atomic-json.ts'
 import { randomBytes } from 'node:crypto'
-import { readFile } from 'node:fs/promises'
+import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { ServerConfig } from './config.ts'
 import { entryAt, listPath, openDownload, resolveSafe } from './storage.ts'
@@ -47,7 +45,7 @@ async function loadAll(config: ServerConfig): Promise<LinkRecord[]> {
 }
 
 async function saveAll(config: ServerConfig, links: LinkRecord[]): Promise<void> {
-  await atomicWriteFile(filePath(config), `${JSON.stringify({ links }, null, 2)}\n`)
+  await writeFile(filePath(config), `${JSON.stringify({ links }, null, 2)}\n`)
 }
 
 function covers(sharePath: string, relPath: string): boolean {
@@ -121,7 +119,7 @@ export async function pathHasLink(config: ServerConfig, ownerId: string, path: s
   return links.some((link) => link.ownerId === ownerId && covers(link.path, path))
 }
 
-async function ensureLinkUnlocked(
+export async function ensureLink(
   config: ServerConfig,
   owner: UserRecord,
   path: string,
@@ -155,7 +153,7 @@ async function ensureLinkUnlocked(
   return created
 }
 
-async function deleteLinkUnlocked(config: ServerConfig, actor: UserRecord, id: string): Promise<void> {
+export async function deleteLink(config: ServerConfig, actor: UserRecord, id: string): Promise<void> {
   const links = await loadAll(config)
   const found = links.find((link) => link.id === id)
   if (!found) throw new LinkError('Link not found', 404)
@@ -166,13 +164,13 @@ async function deleteLinkUnlocked(config: ServerConfig, actor: UserRecord, id: s
   )
 }
 
-async function dropLinksForPathUnlocked(config: ServerConfig, ownerId: string, path: string): Promise<void> {
+export async function dropLinksForPath(config: ServerConfig, ownerId: string, path: string): Promise<void> {
   const links = await loadAll(config)
   const next = links.filter((link) => !(link.ownerId === ownerId && covers(path, link.path)))
   if (next.length !== links.length) await saveAll(config, next)
 }
 
-async function rewriteLinksUnlocked(config: ServerConfig, ownerId: string, from: string, to: string): Promise<void> {
+export async function rewriteLinks(config: ServerConfig, ownerId: string, from: string, to: string): Promise<void> {
   const links = await loadAll(config)
   let changed = false
   const next = links.map((link) => {
@@ -246,15 +244,3 @@ export async function openPublicFile(config: ServerConfig, token: string, sub = 
   if (target.type === 'folder') throw new LinkError('Cannot download a folder', 400)
   return openDownload(root, rel)
 }
-
-export const ensureLink = (...args: Parameters<typeof ensureLinkUnlocked>): ReturnType<typeof ensureLinkUnlocked> =>
-  withLock(args[0].dataDir + ':links', () => ensureLinkUnlocked(...args))
-
-export const deleteLink = (...args: Parameters<typeof deleteLinkUnlocked>): ReturnType<typeof deleteLinkUnlocked> =>
-  withLock(args[0].dataDir + ':links', () => deleteLinkUnlocked(...args))
-
-export const dropLinksForPath = (...args: Parameters<typeof dropLinksForPathUnlocked>): ReturnType<typeof dropLinksForPathUnlocked> =>
-  withLock(args[0].dataDir + ':links', () => dropLinksForPathUnlocked(...args))
-
-export const rewriteLinks = (...args: Parameters<typeof rewriteLinksUnlocked>): ReturnType<typeof rewriteLinksUnlocked> =>
-  withLock(args[0].dataDir + ':links', () => rewriteLinksUnlocked(...args))
