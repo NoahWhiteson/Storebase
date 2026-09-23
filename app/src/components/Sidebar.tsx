@@ -32,15 +32,12 @@ import {
   X,
 } from 'lucide-react'
 
-const libraryNav: { id: SectionId; label: string; icon: typeof Home }[] = [
+const nav: { id: SectionId; label: string; icon: typeof Home }[] = [
   { id: 'home', label: 'Home', icon: Home },
   { id: 'my-drive', label: 'My files', icon: HardDrive },
   { id: 'shared', label: 'Shared with me', icon: Users },
   { id: 'recent', label: 'Recent', icon: Clock },
   { id: 'starred', label: 'Starred', icon: Star },
-]
-
-const manageNav: { id: SectionId; label: string; icon: typeof Home }[] = [
   { id: 'temp', label: 'Temp', icon: Timer },
   { id: 'spam', label: 'Spam', icon: AlertTriangle },
   { id: 'trash', label: 'Trash', icon: Trash2 },
@@ -80,7 +77,7 @@ export function Sidebar({
   const usedPct = Math.min(100, Math.round((usedBytes / quotaBytes) * 100))
 
   const body = (
-    <div className="flex h-full w-[256px] shrink-0 flex-col border-r border-white/[0.07] bg-[#1a1a1a]">
+    <div className="flex h-full w-[256px] shrink-0 flex-col bg-[#1a1a1a]">
       <div className="flex items-center justify-between px-4 pt-3 pb-1 md:hidden">
         <div className="flex items-center gap-2.5">
           <StorebaseLogo className="size-7" />
@@ -91,10 +88,10 @@ export function Sidebar({
         </Button>
       </div>
 
-      <div className="px-3 pt-3 pb-4">
+      <div className="px-4 pt-2 pb-3">
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <button className="flex h-11 w-full items-center gap-3 rounded-xl bg-white px-4 text-sm font-semibold text-[#1a1a1a] shadow-sm transition-[background-color,transform] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] hover:bg-[#f2f2f2] active:scale-[0.98]">
+            <button className="flex h-12 items-center gap-3 rounded-2xl bg-white px-5 text-[15px] font-medium text-[#1a1a1a] transition hover:bg-[#f2f2f2]">
               <Plus className="size-5" strokeWidth={2} />
               New
             </button>
@@ -127,10 +124,8 @@ export function Sidebar({
       </div>
 
       <ScrollArea className="flex-1 px-3">
-        <nav className="flex flex-col py-1">
-          <p className="mb-1.5 px-3 text-[10px] font-semibold tracking-[0.12em] text-[#777] uppercase">Library</p>
-          <div className="flex flex-col gap-0.5">
-          {libraryNav.map((item) => {
+        <nav className="flex flex-col gap-0.5 py-1">
+          {nav.map((item) => {
             const Icon = item.icon
             const active = !terminalsOpen && section === item.id
             return (
@@ -139,9 +134,9 @@ export function Sidebar({
                 type="button"
                 onClick={() => onSection(item.id)}
                 className={cn(
-                  'flex h-10 items-center gap-3 rounded-xl px-3 text-sm font-medium transition-[background-color,color,transform] duration-150 active:scale-[0.98]',
+                  'flex h-10 items-center gap-3 rounded-full px-4 text-sm font-medium transition-colors',
                   active
-                    ? 'bg-white/[0.09] text-white shadow-[inset_0_0_0_1px_rgb(255_255_255/0.04)]'
+                    ? 'bg-white/10 text-white'
                     : 'text-[#b3b3b3] hover:bg-white/5 hover:text-white',
                 )}
               >
@@ -150,37 +145,12 @@ export function Sidebar({
               </button>
             )
           })}
-          </div>
-          <p className="mt-5 mb-1.5 px-3 text-[10px] font-semibold tracking-[0.12em] text-[#777] uppercase">Manage</p>
-          <div className="flex flex-col gap-0.5">
-          {manageNav.map((item) => {
-            const Icon = item.icon
-            const active = !terminalsOpen && section === item.id
-            return (
-              <button
-                key={item.id}
-                type="button"
-                onClick={() => onSection(item.id)}
-                className={cn(
-                  'flex h-10 items-center gap-3 rounded-xl px-3 text-sm font-medium transition-[background-color,color,transform] duration-150 active:scale-[0.98]',
-                  active
-                    ? 'bg-white/[0.09] text-white shadow-[inset_0_0_0_1px_rgb(255_255_255/0.04)]'
-                    : 'text-[#b3b3b3] hover:bg-white/5 hover:text-white',
-                )}
-              >
-                <Icon className="size-[18px]" strokeWidth={active ? 2 : 1.75} />
-                {item.label}
-              </button>
-            )
-          })}
-          </div>
-          <div className="my-3 h-px bg-white/[0.06]" />
           {terminalsEnabled ? (
             <button
               type="button"
               onClick={onOpenTerminals}
               className={cn(
-                'flex h-10 items-center gap-3 rounded-xl px-3 text-sm font-medium transition-[background-color,color,transform] duration-150 active:scale-[0.98]',
+                'flex h-10 items-center gap-3 rounded-full px-4 text-sm font-medium transition-colors',
                 terminalsOpen
                   ? 'bg-white/10 text-white'
                   : 'text-[#b3b3b3] hover:bg-white/5 hover:text-white',
@@ -193,7 +163,7 @@ export function Sidebar({
           <button
             type="button"
             onClick={onOpenSettings}
-            className="flex h-10 items-center gap-3 rounded-xl px-3 text-sm font-medium text-[#b3b3b3] transition-[background-color,color,transform] duration-150 hover:bg-white/5 hover:text-white active:scale-[0.98]"
+            className="mt-2 flex h-10 items-center gap-3 rounded-full px-4 text-sm font-medium text-[#b3b3b3] hover:bg-white/5 hover:text-white"
           >
             <Settings className="size-[18px]" strokeWidth={1.75} />
             Settings
@@ -201,12 +171,12 @@ export function Sidebar({
         </nav>
       </ScrollArea>
 
-      <div className="border-t border-white/[0.06] px-4 py-4">
+      <div className="px-5 py-4">
         <div className="mb-2 flex items-center gap-3 text-sm font-medium text-[#b3b3b3]">
           <HardDrive className="size-[18px]" />
           Storage
         </div>
-        <Progress value={usedPct} className="h-1.5 bg-white/10" />
+        <Progress value={usedPct} className="h-1 bg-white/10" />
         <p className="mt-2 text-xs text-[#8d8d8d]">
           {formatBytes(usedBytes)} of {formatBytes(quotaBytes)} used
         </p>

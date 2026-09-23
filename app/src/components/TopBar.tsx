@@ -17,8 +17,7 @@ import {
 } from '@/components/ui/tooltip'
 import { cn } from 'cn'
 import type { SettingsSection } from '@/components/Settings'
-import { Grid2x2, List, Menu, Search, Settings, SquareTerminal, X } from 'lucide-react'
-import { useEffect, useRef } from 'react'
+import { Grid2x2, List, Menu, Search, Settings, SquareTerminal } from 'lucide-react'
 
 type TopBarProps = {
   search: string
@@ -53,21 +52,8 @@ export function TopBar({
   onOpenTerminals,
   onSignOut,
 }: TopBarProps) {
-  const searchRef = useRef<HTMLInputElement>(null)
-
-  useEffect(() => {
-    const focusSearch = (event: KeyboardEvent) => {
-      const target = event.target as HTMLElement | null
-      if (event.key !== '/' || settingsOpen || terminalsOpen || target?.matches('input, textarea, [contenteditable="true"]')) return
-      event.preventDefault()
-      searchRef.current?.focus()
-    }
-    window.addEventListener('keydown', focusSearch)
-    return () => window.removeEventListener('keydown', focusSearch)
-  }, [settingsOpen, terminalsOpen])
-
   return (
-    <header className="flex h-16 shrink-0 items-center border-b border-white/[0.07] bg-[#1a1a1a]">
+    <header className="flex h-16 shrink-0 items-center bg-[#1a1a1a]">
       <div className="flex h-full w-auto shrink-0 items-center gap-2 px-3 md:w-[256px] md:gap-2.5 md:px-4">
         <Button
           variant="ghost"
@@ -78,8 +64,8 @@ export function TopBar({
         >
           <Menu />
         </Button>
-        <StorebaseLogo className="size-7" />
-        <span className="text-[19px] font-semibold tracking-[-0.025em] text-white">Storebase</span>
+        <StorebaseLogo className="size-8" />
+        <span className="text-[20px] font-medium tracking-tight text-white">Storebase</span>
       </div>
 
       <div className="flex h-full min-w-0 flex-1 items-center gap-2 px-3 md:gap-3 md:pr-4 md:pl-2">
@@ -88,32 +74,19 @@ export function TopBar({
         ) : terminalsOpen ? (
           <div className="min-w-0 flex-1 text-[15px] font-medium text-white">Terminal</div>
         ) : (
-          <div className="relative flex h-11 min-w-0 max-w-3xl flex-1 items-center">
+          <div className="relative flex h-12 min-w-0 flex-1 items-center">
             <Search className="pointer-events-none absolute left-4 size-[18px] text-[#9a9a9a]" />
             <Input
-              ref={searchRef}
               value={search}
               onChange={(e) => onSearch(e.target.value)}
               placeholder="Search in Storebase"
-              className="h-11 rounded-xl border border-white/[0.06] bg-[#242424] pr-16 pl-11 text-sm shadow-none placeholder:text-[#8d8d8d] outline-none focus-visible:border-white/15 focus-visible:bg-[#2a2a2a] focus-visible:ring-2 focus-visible:ring-white/10"
+              className="h-12 rounded-full border-0 bg-[#242424] pl-12 text-[15px] shadow-none placeholder:text-[#8d8d8d] outline-none focus-visible:bg-[#2a2a2a] focus-visible:ring-0"
             />
-            {search ? (
-              <button
-                type="button"
-                className="absolute right-2 flex size-7 items-center justify-center rounded-lg text-[#8d8d8d] transition-colors hover:bg-white/10 hover:text-white"
-                onClick={() => onSearch('')}
-                aria-label="Clear search"
-              >
-                <X className="size-4" />
-              </button>
-            ) : (
-              <kbd className="pointer-events-none absolute right-3 rounded-md border border-white/10 bg-white/[0.04] px-1.5 py-0.5 text-[11px] text-[#777]">/</kbd>
-            )}
           </div>
         )}
 
-        <div className="ml-auto flex shrink-0 items-center gap-0.5">
-          {!settingsOpen && !terminalsOpen ? <Tooltip>
+        <div className="flex shrink-0 items-center gap-0.5">
+          <Tooltip>
             <TooltipTrigger asChild>
               <Button
                 variant="ghost"
@@ -126,7 +99,7 @@ export function TopBar({
               </Button>
             </TooltipTrigger>
             <TooltipContent>{view === 'grid' ? 'List view' : 'Grid view'}</TooltipContent>
-          </Tooltip> : null}
+          </Tooltip>
           {terminalsEnabled ? (
             <Tooltip>
               <TooltipTrigger asChild>
@@ -153,7 +126,7 @@ export function TopBar({
           </Tooltip>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <button className="ml-1 rounded-full outline-none transition-transform duration-150 active:scale-[0.96] focus-visible:ring-2 focus-visible:ring-white/30">
+              <button className="ml-1 rounded-full outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-white/30">
                 <Avatar>
                   {avatarUrl ? <AvatarImage src={avatarUrl} alt="" className="object-cover" /> : null}
                   <AvatarFallback className="bg-[#2a2a2a] text-sm font-medium text-white">
@@ -169,7 +142,7 @@ export function TopBar({
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
               <DropdownMenuItem onSelect={() => onOpenSettings('account')}>Account</DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => onOpenSettings('my-storage')}>Storage</DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => onOpenSettings('storage')}>Storage</DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem onSelect={onSignOut}>Sign out</DropdownMenuItem>
             </DropdownMenuContent>
