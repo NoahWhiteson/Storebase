@@ -361,7 +361,9 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
   }
 
   function openSettings(section: SettingsSection = 'account') {
-    const next = account.role === 'admin' || section === 'account' ? section : 'account'
+    const next = account.role === 'admin' || ['account', 'devices', 'general', 'my-storage', 'virus'].includes(section)
+      ? section
+      : 'account'
     setSettingsSection(next)
     setSettingsOpen(true)
     setTerminalsOpen(false)
@@ -981,7 +983,7 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
           }}
           onCreateFile={(kind) => void createUntitled(kind)}
           onUpload={() => uploadRef.current?.click()}
-          onOpenSettings={() => openSettings(account.role === 'admin' ? 'storage' : 'account')}
+          onOpenSettings={() => openSettings('my-storage')}
           onOpenTerminals={openTerminals}
         />
         {terminalsOpen ? (

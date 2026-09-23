@@ -5,7 +5,7 @@ export function StorebaseLogo({ className }: { className?: string }) {
     <img
       src="/logo.png"
       alt=""
-      className={cn('object-contain mix-blend-lighten', className)}
+      className={cn('storebase-logo object-contain mix-blend-lighten', className)}
     />
   )
 }

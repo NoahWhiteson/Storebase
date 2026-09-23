@@ -19,6 +19,24 @@ export type StorageBackend = {
 
 export type SettingsUser = PublicUser & { usedBytes: number; quotaBytes: number | null }
 
+export type StorageCategoryId =
+  | 'media'
+  | 'executables'
+  | 'archives'
+  | 'documents'
+  | 'code'
+  | 'temporary'
+  | 'trash'
+  | 'storebase'
+  | 'other'
+
+export type UserStorageBreakdown = {
+  totalBytes: number
+  scannedAt: string | null
+  detailed: boolean
+  categories: Array<{ id: StorageCategoryId; bytes: number; files: number }>
+}
+
 export type DiagnosticsPayload = {
   generatedAt: string
   process: {
@@ -117,6 +135,7 @@ export type SettingsPayload = {
   virusInstall?: VirusInstallProgress
   domain?: DomainInfo
   diagnostics?: DiagnosticsPayload
+  userStorage?: UserStorageBreakdown
 }
 
 export type DnsRecord = { type: 'A' | 'AAAA'; host: string; value: string; ttl: number }
@@ -140,6 +159,11 @@ export type DomainInfo = {
 
 export async function fetchSettings(section: string = 'account'): Promise<SettingsPayload> {
   return api<SettingsPayload>(`/api/settings?section=${encodeURIComponent(section)}`)
+}
+
+export async function scanUserStorage(): Promise<UserStorageBreakdown> {
+  const res = await api<{ userStorage: UserStorageBreakdown }>('/api/settings/storage-scan', { method: 'POST' })
+  return res.userStorage
 }
 
 export async function saveSettings(body: {

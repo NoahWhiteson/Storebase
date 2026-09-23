@@ -25,6 +25,7 @@ import {
   saveAccount,
   saveDomain,
   saveSettings,
+  scanUserStorage,
   setNetworkInbound,
   setStoreOrder,
   testStorageBackend,
@@ -35,19 +36,28 @@ import {
   type PairingInfo,
   type SettingsPayload,
   type SettingsUser,
+  type StorageCategoryId,
+  type UserStorageBreakdown,
 } from '@/lib/settings'
 import type { ThemePreference } from '@/lib/theme'
 import { cn } from 'cn'
 import {
   Activity,
   AppWindow,
+  Archive,
   ArrowLeft,
+  Boxes,
+  ChartPie,
   ChevronDown,
   ChevronRight,
   ChevronUp,
   Globe,
   HardDrive,
+  Images,
   KeyRound,
+  Code2,
+  FileText,
+  Package,
   RefreshCw,
   Search,
   Server,
@@ -55,6 +65,7 @@ import {
   ShieldCheck,
   SlidersHorizontal,
   SquareTerminal,
+  Trash2,
   UserRound,
   Users,
 } from 'lucide-react'
@@ -67,6 +78,7 @@ export type SettingsSection =
   | 'account'
   | 'devices'
   | 'general'
+  | 'my-storage'
   | 'virus'
   | 'server'
   | 'storage'
@@ -95,6 +107,7 @@ const settingsGroups: { id: string; label: string; items: SettingsNavItem[] }[] 
     items: [
       { id: 'general', label: 'General', icon: SlidersHorizontal, keywords: 'preferences operations notifications view' },
       { id: 'account', label: 'Account', icon: UserRound, keywords: 'profile name email password quota' },
+      { id: 'my-storage', label: 'Your storage', icon: ChartPie, keywords: 'storage usage space media zip archive temporary cleanup scan' },
       { id: 'devices', label: 'App', icon: AppWindow, keywords: 'device pairing capture desktop macos' },
     ],
   },
@@ -143,7 +156,7 @@ export function Settings({
   onToast: (message: string) => void
 }) {
   const [section, setSection] = useState<SettingsSection>(
-    account.role === 'admin' || ['account', 'devices', 'general', 'virus'].includes(initialSection)
+    account.role === 'admin' || ['account', 'devices', 'general', 'my-storage', 'virus'].includes(initialSection)
       ? initialSection
       : 'account',
   )
@@ -194,7 +207,7 @@ export function Settings({
   const admin = Boolean(data?.admin ?? account.role === 'admin')
 
   useEffect(() => {
-    setSection(admin || ['account', 'devices', 'general', 'virus'].includes(initialSection) ? initialSection : 'account')
+    setSection(admin || ['account', 'devices', 'general', 'my-storage', 'virus'].includes(initialSection) ? initialSection : 'account')
   }, [admin, initialSection])
 
   return (
@@ -247,6 +260,9 @@ export function Settings({
         {section === 'devices' ? <DevicesPanel onToast={onToast} /> : null}
         {!loading && data && section === 'general' ? (
           <GeneralPanel data={data} admin={admin} onSaved={reload} onAccount={onAccount} onPlatform={onPlatform} onToast={onToast} />
+        ) : null}
+        {!loading && data && section === 'my-storage' ? (
+          <UserStoragePanel data={data} onToast={onToast} />
         ) : null}
         {!loading && data && section === 'virus' ? (
           <VirusPanel data={data} admin={admin} onSaved={reload} onAccount={onAccount} onToast={onToast} />
@@ -435,6 +451,131 @@ function MetricCard({ label, value, detail }: { label: string; value: string; de
       <p className="text-xs font-medium tracking-wide text-[#8d8d8d] uppercase">{label}</p>
       <p className="mt-1 text-xl font-medium tracking-tight text-white tabular-nums">{value}</p>
       {detail ? <p className="mt-1 text-xs text-[#777]">{detail}</p> : null}
+    </div>
+  )
+}
+
+const storageCategoryView: Record<StorageCategoryId, { label: string; color: string; icon: typeof HardDrive; tip: string }> = {
+  media: { label: 'Media', color: '#78d9ec', icon: Images, tip: 'Photos, video, and audio' },
+  executables: { label: 'Executables', color: '#c4b5fd', icon: AppWindow, tip: 'Apps, installers, and packages' },
+  archives: { label: 'ZIPs & archives', color: '#fdd663', icon: Archive, tip: 'Compressed files and disk images' },
+  documents: { label: 'Documents', color: '#8ab4f8', icon: FileText, tip: 'Documents, PDFs, and spreadsheets' },
+  code: { label: 'Code', color: '#81c995', icon: Code2, tip: 'Projects and source files' },
+  temporary: { label: 'Temporary', color: '#ff9f6e', icon: Package, tip: 'Files in your temporary area' },
+  trash: { label: 'Trash', color: '#f28b82', icon: Trash2, tip: 'Deleted files that can be emptied' },
+  storebase: { label: 'Storebase', color: '#34a853', icon: HardDrive, tip: 'Versions, indexes, and Storebase data' },
+  other: { label: 'Other', color: '#9aa0a6', icon: Boxes, tip: 'Everything outside these groups' },
+}
+
+function UserStoragePanel({ data, onToast }: { data: SettingsPayload; onToast: (message: string) => void }) {
+  const [breakdown, setBreakdown] = useState<UserStorageBreakdown | undefined>(data.userStorage)
+  const [scanning, setScanning] = useState(false)
+
+  async function scan() {
+    setScanning(true)
+    try {
+      const next = await scanUserStorage()
+      setBreakdown(next)
+      onToast('Storage scan complete')
+    } catch (error) {
+      onToast(error instanceof Error ? error.message : 'Could not scan storage')
+    } finally {
+      setScanning(false)
+    }
+  }
+
+  const categories = (breakdown?.categories ?? []).filter((category) => category.bytes > 0)
+  const measuredBytes = Math.max(1, categories.reduce((sum, category) => sum + category.bytes, 0))
+  const limit = data.account.reservedBytes
+  const available = Math.max(0, limit - data.account.usedBytes)
+  const largest = categories.reduce<(typeof categories)[number] | undefined>(
+    (current, category) => !current || category.bytes > current.bytes ? category : current,
+    undefined,
+  )
+
+  return (
+    <div className="max-w-4xl">
+      <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-medium tracking-tight text-white">Your storage</h1>
+          <p className="mt-1 text-sm text-[#8d8d8d]">See what uses your space. The detailed scan reads only files in your account.</p>
+        </div>
+        <Button
+          type="button"
+          className="h-10 rounded-full bg-white px-4 text-[#1a1a1a] hover:bg-[#f2f2f2]"
+          disabled={scanning}
+          onClick={() => void scan()}
+        >
+          <RefreshCw className={cn('size-4', scanning && 'animate-spin')} />
+          {scanning ? 'Scanning your files…' : breakdown?.detailed ? 'Scan again' : 'Scan my files'}
+        </Button>
+      </div>
+
+      <div className="mb-6 grid gap-3 sm:grid-cols-3">
+        <MetricCard label="Used" value={formatBytes(data.account.usedBytes)} detail={`${Math.min(100, Math.round((data.account.usedBytes / Math.max(1, limit)) * 100))}% of your limit`} />
+        <MetricCard label="Available" value={formatBytes(available)} detail={`${formatBytes(limit)} total`} />
+        <MetricCard
+          label="Largest category"
+          value={largest ? storageCategoryView[largest.id].label : 'Waiting for scan'}
+          detail={largest ? formatBytes(largest.bytes) : 'Run a scan for a breakdown'}
+        />
+      </div>
+
+      <SettingsCard
+        title="Space by file type"
+        hint={breakdown?.scannedAt ? `Last scanned ${formatDate(breakdown.scannedAt)}` : 'Run your first scan to sort usage into categories.'}
+      >
+        <div className="mb-5 flex h-3 w-full overflow-hidden rounded-full bg-white/[0.08]" aria-label="Storage usage by category">
+          {categories.map((category) => (
+            <div
+              key={category.id}
+              title={`${storageCategoryView[category.id].label}: ${formatBytes(category.bytes)}`}
+              style={{ width: `${(category.bytes / measuredBytes) * 100}%`, backgroundColor: storageCategoryView[category.id].color }}
+            />
+          ))}
+        </div>
+
+        {breakdown?.detailed && categories.length ? (
+          <div className="grid gap-2 sm:grid-cols-2">
+            {categories.map((category) => {
+              const view = storageCategoryView[category.id]
+              const Icon = view.icon
+              return (
+                <div key={category.id} className="flex items-center gap-3 rounded-xl border border-white/[0.07] bg-white/[0.025] p-3">
+                  <span className="flex size-9 shrink-0 items-center justify-center rounded-lg" style={{ color: view.color, backgroundColor: `${view.color}1f` }}>
+                    <Icon className="size-4.5" />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-baseline justify-between gap-3">
+                      <p className="truncate text-sm font-medium text-white">{view.label}</p>
+                      <p className="shrink-0 text-sm font-medium text-white tabular-nums">{formatBytes(category.bytes)}</p>
+                    </div>
+                    <p className="mt-0.5 truncate text-xs text-[#8d8d8d]">{category.files.toLocaleString()} files · {view.tip}</p>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        ) : breakdown?.detailed ? (
+          <div className="rounded-xl border border-dashed border-white/[0.12] px-4 py-7 text-center">
+            <HardDrive className="mx-auto mb-2 size-6 text-[#8d8d8d]" />
+            <p className="text-sm font-medium text-white">Your storage is empty</p>
+            <p className="mt-1 text-xs text-[#8d8d8d]">This account has no files taking up measurable space.</p>
+          </div>
+        ) : (
+          <div className="rounded-xl border border-dashed border-white/[0.12] px-4 py-7 text-center">
+            <ChartPie className="mx-auto mb-2 size-6 text-[#8d8d8d]" />
+            <p className="text-sm font-medium text-white">Your total is ready</p>
+            <p className="mt-1 text-xs text-[#8d8d8d]">The category breakdown is kept out of the normal settings load so this page stays quick.</p>
+          </div>
+        )}
+      </SettingsCard>
+
+      {largest && breakdown?.detailed ? (
+        <p className="mt-4 text-sm text-[#8d8d8d]">
+          Start with <span className="font-medium text-white">{storageCategoryView[largest.id].label}</span>. It uses {formatBytes(largest.bytes)}, or {Math.round((largest.bytes / measuredBytes) * 100)}% of the scanned space.
+        </p>
+      ) : null}
     </div>
   )
 }

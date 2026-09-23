@@ -23,6 +23,7 @@ import {
 } from './network.ts'
 import { cachedFolderSize, quotaCacheStats } from './quota.ts'
 import { diagnosticsSnapshot, recordSettingsTiming } from './diagnostics.ts'
+import { cachedStorageBreakdown, scanUserStorage } from './storage-analysis.ts'
 import { issueSession, rotateSecret } from './session.ts'
 import { updateStatus } from './update.ts'
 import { publicDomain } from './domain.ts'
@@ -101,11 +102,15 @@ export function mountAdmin(app: Hono<{ Variables: Vars }>, config: ServerConfig,
       nodeReservedBytes: manifest.reservedBytes,
       virusScannerAvailable,
     }
+    const userStorage = section === 'my-storage'
+      ? await cachedStorageBreakdown(root, usedBytes)
+      : undefined
     if (user.role !== 'admin') {
       return c.json({
         admin: false,
         account,
         platform: { nodeName: platform.nodeName, defaultView: platform.defaultView, virusScanPolicy: platform.virusScanPolicy },
+        ...(userStorage ? { userStorage } : {}),
       })
     }
     const response: Record<string, unknown> = {
@@ -128,6 +133,7 @@ export function mountAdmin(app: Hono<{ Variables: Vars }>, config: ServerConfig,
     }
     const detailStarted = performance.now()
     const wants = (name: string) => !section || section === name
+    if (wants('my-storage')) response.userStorage = userStorage ?? await cachedStorageBreakdown(root, usedBytes)
     if (wants('virus')) response.virusInstall = virusInstallSnapshot()
     if (wants('server')) response.server = {
         liveHost: config.host,
@@ -181,6 +187,10 @@ export function mountAdmin(app: Hono<{ Variables: Vars }>, config: ServerConfig,
     })
     c.header('Server-Timing', `base;dur=${baseMs.toFixed(1)}, detail;dur=${detailMs.toFixed(1)}`)
     return c.json(response)
+  })
+
+  app.post('/api/settings/storage-scan', async (c) => {
+    return c.json({ userStorage: await scanUserStorage(c.get('root')) })
   })
 
   app.patch('/api/settings', async (c) => {
