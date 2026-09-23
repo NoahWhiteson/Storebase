@@ -20,6 +20,8 @@ export type VirusScanResult = {
 
 type ScanStore = { results: Record<string, VirusScanResult> }
 const writes = new Map<string, Promise<void>>()
+const scanCache = new Map<string, { at: number; value: ScanStore }>()
+const SCAN_CACHE_MS = 1000
 
 let scannerCache: boolean | null = null
 let scannerCacheAt = 0
@@ -31,23 +33,31 @@ function cleanPath(path: string): string {
 }
 
 async function load(root: string): Promise<ScanStore> {
+  const hit = scanCache.get(root)
+  if (hit && Date.now() - hit.at < SCAN_CACHE_MS) return hit.value
   try {
     const parsed = JSON.parse(await readFile(join(root, SCAN_FILE), 'utf8')) as Partial<ScanStore>
-    return { results: parsed.results ?? {} }
+    const store = { results: parsed.results ?? {} }
+    scanCache.set(root, { at: Date.now(), value: store })
+    return store
   } catch {
-    return { results: {} }
+    const store = { results: {} }
+    scanCache.set(root, { at: Date.now(), value: store })
+    return store
   }
 }
 
 async function mutate(root: string, update: (store: ScanStore) => boolean): Promise<void> {
   const previous = writes.get(root) ?? Promise.resolve()
   const next = previous.catch(() => {}).then(async () => {
-    const store = await load(root)
+    const current = await load(root)
+    const store = { results: { ...current.results } }
     if (!update(store)) return
     const target = join(root, SCAN_FILE)
     const temp = `${target}.${process.pid}.${Date.now()}.tmp`
     await writeFile(temp, `${JSON.stringify(store, null, 2)}\n`)
     await rename(temp, target)
+    scanCache.set(root, { at: Date.now(), value: store })
   })
   writes.set(root, next)
   try { await next } finally { if (writes.get(root) === next) writes.delete(root) }

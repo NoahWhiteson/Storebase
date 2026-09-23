@@ -29,6 +29,7 @@ import {
   setStoreOrder,
   testStorageBackend,
   clearDomain,
+  type DiagnosticsPayload,
   type DomainInfo,
   type PairingInfo,
   type SettingsPayload,
@@ -36,6 +37,7 @@ import {
 } from '@/lib/settings'
 import { cn } from 'cn'
 import {
+  Activity,
   ArrowLeft,
   ChevronDown,
   ChevronRight,
@@ -71,6 +73,7 @@ export type SettingsSection =
   | 'security'
   | 'terminals'
   | 'domain'
+  | 'diagnostics'
 
 type Account = { id: string; name: string; email: string; role: 'admin' | 'user'; virusScanEnabled?: boolean; operationNotifications?: boolean }
 
@@ -114,7 +117,10 @@ const settingsGroups: { id: string; label: string; items: SettingsNavItem[] }[] 
   {
     id: 'maintenance',
     label: 'Maintenance',
-    items: [{ id: 'updates', label: 'Updates', icon: RefreshCw, admin: true, keywords: 'version upgrade release automatic' }],
+    items: [
+      { id: 'updates', label: 'Updates', icon: RefreshCw, admin: true, keywords: 'version upgrade release automatic' },
+      { id: 'diagnostics', label: 'Diagnostics', icon: Activity, admin: true, keywords: 'performance speed timing debug memory requests cache slow' },
+    ],
   },
 ]
 
@@ -173,6 +179,12 @@ export function Settings({
   }
 
   useEffect(() => {
+    if (section === 'devices') {
+      loadSequence.current += 1
+      setLoading(false)
+      setError(null)
+      return
+    }
     void loadSection(section)
   }, [section])
 
@@ -261,6 +273,9 @@ export function Settings({
           <UpdatesPanel data={data} onSaved={reload} onToast={onToast} />
         ) : null}
         {!loading && data && admin && section === 'security' ? <SecurityPanel onToast={onToast} /> : null}
+        {!loading && data && admin && section === 'diagnostics' ? (
+          <DiagnosticsPanel data={data.diagnostics} onSaved={reload} onToast={onToast} />
+        ) : null}
       </main>
     </div>
   )
@@ -387,6 +402,37 @@ function SettingsCard({ title, hint, children }: { title: string; hint: string; 
       <p className="mt-1 mb-4 text-xs leading-5 text-[#8d8d8d]">{hint}</p>
       {children}
     </section>
+  )
+}
+
+function SettingsTable({ headings, children, minWidth = 640 }: { headings: string[]; children: ReactNode; minWidth?: number }) {
+  return (
+    <div className="overflow-x-auto rounded-2xl border border-white/[0.08] bg-white/[0.025]">
+      <table className="w-full border-collapse text-left text-sm" style={{ minWidth }}>
+        <thead>
+          <tr className="border-b border-white/[0.08] bg-white/[0.035]">
+            {headings.map((heading) => (
+              <th key={heading} className="px-4 py-3 text-xs font-medium tracking-wide text-[#8d8d8d] uppercase">
+                {heading}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody className="[&_tr:last-child]:border-0">{children}</tbody>
+      </table>
+    </div>
+  )
+}
+
+const tableCellClass = 'border-b border-white/[0.06] px-4 py-3 align-middle text-[#e8e8e8]'
+
+function MetricCard({ label, value, detail }: { label: string; value: string; detail?: string }) {
+  return (
+    <div className="rounded-2xl border border-white/[0.08] bg-white/[0.035] px-4 py-4">
+      <p className="text-xs font-medium tracking-wide text-[#8d8d8d] uppercase">{label}</p>
+      <p className="mt-1 text-xl font-medium tracking-tight text-white tabular-nums">{value}</p>
+      {detail ? <p className="mt-1 text-xs text-[#777]">{detail}</p> : null}
+    </div>
   )
 }
 
@@ -874,21 +920,32 @@ function ServerPanel({
   }
 
   return (
-    <div className="max-w-lg">
+    <div className="max-w-3xl">
       <Heading title="Server" hint="Live process vs what the next restart will use." />
-      <Row label="Hostname" value={server.hostname} />
-      <Row label="Listening now" value={`${server.liveHost}:${server.livePort}`} />
-      <Row label="Data" value={server.dataDir} />
-      <Row label="Drive" value={server.driveDir} />
-      <Row label="Install" value={server.homeDir} />
-      <label className="mt-6 mb-3 block text-sm text-[#8d8d8d]">
-        Bind address
-        <Input className={`${fieldClass} mt-1.5`} value={bindHost} onChange={(e) => setBindHost(e.target.value)} />
-      </label>
-      <label className="mb-4 block text-sm text-[#8d8d8d]">
-        Port
-        <Input className={`${fieldClass} mt-1.5`} value={bindPort} onChange={(e) => setBindPort(e.target.value)} />
-      </label>
+      <SettingsTable headings={['Runtime', 'Value']} minWidth={480}>
+        {[
+          ['Hostname', server.hostname],
+          ['Listening now', `${server.liveHost}:${server.livePort}`],
+          ['Data', server.dataDir],
+          ['Drive', server.driveDir],
+          ['Install', server.homeDir],
+        ].map(([label, value]) => (
+          <tr key={label}>
+            <td className={`${tableCellClass} w-40 text-[#8d8d8d]`}>{label}</td>
+            <td className={`${tableCellClass} break-all font-mono text-xs`}>{value}</td>
+          </tr>
+        ))}
+      </SettingsTable>
+      <div className="mt-6 grid gap-3 sm:grid-cols-[1fr_160px]">
+        <label className="block text-sm text-[#8d8d8d]">
+          Bind address
+          <Input className={`${fieldClass} mt-1.5`} value={bindHost} onChange={(e) => setBindHost(e.target.value)} />
+        </label>
+        <label className="block text-sm text-[#8d8d8d]">
+          Port
+          <Input className={`${fieldClass} mt-1.5`} value={bindPort} onChange={(e) => setBindPort(e.target.value)} />
+        </label>
+      </div>
       {server.restartNeeded ? (
         <p className="mb-4 text-sm text-[#e8c07d]">Restart the Storebase node to pick up the new bind address.</p>
       ) : (
@@ -1189,11 +1246,12 @@ function StoragePanel({
   }
 
   return (
-    <div className="max-w-xl">
+    <div className="max-w-4xl">
       <Heading title="Storage" hint="Node-wide reserve. Admins set per-user caps under Users." />
-      <div className="mb-2 flex items-end gap-2">
-        <span className="text-[56px] leading-none font-medium tracking-tight tabular-nums">{gb >= 100 ? gb.toFixed(0) : gb.toFixed(1)}</span>
-        <span className="mb-1 text-xl text-[#8d8d8d]">GB</span>
+      <div className="mb-6 grid gap-3 sm:grid-cols-3">
+        <MetricCard label="Reserved" value={`${gb >= 100 ? gb.toFixed(0) : gb.toFixed(1)} GB`} />
+        <MetricCard label="Used" value={formatBytes(storage.poolUsedBytes)} />
+        <MetricCard label="Free on disk" value={formatBytes(storage.disk.freeBytes)} />
       </div>
       <input
         type="range"
@@ -1208,20 +1266,23 @@ function StoragePanel({
         {formatBytes(storage.poolUsedBytes)} used · {formatBytes(storage.disk.freeBytes)} free on disk
       </p>
       <Progress value={usedPct} className="mb-8 h-1 bg-white/10" />
-      <div className="mb-8 space-y-3">
-        {users.map((user) => (
-          <div key={user.id} className="flex items-center justify-between text-sm">
-            <span className="text-[#e8e8e8]">
-              {user.name}
-              <span className="text-[#8d8d8d]"> · {user.role}</span>
-            </span>
-            <span className="tabular-nums text-[#8d8d8d]">
-              {formatBytes(user.usedBytes)}
-              {user.quotaBytes ? ` / ${formatBytes(user.quotaBytes)}` : ' / node'}
-            </span>
-          </div>
-        ))}
-      </div>
+      {users.length ? (
+        <div className="mb-8">
+          <p className="mb-2 text-sm font-medium text-white">Usage by user</p>
+          <SettingsTable headings={['User', 'Role', 'Used', 'Limit']} minWidth={560}>
+            {users.map((user) => (
+              <tr key={user.id}>
+                <td className={`${tableCellClass} font-medium text-white`}>{user.name}</td>
+                <td className={`${tableCellClass} capitalize text-[#8d8d8d]`}>{user.role}</td>
+                <td className={`${tableCellClass} tabular-nums`}>{formatBytes(user.usedBytes)}</td>
+                <td className={`${tableCellClass} tabular-nums text-[#8d8d8d]`}>
+                  {user.quotaBytes ? formatBytes(user.quotaBytes) : 'Node default'}
+                </td>
+              </tr>
+            ))}
+          </SettingsTable>
+        </div>
+      ) : null}
       <Button className="h-11 rounded-full bg-white text-[#1a1a1a] hover:bg-[#f2f2f2]" disabled={busy} onClick={() => void save()}>
         {busy ? 'Saving…' : 'Save cap'}
       </Button>
@@ -1838,7 +1899,7 @@ function UsersPanel({
   }
 
   return (
-    <div className="max-w-3xl">
+    <div className="max-w-5xl">
       <Heading title="Users" hint="Each account gets its own drive. Set a GB cap per person, or leave blank for the node default." />
       <div className="mb-8 grid gap-2 sm:grid-cols-2">
         <Input className={fieldClass} placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} />
@@ -1884,44 +1945,50 @@ function UsersPanel({
         {busy ? 'Adding…' : 'Add user'}
       </Button>
 
-      <div className="space-y-2">
+      <SettingsTable headings={['User', 'Role', 'Storage', 'Quota', 'Created', 'Actions']} minWidth={1_020}>
         {users.map((user) => (
-          <div key={user.id} className="rounded-2xl bg-white/[0.04] px-4 py-3">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <div className="text-sm font-medium text-white">
-                  {user.name}
-                  {user.id === meId ? <span className="text-[#8d8d8d]"> · you</span> : null}
-                </div>
-                <div className="text-sm text-[#8d8d8d]">{user.email}</div>
-                <div className="mt-1 text-xs text-[#8d8d8d]">
-                  {user.role} · {formatBytes(user.usedBytes)}
-                  {user.quotaBytes ? ` of ${formatBytes(user.quotaBytes)}` : ' · node default'}
-                  {user.createdAt ? ` · ${formatDate(user.createdAt)}` : ''}
-                </div>
+          <tr key={user.id}>
+            <td className={tableCellClass}>
+              <div className="font-medium text-white">
+                {user.name}
+                {user.id === meId ? <span className="text-[#8d8d8d]"> · you</span> : null}
               </div>
-              <div className="flex flex-wrap gap-2">
-                <QuotaField user={user} nodeGb={nodeGb} onSaved={onSaved} onToast={onToast} />
+              <div className="mt-0.5 text-xs text-[#8d8d8d]">{user.email}</div>
+            </td>
+            <td className={tableCellClass}>
+              <span className="rounded-full bg-white/[0.07] px-2 py-1 text-[11px] font-medium text-[#bdbdbd] capitalize">
+                {user.role}
+              </span>
+            </td>
+            <td className={`${tableCellClass} tabular-nums`}>{formatBytes(user.usedBytes)}</td>
+            <td className={tableCellClass}>
+              <QuotaField user={user} nodeGb={nodeGb} onSaved={onSaved} onToast={onToast} />
+            </td>
+            <td className={`${tableCellClass} whitespace-nowrap text-[#8d8d8d]`}>
+              {user.createdAt ? formatDate(user.createdAt) : '—'}
+            </td>
+            <td className={tableCellClass}>
+              <div className="flex gap-1 whitespace-nowrap">
                 <Button
                   variant="ghost"
-                  className="h-8 rounded-full"
+                  className="h-8 rounded-full px-3"
                   onClick={() => void setRoleFor(user, user.role === 'admin' ? 'user' : 'admin')}
                 >
                   {user.role === 'admin' ? 'Make user' : 'Make admin'}
                 </Button>
-                <Button variant="ghost" className="h-8 rounded-full" onClick={() => void resetPassword(user)}>
+                <Button variant="ghost" className="h-8 rounded-full px-3" onClick={() => void resetPassword(user)}>
                   Password
                 </Button>
                 {user.id !== meId ? (
-                  <Button variant="ghost" className="h-8 rounded-full text-[#f28b82]" onClick={() => void remove(user)}>
+                  <Button variant="ghost" className="h-8 rounded-full px-3 text-[#f28b82]" onClick={() => void remove(user)}>
                     Delete
                   </Button>
                 ) : null}
               </div>
-            </div>
-          </div>
+            </td>
+          </tr>
         ))}
-      </div>
+      </SettingsTable>
     </div>
   )
 }
@@ -2189,6 +2256,111 @@ function SecurityPanel({ onToast }: { onToast: (message: string) => void }) {
         <KeyRound className="size-4" />
         {busy ? 'Rotating…' : 'Rotate session secret'}
       </Button>
+    </div>
+  )
+}
+
+function timingTone(ms: number) {
+  if (ms >= 1_000) return 'text-[#f28b82]'
+  if (ms >= 250) return 'text-[#e8c07d]'
+  return 'text-[#81c995]'
+}
+
+function formatTiming(ms: number) {
+  return ms >= 1_000 ? `${(ms / 1_000).toFixed(2)} s` : `${Math.round(ms)} ms`
+}
+
+function formatUptime(seconds: number) {
+  const days = Math.floor(seconds / 86_400)
+  const hours = Math.floor((seconds % 86_400) / 3_600)
+  const minutes = Math.floor((seconds % 3_600) / 60)
+  return days ? `${days}d ${hours}h` : hours ? `${hours}h ${minutes}m` : `${minutes}m`
+}
+
+function DiagnosticsPanel({
+  data,
+  onSaved,
+  onToast,
+}: {
+  data?: DiagnosticsPayload
+  onSaved: () => Promise<void>
+  onToast: (message: string) => void
+}) {
+  const [busy, setBusy] = useState(false)
+  if (!data) return null
+
+  async function refresh() {
+    setBusy(true)
+    try {
+      await onSaved()
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function copy() {
+    const ok = await copyText(JSON.stringify(data, null, 2))
+    onToast(ok ? 'Diagnostics copied' : 'Could not copy diagnostics')
+  }
+
+  return (
+    <div className="max-w-5xl">
+      <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
+        <Heading title="Diagnostics" hint="Server-side request timings reveal which phase is slow without adding work to the browser." />
+        <div className="flex gap-2">
+          <Button variant="ghost" className="h-9 rounded-full" onClick={() => void copy()}>Copy report</Button>
+          <Button className="h-9 rounded-full bg-white text-[#1a1a1a] hover:bg-[#f2f2f2]" disabled={busy} onClick={() => void refresh()}>
+            {busy ? 'Refreshing…' : 'Refresh'}
+          </Button>
+        </div>
+      </div>
+
+      <div className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <MetricCard label="Server uptime" value={formatUptime(data.process.uptimeSeconds)} detail={data.process.nodeVersion} />
+        <MetricCard label="Process memory" value={formatBytes(data.process.rssBytes)} detail={`${formatBytes(data.process.heapUsedBytes)} heap used`} />
+        <MetricCard label="Size cache" value={`${data.cache.sizeEntries ?? 0} entries`} detail={`${data.cache.activeRefreshes ?? 0} active · ${data.cache.queuedRefreshes ?? 0} queued`} />
+        <MetricCard label="Reservations" value={formatBytes(data.cache.reservedBytes ?? 0)} detail={`${data.cache.activeReservations ?? 0} active operations`} />
+      </div>
+
+      <SettingsCard title="Settings load breakdown" hint="Base is account and platform data. Detail is the selected section. Red values are over one second.">
+        {data.settings.length ? (
+          <SettingsTable headings={['Section', 'Base', 'Section data', 'Total', 'Captured']} minWidth={650}>
+            {data.settings.slice(0, 12).map((timing, index) => (
+              <tr key={`${timing.at}-${index}`}>
+                <td className={`${tableCellClass} font-medium text-white capitalize`}>{timing.section}</td>
+                <td className={`${tableCellClass} tabular-nums ${timingTone(timing.baseMs)}`}>{formatTiming(timing.baseMs)}</td>
+                <td className={`${tableCellClass} tabular-nums ${timingTone(timing.detailMs)}`}>{formatTiming(timing.detailMs)}</td>
+                <td className={`${tableCellClass} tabular-nums ${timingTone(timing.totalMs)}`}>{formatTiming(timing.totalMs)}</td>
+                <td className={`${tableCellClass} whitespace-nowrap text-[#8d8d8d]`}>{formatDate(timing.at)}</td>
+              </tr>
+            ))}
+          </SettingsTable>
+        ) : (
+          <p className="text-sm text-[#8d8d8d]">Open a few settings sections, then refresh this page to compare their timings.</p>
+        )}
+      </SettingsCard>
+
+      <div className="mt-4">
+        <SettingsCard title="Slowest API routes" hint="Rolling measurements from this server process, sorted by the 95th-percentile response time.">
+          {data.endpoints.length ? (
+            <SettingsTable headings={['Route', 'Samples', 'Average', 'P95', 'Maximum', 'Errors']} minWidth={760}>
+              {data.endpoints.slice(0, 16).map((endpoint) => (
+                <tr key={endpoint.path}>
+                  <td className={`${tableCellClass} font-mono text-xs text-white`}>{endpoint.path}</td>
+                  <td className={`${tableCellClass} tabular-nums text-[#8d8d8d]`}>{endpoint.count}</td>
+                  <td className={`${tableCellClass} tabular-nums ${timingTone(endpoint.averageMs)}`}>{formatTiming(endpoint.averageMs)}</td>
+                  <td className={`${tableCellClass} tabular-nums ${timingTone(endpoint.p95Ms)}`}>{formatTiming(endpoint.p95Ms)}</td>
+                  <td className={`${tableCellClass} tabular-nums ${timingTone(endpoint.maxMs)}`}>{formatTiming(endpoint.maxMs)}</td>
+                  <td className={`${tableCellClass} tabular-nums ${endpoint.errors ? 'text-[#f28b82]' : 'text-[#8d8d8d]'}`}>{endpoint.errors}</td>
+                </tr>
+              ))}
+            </SettingsTable>
+          ) : (
+            <p className="text-sm text-[#8d8d8d]">No requests have been measured yet.</p>
+          )}
+        </SettingsCard>
+      </div>
+      <p className="mt-3 text-xs text-[#777]">Captured {formatDate(data.generatedAt)} · {data.process.platform} · {data.process.cpuCount} CPU cores</p>
     </div>
   )
 }

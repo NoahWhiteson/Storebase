@@ -49,6 +49,13 @@ export type NetworkState = {
   order: string[]
 }
 
+const networkCache = new Map<string, { at: number; value: NetworkState }>()
+const NETWORK_CACHE_MS = 1000
+
+function cloneNetwork(state: NetworkState): NetworkState {
+  return { ...state, backends: state.backends.map((backend) => ({ ...backend })), order: [...state.order] }
+}
+
 export class NetworkError extends Error {
   readonly status: 400 | 403 | 404 | 409
   constructor(message: string, status: 400 | 403 | 404 | 409 = 400) {
@@ -92,26 +99,32 @@ export function normalizeOrder(backends: StorageBackend[], order?: string[]): st
 }
 
 export async function loadNetwork(config: ServerConfig): Promise<NetworkState> {
+  const path = filePath(config)
+  const hit = networkCache.get(path)
+  if (hit && Date.now() - hit.at < NETWORK_CACHE_MS) return cloneNetwork(hit.value)
   try {
-    const raw = await readFile(filePath(config), 'utf8')
+    const raw = await readFile(path, 'utf8')
     const parsed = JSON.parse(raw) as Partial<NetworkState>
     const backends = Array.isArray(parsed.backends) ? parsed.backends : []
-    return {
+    const state: NetworkState = {
       inboundToken: typeof parsed.inboundToken === 'string' && parsed.inboundToken ? parsed.inboundToken : randomBytes(24).toString('hex'),
       inboundEnabled: parsed.inboundEnabled !== false,
       backends,
       order: normalizeOrder(backends, Array.isArray(parsed.order) ? parsed.order : undefined),
     }
+    networkCache.set(path, { at: Date.now(), value: cloneNetwork(state) })
+    return state
   } catch {
     const state = await emptyState()
     await saveNetwork(config, state)
-    return state
+    return cloneNetwork(state)
   }
 }
 
 async function saveNetwork(config: ServerConfig, state: NetworkState): Promise<void> {
   await mkdir(config.dataDir, { recursive: true })
   await writeFile(filePath(config), `${JSON.stringify(state, null, 2)}\n`)
+  networkCache.set(filePath(config), { at: Date.now(), value: cloneNetwork(state) })
 }
 
 export function publicBackend(backend: StorageBackend, usedBytes: number): BackendPublic {

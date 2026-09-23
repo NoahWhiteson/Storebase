@@ -9,6 +9,12 @@ export type UserMeta = {
 }
 
 const FILE = '.storebase-meta.json'
+const metaCache = new Map<string, { at: number; value: UserMeta }>()
+const META_CACHE_MS = 1000
+
+function cloneMeta(meta: UserMeta): UserMeta {
+  return { starred: [...meta.starred], recents: meta.recents.map((item) => ({ ...item })) }
+}
 
 function empty(): UserMeta {
   return { starred: [], recents: [] }
@@ -19,20 +25,27 @@ export function metaPath(root: string): string {
 }
 
 export async function loadMeta(root: string): Promise<UserMeta> {
+  const hit = metaCache.get(root)
+  if (hit && Date.now() - hit.at < META_CACHE_MS) return cloneMeta(hit.value)
   try {
     const raw = await readFile(metaPath(root), 'utf8')
     const parsed = JSON.parse(raw) as Partial<UserMeta>
-    return {
+    const meta = {
       starred: Array.isArray(parsed.starred) ? parsed.starred : [],
       recents: Array.isArray(parsed.recents) ? parsed.recents : [],
     }
+    metaCache.set(root, { at: Date.now(), value: cloneMeta(meta) })
+    return meta
   } catch {
-    return empty()
+    const meta = empty()
+    metaCache.set(root, { at: Date.now(), value: cloneMeta(meta) })
+    return meta
   }
 }
 
 export async function saveMeta(root: string, meta: UserMeta): Promise<void> {
   await atomicWriteFile(metaPath(root), `${JSON.stringify(meta, null, 2)}\n`)
+  metaCache.set(root, { at: Date.now(), value: cloneMeta(meta) })
 }
 
 async function setStarredUnlocked(root: string, path: string, starred: boolean): Promise<UserMeta> {

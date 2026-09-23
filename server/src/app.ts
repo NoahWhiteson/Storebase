@@ -121,6 +121,8 @@ import { applyUpdate, checkGithub, updateStatus } from './update.ts'
 import { mountTerminals } from './terminal-api.ts'
 import { attachTerminalWs } from './terminal-ws.ts'
 import { createTerminalHub } from './terminals.ts'
+import { recordRequest } from './diagnostics.ts'
+import { mapConcurrent } from './concurrency.ts'
 import {
   effectiveReserved,
   ensureUserDrive,
@@ -300,6 +302,28 @@ export function createApp(config: ServerConfig) {
     return backblazeHealthCheck
   }
   app.use('/api/*', cors({ origin: (origin) => origin || '*', credentials: true }))
+  app.use('/api/*', async (c, next) => {
+    const started = performance.now()
+    let failed = false
+    try {
+      await next()
+    } catch (error) {
+      failed = true
+      throw error
+    } finally {
+      const durationMs = performance.now() - started
+      const section = c.req.path === '/api/settings' ? c.req.query('section') : undefined
+      const stablePath = c.req.path.replace(/\/[0-9a-f]{8}-[0-9a-f-]{27,}/gi, '/:id')
+      recordRequest({
+        method: c.req.method,
+        path: `${stablePath}${section ? ` [${section}]` : ''}`,
+        status: failed ? 500 : c.res.status,
+        durationMs,
+        at: new Date().toISOString(),
+      })
+      if (!failed) c.header('X-Storebase-Duration', durationMs.toFixed(1))
+    }
+  })
 
   app.get('/.well-known/acme-challenge/:token', (c) => {
     const body = acmeKeyAuthorization(c.req.param('token'))
@@ -765,25 +789,9 @@ export function createApp(config: ServerConfig) {
     const path = c.req.query('path') ?? ''
     const shareId = c.req.query('share') ?? ''
     const q = (c.req.query('q') ?? '').trim().toLowerCase()
-    const meta = await loadMeta(root)
-    const scans = await loadScanResults(root)
-    const starred = new Set(meta.starred)
-    const outgoing = await listOutgoing(config, user.id)
-    const links = await listLinks(config, user.id)
-    const sharedFlag = (rel: string) =>
-      outgoing.some((share) => share.path === rel || rel.startsWith(`${share.path}/`)) ||
-      links.some((link) => link.path === rel || rel.startsWith(`${link.path}/`))
 
-    function decorate(items: Awaited<ReturnType<typeof listPath>>, trashed = false) {
-      return items.map((item) => ({
-        ...item,
-        virusScan: scanResultFrom(scans, item.path, item.type),
-        starred: starred.has(item.path),
-        trashed,
-        shared: !trashed && sharedFlag(item.path),
-      }))
-    }
-
+    // These views do not use the user's file metadata. Returning early avoids
+    // touching several JSON stores and remote-share indexes on every request.
     if (view === 'index') {
       return c.json({ paths: await walkLiveFilePaths(root) })
     }
@@ -811,6 +819,28 @@ export function createApp(config: ServerConfig) {
         items: items.map((item) => ({ ...item, starred: false, trashed: false, spam: true })),
       })
     }
+
+    const [meta, scans, outgoing, links] = await Promise.all([
+      loadMeta(root),
+      loadScanResults(root),
+      listOutgoing(config, user.id),
+      listLinks(config, user.id),
+    ])
+    const starred = new Set(meta.starred)
+    const sharedFlag = (rel: string) =>
+      outgoing.some((share) => share.path === rel || rel.startsWith(`${share.path}/`)) ||
+      links.some((link) => link.path === rel || rel.startsWith(`${link.path}/`))
+
+    function decorate(items: Awaited<ReturnType<typeof listPath>>, trashed = false) {
+      return items.map((item) => ({
+        ...item,
+        virusScan: scanResultFrom(scans, item.path, item.type),
+        starred: starred.has(item.path),
+        trashed,
+        shared: !trashed && sharedFlag(item.path),
+      }))
+    }
+
     if (view === 'trash') {
       const items = await listTrashItems(root)
       return c.json({
@@ -842,27 +872,30 @@ export function createApp(config: ServerConfig) {
       })
     }
     if (view === 'starred') {
-      const items = []
-      for (const rel of meta.starred) {
+      const resolved = await mapConcurrent(meta.starred, 16, async (rel) => {
         const item = await entryAt(root, rel)
-        if (item) items.push({ ...item, starred: true, trashed: false, shared: sharedFlag(item.path), virusScan: scanResultFrom(scans, item.path, item.type) })
-      }
+        return item
+          ? { ...item, starred: true, trashed: false, shared: sharedFlag(item.path), virusScan: scanResultFrom(scans, item.path, item.type) }
+          : null
+      })
+      const items = resolved.filter((item) => item !== null)
       return c.json({ path: '', items })
     }
     if (view === 'recent') {
-      const items = []
-      for (const rec of meta.recents) {
+      const resolved = await mapConcurrent(meta.recents, 16, async (rec) => {
         const item = await entryAt(root, rec.path)
         if (item && item.type === 'file') {
-          items.push({
+          return {
             ...item,
             virusScan: scanResultFrom(scans, item.path, item.type),
             starred: starred.has(item.path),
             trashed: false,
             shared: sharedFlag(item.path),
-          })
+          }
         }
-      }
+        return null
+      })
+      const items = resolved.filter((item) => item !== null)
       return c.json({ path: '', items })
     }
     if (view === 'search' || q) {

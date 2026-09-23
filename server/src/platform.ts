@@ -20,6 +20,9 @@ export type PlatformSettings = {
   virusScanPolicy: VirusScanPolicy
 }
 
+const platformCache = new Map<string, { at: number; value: PlatformSettings }>()
+const PLATFORM_CACHE_MS = 1000
+
 export function defaultPlatform(config: ServerConfig): PlatformSettings {
   return {
     nodeName: hostname(),
@@ -43,13 +46,15 @@ function clampInt(value: unknown, fallback: number, min: number, max: number): n
 }
 
 export async function loadPlatform(config: ServerConfig): Promise<PlatformSettings> {
+  const hit = platformCache.get(config.settingsPath)
+  if (hit && Date.now() - hit.at < PLATFORM_CACHE_MS) return { ...hit.value }
   const fallback = defaultPlatform(config)
   try {
     const raw = await readFile(config.settingsPath, 'utf8')
     const parsed = JSON.parse(raw) as Partial<PlatformSettings>
     const view = parsed.defaultView === 'list' ? 'list' : 'grid'
     const port = Number(parsed.bindPort)
-    return {
+    const value: PlatformSettings = {
       nodeName: parsed.nodeName?.trim() || fallback.nodeName,
       signInMessage: parsed.signInMessage?.trim() ?? '',
       defaultView: view,
@@ -62,7 +67,10 @@ export async function loadPlatform(config: ServerConfig): Promise<PlatformSettin
       terminalUsers: typeof parsed.terminalUsers === 'boolean' ? parsed.terminalUsers : fallback.terminalUsers,
       virusScanPolicy: parsed.virusScanPolicy === 'on' || parsed.virusScanPolicy === 'off' ? parsed.virusScanPolicy : 'user',
     }
+    platformCache.set(config.settingsPath, { at: Date.now(), value: { ...value } })
+    return value
   } catch {
+    platformCache.set(config.settingsPath, { at: Date.now(), value: { ...fallback } })
     return fallback
   }
 }
@@ -84,6 +92,7 @@ export async function savePlatform(config: ServerConfig, settings: PlatformSetti
     STOREBASE_PORT: String(settings.bindPort),
     STOREBASE_AUTO_UPDATE: settings.autoUpdate ? '1' : '0',
   })
+  platformCache.set(config.settingsPath, { at: Date.now(), value: { ...settings } })
 }
 
 async function patchEnv(file: string, updates: Record<string, string>): Promise<void> {

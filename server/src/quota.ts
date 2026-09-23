@@ -147,6 +147,17 @@ const reserved = new Map<string, number>()
 export function pendingPoolReservations(poolRoot: string): number {
   return reserved.get(`pool:${poolRoot}`) ?? 0
 }
+
+export function quotaCacheStats(): Record<string, number> {
+  return {
+    sizeEntries: sizeCache.size,
+    sizeRefreshes: refreshing.size,
+    queuedRefreshes: refreshQueue.length,
+    activeRefreshes: refreshInFlight,
+    activeReservations: reserved.size,
+    reservedBytes: [...reserved.values()].reduce((sum, value) => sum + value, 0),
+  }
+}
 /** Reserve capacity across concurrent writes; release on success or failure. */
 export async function reserveWriteSpace(opts: Parameters<typeof assertWriteFits>[0]): Promise<(committed?: boolean) => void> {
   return withLock(`quota:${opts.poolRoot}`, async () => {

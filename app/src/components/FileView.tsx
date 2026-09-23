@@ -293,6 +293,7 @@ type DragApi = {
 }
 
 function ListView(props: FileViewProps & { items: DriveItem[]; drag: DragApi; onGetInfo: (item: DriveItem) => void }) {
+  const selected = useMemo(() => new Set(props.selectedIds), [props.selectedIds])
   return (
     <div>
       <div className="hidden grid-cols-[minmax(0,2fr)_140px_160px_100px] gap-3 px-3 py-2 text-xs font-medium text-[#8d8d8d] md:grid">
@@ -307,11 +308,11 @@ function ListView(props: FileViewProps & { items: DriveItem[]; drag: DragApi; on
         <ItemMenu key={item.id} item={item} items={props.items} selectedIds={props.selectedIds} {...handlers(props)}>
           <Tile
             item={item}
-            selected={props.selectedIds.includes(item.id)}
+            selected={selected.has(item.id)}
             drag={props.drag}
             onSelect={props.onSelect}
             onOpen={props.onOpen}
-            className="grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-full px-3 py-2.5 text-left hover:bg-white/5 md:grid-cols-[minmax(0,2fr)_140px_160px_100px]"
+            className="grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-full px-3 py-2.5 text-left hover:bg-white/5 [content-visibility:auto] [contain-intrinsic-size:auto_52px] md:grid-cols-[minmax(0,2fr)_140px_160px_100px]"
           >
             <span className="flex min-w-0 items-center gap-3">
               <ItemThumb item={item} size="sm" />
@@ -343,6 +344,7 @@ function GridView({
   drag: DragApi
   onGetInfo: (item: DriveItem) => void
 }) {
+  const selected = useMemo(() => new Set(props.selectedIds), [props.selectedIds])
   return (
     <div className="flex flex-col gap-8">
       {folders.length > 0 ? (
@@ -353,11 +355,11 @@ function GridView({
               <ItemMenu key={item.id} item={item} items={props.items} selectedIds={props.selectedIds} {...handlers(props)}>
                 <Tile
                   item={item}
-                  selected={props.selectedIds.includes(item.id)}
+                  selected={selected.has(item.id)}
                   drag={drag}
                   onSelect={props.onSelect}
                   onOpen={props.onOpen}
-                  className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left hover:bg-white/5"
+                  className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left hover:bg-white/5 [content-visibility:auto] [contain-intrinsic-size:auto_52px]"
                 >
                   <FileGlyph kind="folder" size="sm" />
                   <span className="min-w-0 flex-1">
@@ -383,14 +385,14 @@ function GridView({
               <ItemMenu key={item.id} item={item} items={props.items} selectedIds={props.selectedIds} {...handlers(props)}>
                 <Tile
                   item={item}
-                  selected={props.selectedIds.includes(item.id)}
+                  selected={selected.has(item.id)}
                   drag={drag}
                   onSelect={props.onSelect}
                   onOpen={props.onOpen}
                   className={
                     preview
-                      ? 'flex w-full flex-col items-stretch rounded-xl p-2 text-left hover:bg-white/5'
-                      : 'flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left hover:bg-white/5'
+                      ? 'flex w-full flex-col items-stretch rounded-xl p-2 text-left hover:bg-white/5 [content-visibility:auto] [contain-intrinsic-size:auto_168px]'
+                      : 'flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left hover:bg-white/5 [content-visibility:auto] [contain-intrinsic-size:auto_52px]'
                   }
                 >
                   {preview ? (

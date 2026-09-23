@@ -1,5 +1,5 @@
 import { FileGlyph } from '@/components/FileGlyph'
-import { FilePreview } from '@/components/FilePreview'
+import { FilePreview } from '@/components/DeferredPanels'
 import { SafetyGauge } from '@/components/SafetyGauge'
 import { StorebaseLogo } from '@/components/StorebaseLogo'
 import { Button } from '@/components/ui/button'

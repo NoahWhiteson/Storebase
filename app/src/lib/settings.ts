@@ -19,6 +19,44 @@ export type StorageBackend = {
 
 export type SettingsUser = PublicUser & { usedBytes: number; quotaBytes: number | null }
 
+export type DiagnosticsPayload = {
+  generatedAt: string
+  process: {
+    uptimeSeconds: number
+    nodeVersion: string
+    platform: string
+    cpuCount: number
+    loadAverage: number[]
+    rssBytes: number
+    heapUsedBytes: number
+    heapTotalBytes: number
+  }
+  cache: Record<string, number>
+  endpoints: Array<{
+    path: string
+    count: number
+    averageMs: number
+    p95Ms: number
+    maxMs: number
+    lastMs: number
+    errors: number
+  }>
+  settings: Array<{
+    section: string
+    baseMs: number
+    detailMs: number
+    totalMs: number
+    at: string
+  }>
+  recent: Array<{
+    method: string
+    path: string
+    status: number
+    durationMs: number
+    at: string
+  }>
+}
+
 export type SettingsPayload = {
   admin: boolean
   account: PublicUser & {
@@ -78,6 +116,7 @@ export type SettingsPayload = {
   }
   virusInstall?: VirusInstallProgress
   domain?: DomainInfo
+  diagnostics?: DiagnosticsPayload
 }
 
 export type DnsRecord = { type: 'A' | 'AAAA'; host: string; value: string; ttl: number }

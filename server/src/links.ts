@@ -37,18 +37,32 @@ function filePath(config: ServerConfig): string {
   return join(config.dataDir, 'links.json')
 }
 
+const linksCache = new Map<string, { at: number; value: LinkRecord[] }>()
+const LINKS_CACHE_MS = 1000
+
+function cloneLinks(links: LinkRecord[]): LinkRecord[] {
+  return links.map((link) => ({ ...link }))
+}
+
 async function loadAll(config: ServerConfig): Promise<LinkRecord[]> {
+  const path = filePath(config)
+  const hit = linksCache.get(path)
+  if (hit && Date.now() - hit.at < LINKS_CACHE_MS) return cloneLinks(hit.value)
   try {
-    const raw = await readFile(filePath(config), 'utf8')
+    const raw = await readFile(path, 'utf8')
     const parsed = JSON.parse(raw) as { links?: LinkRecord[] }
-    return Array.isArray(parsed.links) ? parsed.links : []
+    const links = Array.isArray(parsed.links) ? parsed.links : []
+    linksCache.set(path, { at: Date.now(), value: cloneLinks(links) })
+    return links
   } catch {
+    linksCache.set(path, { at: Date.now(), value: [] })
     return []
   }
 }
 
 async function saveAll(config: ServerConfig, links: LinkRecord[]): Promise<void> {
   await atomicWriteFile(filePath(config), `${JSON.stringify({ links }, null, 2)}\n`)
+  linksCache.set(filePath(config), { at: Date.now(), value: cloneLinks(links) })
 }
 
 function covers(sharePath: string, relPath: string): boolean {

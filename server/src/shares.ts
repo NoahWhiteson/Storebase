@@ -54,18 +54,32 @@ function filePath(config: ServerConfig): string {
   return join(config.dataDir, 'shares.json')
 }
 
+const sharesCache = new Map<string, { at: number; value: ShareRecord[] }>()
+const SHARES_CACHE_MS = 1000
+
+function cloneShares(shares: ShareRecord[]): ShareRecord[] {
+  return shares.map((share) => ({ ...share }))
+}
+
 async function loadAll(config: ServerConfig): Promise<ShareRecord[]> {
+  const path = filePath(config)
+  const hit = sharesCache.get(path)
+  if (hit && Date.now() - hit.at < SHARES_CACHE_MS) return cloneShares(hit.value)
   try {
-    const raw = await readFile(filePath(config), 'utf8')
+    const raw = await readFile(path, 'utf8')
     const parsed = JSON.parse(raw) as { shares?: ShareRecord[] }
-    return Array.isArray(parsed.shares) ? parsed.shares : []
+    const shares = Array.isArray(parsed.shares) ? parsed.shares : []
+    sharesCache.set(path, { at: Date.now(), value: cloneShares(shares) })
+    return shares
   } catch {
+    sharesCache.set(path, { at: Date.now(), value: [] })
     return []
   }
 }
 
 async function writeShares(config: ServerConfig, shares: ShareRecord[]): Promise<void> {
   await atomicWriteFile(filePath(config), `${JSON.stringify({ shares }, null, 2)}\n`)
+  sharesCache.set(filePath(config), { at: Date.now(), value: cloneShares(shares) })
 }
 
 function covers(sharePath: string, relPath: string): boolean {

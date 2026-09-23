@@ -5,6 +5,12 @@ import { promisify } from 'node:util'
 import type { ServerConfig } from './config.ts'
 
 const scryptAsync = promisify(scrypt)
+const usersCache = new Map<string, { at: number; users: UserRecord[] }>()
+const USERS_CACHE_MS = 1000
+
+function cloneUsers(users: UserRecord[]): UserRecord[] {
+  return users.map((user) => ({ ...user }))
+}
 
 export type UserRole = 'admin' | 'user'
 
@@ -42,10 +48,14 @@ export async function hashPassword(password: string): Promise<string> {
 }
 
 export async function loadUsers(config: ServerConfig): Promise<UserRecord[]> {
+  const hit = usersCache.get(config.usersPath)
+  if (hit && Date.now() - hit.at < USERS_CACHE_MS) return cloneUsers(hit.users)
   try {
     const raw = await readFile(config.usersPath, 'utf8')
     const parsed = JSON.parse(raw) as { users?: UserRecord[] }
-    return parsed.users ?? []
+    const users = parsed.users ?? []
+    usersCache.set(config.usersPath, { at: Date.now(), users: cloneUsers(users) })
+    return cloneUsers(users)
   } catch {
     return []
   }
@@ -53,6 +63,7 @@ export async function loadUsers(config: ServerConfig): Promise<UserRecord[]> {
 
 export async function saveUsers(config: ServerConfig, users: UserRecord[]): Promise<void> {
   await writeFile(config.usersPath, `${JSON.stringify({ users }, null, 2)}\n`)
+  usersCache.set(config.usersPath, { at: Date.now(), users: cloneUsers(users) })
 }
 
 export function toPublic(user: UserRecord): PublicUser {

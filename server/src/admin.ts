@@ -21,7 +21,8 @@ import {
   setStoreOrder,
   updateBackendCredentials,
 } from './network.ts'
-import { cachedFolderSize } from './quota.ts'
+import { cachedFolderSize, quotaCacheStats } from './quota.ts'
+import { diagnosticsSnapshot, recordSettingsTiming } from './diagnostics.ts'
 import { issueSession, rotateSecret } from './session.ts'
 import { updateStatus } from './update.ts'
 import { publicDomain } from './domain.ts'
@@ -81,6 +82,7 @@ async function parseQuotaGb(
 
 export function mountAdmin(app: Hono<{ Variables: Vars }>, config: ServerConfig, hub: TerminalHub): void {
   app.get('/api/settings', async (c) => {
+    const requestStarted = performance.now()
     const user = c.get('user')
     const root = c.get('root')
     const section = c.req.query('section')
@@ -90,6 +92,7 @@ export function mountAdmin(app: Hono<{ Variables: Vars }>, config: ServerConfig,
       loadPlatform(config),
       scannerAvailable(),
     ])
+    const baseMs = performance.now() - requestStarted
     const account = {
       ...toPublic(user),
       usedBytes,
@@ -110,6 +113,20 @@ export function mountAdmin(app: Hono<{ Variables: Vars }>, config: ServerConfig,
       account,
       platform,
     }
+    let peoplePromise: Promise<Array<ReturnType<typeof toPublic> & { usedBytes: number; quotaBytes: number | null }>> | null = null
+    const loadPeople = () => {
+      if (!peoplePromise) {
+        peoplePromise = loadUsers(config).then((users) => Promise.all(
+          users.map(async (person) => ({
+            ...toPublic(person),
+            usedBytes: await cachedFolderSize(join(config.driveDir, person.id)),
+            quotaBytes: personalQuota(person),
+          })),
+        ))
+      }
+      return peoplePromise
+    }
+    const detailStarted = performance.now()
     const wants = (name: string) => !section || section === name
     if (wants('virus')) response.virusInstall = virusInstallSnapshot()
     if (wants('server')) response.server = {
@@ -125,13 +142,14 @@ export function mountAdmin(app: Hono<{ Variables: Vars }>, config: ServerConfig,
       }
     if (wants('domain')) response.domain = await domainView(config)
     if (wants('storage')) {
-      const [disk, poolUsedBytes, localUsedBytes, network, backends, remoteBytes] = await Promise.all([
+      const [disk, poolUsedBytes, localUsedBytes, network, backends, remoteBytes, people] = await Promise.all([
         diskInfo(config.dataDir),
         cachedFolderSize(config.driveDir),
         cachedFolderSize(config.driveDir, { real: true }),
         loadNetwork(config),
         listBackends(config),
         remoteCapacity(config),
+        loadPeople(),
       ])
       response.storage = {
         reservedBytes: manifest.reservedBytes,
@@ -145,18 +163,23 @@ export function mountAdmin(app: Hono<{ Variables: Vars }>, config: ServerConfig,
         backends,
         order: network.order,
       }
+      response.users = people
     }
     if (wants('users')) {
-      const users = await loadUsers(config)
-      response.users = await Promise.all(
-        users.map(async (person) => ({
-          ...toPublic(person),
-          usedBytes: await cachedFolderSize(join(config.driveDir, person.id)),
-          quotaBytes: personalQuota(person),
-        })),
-      )
+      response.users = await loadPeople()
     }
     if (wants('updates')) response.update = { ...updateStatus(), autoUpdate: platform.autoUpdate }
+    if (wants('diagnostics')) response.diagnostics = diagnosticsSnapshot(quotaCacheStats())
+    const detailMs = performance.now() - detailStarted
+    const totalMs = performance.now() - requestStarted
+    recordSettingsTiming({
+      section: section ?? 'all',
+      baseMs,
+      detailMs,
+      totalMs,
+      at: new Date().toISOString(),
+    })
+    c.header('Server-Timing', `base;dur=${baseMs.toFixed(1)}, detail;dur=${detailMs.toFixed(1)}`)
     return c.json(response)
   })
 
