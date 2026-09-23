@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { zipSync } from 'fflate'
 import { copyEntries, listPath, unzipArchive } from '../src/storage.ts'
 import { loadMeta, setStarred } from '../src/meta.ts'
-import { reserveWriteSpace } from '../src/quota.ts'
+import { cachedComputation, folderSize, quotaCacheStats, reserveWriteSpace } from '../src/quota.ts'
 import { listTrashItems, trashEntry } from '../src/trash.ts'
 import { mapConcurrent } from '../src/concurrency.ts'
 import { inspectZipArchive } from '../src/zip.ts'
@@ -39,6 +39,30 @@ async function fixture(t: TestContext) {
   await mkdir(root)
   return { root, quota: { poolRoot: pool, nodeReserved: 100_000_000, userQuota: null } }
 }
+
+test('size walks stay correct and refresh scheduling remains bounded', async t => {
+  const { root } = await fixture(t)
+  await Promise.all(Array.from({ length: 20 }, async (_, i) => {
+    const dir = join(root, `dir-${i % 4}`, 'nested')
+    await mkdir(dir, { recursive: true })
+    await writeFile(join(dir, `${i}.bin`), Buffer.alloc(i + 1))
+  }))
+  assert.equal(await folderSize(root, { real: true }), 210)
+
+  const releases: Array<() => void> = []
+  const jobs = Array.from({ length: 3 }, (_, i) => cachedComputation(`scheduler-test-${Date.now()}-${i}`, () =>
+    new Promise<number>((resolve) => releases.push(() => resolve(i))),
+  ))
+  await new Promise<void>((resolve) => setImmediate(resolve))
+  assert.equal(quotaCacheStats().activeRefreshes, 2)
+  assert.equal(quotaCacheStats().queuedRefreshes, 1)
+  releases.splice(0).forEach((release) => release())
+  await new Promise<void>((resolve) => setImmediate(resolve))
+  releases.splice(0).forEach((release) => release())
+  await Promise.all(jobs)
+  assert.equal(quotaCacheStats().activeRefreshes, 0)
+  assert.equal(quotaCacheStats().queuedRefreshes, 0)
+})
 
 test('concurrent extraction uses unique folders, reports progress, and preserves contents', async t => {
   const { root, quota } = await fixture(t)

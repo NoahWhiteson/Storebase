@@ -788,7 +788,8 @@ function VirusPanel({
   }, [admin])
 
   useEffect(() => {
-    if (virusInstall?.status !== 'installing') return
+    const checking = virusInstall?.status === 'idle' && virusInstall.engineVersion && virusInstall.step === 'Checking virus definitions'
+    if (virusInstall?.status !== 'installing' && !checking) return
     const timer = window.setInterval(() => {
       void fetchVirusInstall()
         .then((next) => {
@@ -863,6 +864,8 @@ function VirusPanel({
                 <p className="text-sm text-[#e8e8e8]">
                   {virusInstall?.status === 'installing'
                     ? 'Installing ClamAV…'
+                    : virusInstall?.status === 'idle' && virusInstall.engineVersion
+                      ? 'Checking ClamAV…'
                     : virusInstall?.status === 'error'
                       ? 'ClamAV is not ready'
                       : virusInstall?.status === 'done'
@@ -871,8 +874,8 @@ function VirusPanel({
                 </p>
                 {virusInstall?.status === 'error' && virusInstall.error ? <p className="mt-1 text-xs text-[#e8a8a8]">{virusInstall.error}</p> : null}
               </div>
-              <Button className="h-9 shrink-0 rounded-full bg-white text-[#1a1a1a] hover:bg-[#f2f2f2]" disabled={installingEngine || virusInstall?.status === 'installing' || virusInstall?.status === 'done'} onClick={() => void startInstall()}>
-                {virusInstall?.status === 'done' ? 'Installed' : installingEngine || virusInstall?.status === 'installing' ? 'Installing…' : virusInstall?.status === 'error' ? 'Try again' : 'Install ClamAV'}
+              <Button className="h-9 shrink-0 rounded-full bg-white text-[#1a1a1a] hover:bg-[#f2f2f2]" disabled={installingEngine || virusInstall?.status === 'installing' || virusInstall?.status === 'done' || Boolean(virusInstall?.status === 'idle' && virusInstall.engineVersion)} onClick={() => void startInstall()}>
+                {virusInstall?.status === 'done' ? 'Installed' : virusInstall?.status === 'idle' && virusInstall.engineVersion ? 'Checking…' : installingEngine || virusInstall?.status === 'installing' ? 'Installing…' : virusInstall?.status === 'error' ? 'Try again' : 'Install ClamAV'}
               </Button>
             </div>
             {virusInstall?.status === 'installing' ? (

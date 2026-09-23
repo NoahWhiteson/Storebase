@@ -206,10 +206,12 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
     window.addEventListener('storebase:backblaze-unavailable', showBackblaze)
     window.addEventListener('storebase:files-changed', refresh)
     void refreshAlerts()
+    const settleTimer = window.setTimeout(refresh, 10_000)
     const timer = window.setInterval(refresh, 5 * 60_000)
     return () => {
       window.removeEventListener('storebase:backblaze-unavailable', showBackblaze)
       window.removeEventListener('storebase:files-changed', refresh)
+      window.clearTimeout(settleTimer)
       window.clearInterval(timer)
     }
   }, [refreshAlerts])

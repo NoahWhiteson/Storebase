@@ -26,6 +26,7 @@ const state: VirusInstallProgress = {
   percent: 0, estimateBytes: 480 * 1024 * 1024, error: null, startedAt: null, finishedAt: null,
 }
 let installJob: Promise<void> | null = null
+let readinessJob: Promise<void> | null = null
 
 export function virusInstallSnapshot(): VirusInstallProgress {
   return { ...state }
@@ -36,10 +37,18 @@ export async function virusInstallProgress(): Promise<VirusInstallProgress> {
     const installed = await scannerVersion()
     if (installed) {
       if (state.status === 'error' && state.engineVersion === installed) return { ...state }
-      const ready = state.status === 'done' && state.engineVersion === installed ? true : await scannerCanScan()
-      Object.assign(state, ready
-        ? { status: 'done', step: 'ClamAV is ready', engineVersion: installed, percent: 100, error: null }
-        : { status: 'error', step: 'Virus definitions are not ready', engineVersion: installed, percent: 95, error: 'Run freshclam on the server, then try again.' })
+      if (state.status !== 'done' || state.engineVersion !== installed) {
+        Object.assign(state, { step: 'Checking virus definitions', engineVersion: installed, percent: 95 })
+        if (!readinessJob) {
+          readinessJob = scannerCanScan()
+            .then((ready) => {
+              Object.assign(state, ready
+                ? { status: 'done', step: 'ClamAV is ready', engineVersion: installed, percent: 100, error: null }
+                : { status: 'error', step: 'Virus definitions are not ready', engineVersion: installed, percent: 95, error: 'Run freshclam on the server, then try again.' })
+            })
+            .finally(() => { readinessJob = null })
+        }
+      }
     } else if (state.status === 'done') {
       Object.assign(state, { status: 'idle', step: 'ClamAV is not installed', engineVersion: null, percent: 0 })
     }

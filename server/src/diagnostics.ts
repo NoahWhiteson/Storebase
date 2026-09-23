@@ -34,7 +34,7 @@ export function recordSettingsTiming(timing: SettingsTiming): void {
 function percentile(values: number[], amount: number): number {
   if (!values.length) return 0
   const sorted = [...values].sort((a, b) => a - b)
-  return sorted[Math.min(sorted.length - 1, Math.floor((sorted.length - 1) * amount))] ?? 0
+  return sorted[Math.min(sorted.length - 1, Math.max(0, Math.ceil(sorted.length * amount) - 1))] ?? 0
 }
 
 export function diagnosticsSnapshot(cache: Record<string, number>) {

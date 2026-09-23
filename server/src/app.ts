@@ -282,24 +282,31 @@ export function createApp(config: ServerConfig) {
   const terminals = createTerminalHub(config)
   let backblazeHealth: { at: number; unavailable: boolean } | null = null
   let backblazeHealthCheck: Promise<boolean> | null = null
+  let updateAlertCheck: Promise<unknown> | null = null
 
   async function isBackblazeUnavailable(): Promise<boolean> {
     if (backblazeHealth && Date.now() - backblazeHealth.at < 60_000) return backblazeHealth.unavailable
-    if (backblazeHealthCheck) return backblazeHealthCheck
-    backblazeHealthCheck = (async () => {
-      const network = await loadNetwork(config)
-      const backblaze = network.backends.filter(
-        (backend) => backend.type === 's3' && /backblazeb2\.com/i.test(backend.endpoint ?? ''),
-      )
-      const results = await Promise.allSettled(backblaze.map((backend) => Promise.race([
-        probeBackend(backend),
-        new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Store check timed out')), 8_000)),
-      ])))
-      const unavailable = results.some((result) => result.status === 'rejected')
-      backblazeHealth = { at: Date.now(), unavailable }
-      return unavailable
-    })().finally(() => { backblazeHealthCheck = null })
-    return backblazeHealthCheck
+    if (!backblazeHealthCheck) {
+      backblazeHealthCheck = (async () => {
+        const network = await loadNetwork(config)
+        const backblaze = network.backends.filter(
+          (backend) => backend.type === 's3' && /backblazeb2\.com/i.test(backend.endpoint ?? ''),
+        )
+        const results = await Promise.allSettled(backblaze.map((backend) => Promise.race([
+          probeBackend(backend),
+          new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Store check timed out')), 8_000)),
+        ])))
+        const unavailable = results.some((result) => result.status === 'rejected')
+        backblazeHealth = { at: Date.now(), unavailable }
+        return unavailable
+      })()
+        .catch(() => {
+          backblazeHealth = { at: Date.now(), unavailable: true }
+          return true
+        })
+        .finally(() => { backblazeHealthCheck = null })
+    }
+    return backblazeHealth?.unavailable ?? false
   }
   app.use('/api/*', cors({ origin: (origin) => origin || '*', credentials: true }))
   app.use('/api/*', async (c, next) => {
@@ -1388,12 +1395,14 @@ const manifest = await requirePool(config)
     if (user.role === 'admin') {
       const current = updateStatus()
       const checkedAt = current.lastCheckedAt ? Date.parse(current.lastCheckedAt) : 0
-      const update = Date.now() - checkedAt < 10 * 60_000 ? current : await checkGithub(config)
-      if ((update.behindBy ?? 0) >= 3) {
+      if (Date.now() - checkedAt >= 10 * 60_000 && !updateAlertCheck) {
+        updateAlertCheck = checkGithub(config).catch(() => undefined).finally(() => { updateAlertCheck = null })
+      }
+      if ((current.behindBy ?? 0) >= 3) {
         alerts.push({
           id: 'updates-behind',
           tone: 'warning',
-          message: `Storebase is ${update.behindBy} updates behind. Open Settings to install the latest version.`,
+          message: `Storebase is ${current.behindBy} updates behind. Open Settings to install the latest version.`,
         })
       }
     }

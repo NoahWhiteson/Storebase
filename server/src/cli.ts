@@ -19,13 +19,16 @@ function arg(name: string): string | undefined {
 }
 
 function warmSizeCaches(config: ServerConfig, userIds: string[]): void {
+  // Warm the first user's drive alongside the pool because those values gate
+  // initial sign-in. The physical-size walk is only needed by Storage settings.
+  if (userIds[0]) void cachedFolderSize(join(config.driveDir, userIds[0]))
   void cachedFolderSize(config.driveDir)
-  void cachedFolderSize(config.driveDir, { real: true })
-  for (let i = 0; i < userIds.length; i += 4) {
+  setTimeout(() => { void cachedFolderSize(config.driveDir, { real: true }) }, 2000)
+  for (let i = 1; i < userIds.length; i += 4) {
     const batch = userIds.slice(i, i + 4)
     setTimeout(() => {
       for (const id of batch) void cachedFolderSize(join(config.driveDir, id))
-    }, 1000 * (i / 4))
+    }, 2000 + 1000 * Math.floor(i / 4))
   }
 }
 
