@@ -5,6 +5,7 @@ import { delimiterFor, parseCsv, serializeCsv } from '@/lib/csv'
 import { listFileVersions, reportFileLoadFailure, restoreFileVersion, saveOriginalFromUrl, type FileVersion } from '@/lib/api'
 import { formatBytes, formatDateTime } from '@/lib/format'
 import { previewKind, renderMarkdown } from '@/lib/preview'
+import { highlightCode, isCodeName } from '@/lib/highlight'
 import { Download, Eye, History, Pencil, Plus, Save, Undo2, X } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 
@@ -36,13 +37,14 @@ export function FilePreview({
   onDownload?: () => void
 }) {
   const kind = previewKind(name)
+  const code = isCodeName(name)
   const canEdit = Boolean(editable && onSave && (kind === 'text' || kind === 'markdown' || kind === 'sheet'))
   const [text, setText] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [truncated, setTruncated] = useState(false)
   const [saving, setSaving] = useState(false)
-  const [mode, setMode] = useState<'edit' | 'preview'>(canEdit ? 'edit' : 'preview')
+  const [mode, setMode] = useState<'edit' | 'preview'>(canEdit && !code ? 'edit' : 'preview')
   const [historyOpen, setHistoryOpen] = useState(false)
   const [versions, setVersions] = useState<FileVersion[] | null>(null)
   const [versionError, setVersionError] = useState<string | null>(null)
@@ -193,7 +195,7 @@ export function FilePreview({
             History
           </Button>
         ) : null}
-        {canEdit && kind === 'markdown' && !truncated ? (
+        {canEdit && (kind === 'markdown' || code) && !truncated ? (
           <Button
             variant="ghost"
             className="h-9 rounded-full"
@@ -270,7 +272,7 @@ export function FilePreview({
                 dangerouslySetInnerHTML={{ __html: renderMarkdown(draft) }}
               />
             </div>
-          ) : canEdit && !truncated ? (
+          ) : canEdit && !truncated && mode === 'edit' ? (
             <div className="mx-auto flex h-full max-w-5xl flex-col">
               {error ? <p className="mb-3 text-sm text-[#f28b82]">{error}</p> : null}
               <textarea
@@ -284,7 +286,7 @@ export function FilePreview({
             <div>
               {truncated ? <p className="mb-3 text-xs text-[#8d8d8d]">Showing the first 1.5 MB.</p> : null}
               <pre className="mx-auto max-w-5xl overflow-x-auto whitespace-pre-wrap break-words font-mono text-[13px] leading-5 text-[#e8e8e8]">
-                {text}
+                {code ? <code dangerouslySetInnerHTML={{ __html: highlightCode(draft, name) }} /> : text}
               </pre>
             </div>
           )

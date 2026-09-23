@@ -1,7 +1,6 @@
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Progress } from '@/components/ui/progress'
-import { ScrollArea } from '@/components/ui/scroll-area'
 import { copyText } from '@/lib/clipboard'
 import { formatBytes, formatDate } from '@/lib/format'
 import {
@@ -22,12 +21,14 @@ import {
   rotateNetworkToken,
   rotatePairCode,
   rotateSecret,
+  removeAvatar,
   saveAccount,
   saveDomain,
   saveSettings,
   setNetworkInbound,
   setStoreOrder,
   testStorageBackend,
+  uploadAvatar,
   clearDomain,
   type DiagnosticsPayload,
   type DomainInfo,
@@ -35,9 +36,11 @@ import {
   type SettingsPayload,
   type SettingsUser,
 } from '@/lib/settings'
+import type { ThemePreference } from '@/lib/theme'
 import { cn } from 'cn'
 import {
   Activity,
+  AppWindow,
   ArrowLeft,
   ChevronDown,
   ChevronRight,
@@ -45,7 +48,6 @@ import {
   Globe,
   HardDrive,
   KeyRound,
-  Laptop,
   RefreshCw,
   Search,
   Server,
@@ -75,7 +77,8 @@ export type SettingsSection =
   | 'domain'
   | 'diagnostics'
 
-type Account = { id: string; name: string; email: string; role: 'admin' | 'user'; virusScanEnabled?: boolean; operationNotifications?: boolean }
+type Account = { id: string; name: string; email: string; role: 'admin' | 'user'; virusScanEnabled?: boolean; operationNotifications?: boolean; theme?: ThemePreference; avatarUrl?: string | null }
+type AccountUpdate = { name: string; email: string; virusScanEnabled?: boolean; operationNotifications?: boolean; theme?: ThemePreference; avatarUrl?: string | null }
 
 type SettingsNavItem = {
   id: SettingsSection
@@ -92,7 +95,7 @@ const settingsGroups: { id: string; label: string; items: SettingsNavItem[] }[] 
     items: [
       { id: 'general', label: 'General', icon: SlidersHorizontal, keywords: 'preferences operations notifications view' },
       { id: 'account', label: 'Account', icon: UserRound, keywords: 'profile name email password quota' },
-      { id: 'devices', label: 'Mac app', icon: Laptop, keywords: 'device pairing capture macos' },
+      { id: 'devices', label: 'App', icon: AppWindow, keywords: 'device pairing capture desktop macos' },
     ],
   },
   {
@@ -135,7 +138,7 @@ export function Settings({
   account: Account
   initialSection?: SettingsSection
   onClose: () => void
-  onAccount: (next: { name: string; email: string; virusScanEnabled?: boolean; operationNotifications?: boolean }) => void
+  onAccount: (next: AccountUpdate) => void
   onPlatform?: (next: { defaultView?: 'grid' | 'list'; terminalsEnabled?: boolean }) => void
   onToast: (message: string) => void
 }) {
@@ -196,7 +199,7 @@ export function Settings({
 
   return (
     <div className="flex h-full min-h-0 flex-1 overflow-hidden bg-[#1a1a1a]">
-      <aside className="hidden w-[256px] shrink-0 flex-col md:flex">
+      <aside className="hidden min-h-0 w-[256px] shrink-0 flex-col md:flex">
         <button
           type="button"
           onClick={onClose}
@@ -205,9 +208,9 @@ export function Settings({
           <ArrowLeft className="size-4" />
           Back to files
         </button>
-        <ScrollArea className="flex-1 px-3">
+        <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-4">
           <SettingsNavigation admin={admin} section={section} onSection={setSection} />
-        </ScrollArea>
+        </div>
       </aside>
 
       <main className="min-w-0 flex-1 overflow-y-auto px-4 py-5 md:px-8">
@@ -217,7 +220,7 @@ export function Settings({
             Files
           </Button>
         </div>
-        <div className="mb-6 md:hidden">
+        <div className="mb-6 max-h-[45vh] overflow-y-auto md:hidden">
           <SettingsNavigation admin={admin} section={section} onSection={setSection} />
         </div>
 
@@ -523,7 +526,7 @@ function DevicesPanel({ onToast }: { onToast: (message: string) => void }) {
   return (
     <div className="max-w-lg">
       <Heading
-        title="Mac app"
+        title="App"
         hint="This page is only pairing. Capture, menu-bar chips, and drag-download all live in the Mac app."
       />
       {error ? <p className="mb-4 text-sm text-[#f28b82]">{error}</p> : null}
@@ -617,7 +620,7 @@ function AccountPanel({
   onToast,
 }: {
   data: SettingsPayload
-  onSaved: (next: { name: string; email: string; virusScanEnabled?: boolean; operationNotifications?: boolean }) => void
+  onSaved: (next: AccountUpdate) => void
   onToast: (message: string) => void
 }) {
   const [name, setName] = useState(data.account.name)
@@ -625,6 +628,9 @@ function AccountPanel({
   const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [busy, setBusy] = useState(false)
+  const [avatarBusy, setAvatarBusy] = useState(false)
+  const [avatarUrl, setAvatarUrl] = useState(data.account.avatarUrl ?? null)
+  const avatarInput = useRef<HTMLInputElement>(null)
 
   async function save() {
     setBusy(true)
@@ -635,7 +641,7 @@ function AccountPanel({
         currentPassword: newPassword ? currentPassword : undefined,
         newPassword: newPassword || undefined,
       })
-      onSaved({ name: user.name, email: user.email, virusScanEnabled: user.virusScanEnabled, operationNotifications: user.operationNotifications })
+      onSaved({ name: user.name, email: user.email, virusScanEnabled: user.virusScanEnabled, operationNotifications: user.operationNotifications, theme: user.theme, avatarUrl: user.avatarUrl })
       setCurrentPassword('')
       setNewPassword('')
       onToast('Account saved')
@@ -646,9 +652,55 @@ function AccountPanel({
     }
   }
 
+  async function changeAvatar(file?: File) {
+    if (!file) return
+    setAvatarBusy(true)
+    try {
+      const user = await uploadAvatar(file)
+      setAvatarUrl(user.avatarUrl ?? null)
+      onSaved({ name: user.name, email: user.email, avatarUrl: user.avatarUrl, theme: user.theme })
+      onToast('Profile picture updated')
+    } catch (error) {
+      onToast(error instanceof Error ? error.message : 'Could not upload profile picture')
+    } finally {
+      setAvatarBusy(false)
+      if (avatarInput.current) avatarInput.current.value = ''
+    }
+  }
+
+  async function clearAvatar() {
+    setAvatarBusy(true)
+    try {
+      const user = await removeAvatar()
+      setAvatarUrl(null)
+      onSaved({ name: user.name, email: user.email, avatarUrl: null, theme: user.theme })
+      onToast('Profile picture removed')
+    } catch (error) {
+      onToast(error instanceof Error ? error.message : 'Could not remove profile picture')
+    } finally {
+      setAvatarBusy(false)
+    }
+  }
+
   return (
     <div className="max-w-lg">
       <Heading title="Account" hint="This is how you show up on this node." />
+      <div className="mb-6 flex items-center gap-4 rounded-2xl border border-white/[0.08] bg-white/[0.035] p-4">
+        <div className="flex size-16 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[#2a2a2a] text-lg font-semibold text-white">
+          {avatarUrl ? <img src={avatarUrl} alt="" className="size-full object-cover" /> : name.trim().slice(0, 2).toUpperCase()}
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-medium text-white">Profile picture</p>
+          <p className="mt-0.5 text-xs text-[#8d8d8d]">JPG, PNG, WebP, or GIF · up to 5 MB</p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Button variant="outline" className="h-8 rounded-full border-white/20 bg-transparent text-white hover:bg-white/10 hover:text-white" disabled={avatarBusy} onClick={() => avatarInput.current?.click()}>
+              {avatarBusy ? 'Saving…' : avatarUrl ? 'Change' : 'Upload'}
+            </Button>
+            {avatarUrl ? <Button variant="ghost" className="h-8 rounded-full text-[#f28b82]" disabled={avatarBusy} onClick={() => void clearAvatar()}>Remove</Button> : null}
+          </div>
+          <input ref={avatarInput} type="file" accept="image/jpeg,image/png,image/webp,image/gif" className="hidden" onChange={(event) => void changeAvatar(event.target.files?.[0])} />
+        </div>
+      </div>
       <label className="mb-4 block text-sm text-[#8d8d8d]">
         Name
         <Input className={`${fieldClass} mt-1.5`} value={name} onChange={(e) => setName(e.target.value)} />
@@ -694,7 +746,7 @@ function GeneralPanel({
   data: SettingsPayload
   admin: boolean
   onSaved: () => Promise<void>
-  onAccount: (next: { name: string; email: string; virusScanEnabled?: boolean; operationNotifications?: boolean }) => void
+  onAccount: (next: AccountUpdate) => void
   onPlatform?: (next: { defaultView?: 'grid' | 'list'; terminalsEnabled?: boolean }) => void
   onToast: (message: string) => void
 }) {
@@ -702,17 +754,20 @@ function GeneralPanel({
   const [signInMessage, setSignInMessage] = useState(data.platform.signInMessage ?? '')
   const [defaultView, setDefaultView] = useState(data.platform.defaultView)
   const [operationNotifications, setOperationNotifications] = useState(data.account.operationNotifications !== false)
+  const [theme, setTheme] = useState<ThemePreference>(data.account.theme ?? 'system')
   const [busy, setBusy] = useState(false)
 
   async function save() {
     setBusy(true)
     try {
-      const user = await saveAccount({ operationNotifications })
+      const user = await saveAccount({ operationNotifications, theme })
       onAccount({
         name: user.name,
         email: user.email,
         virusScanEnabled: user.virusScanEnabled,
         operationNotifications: user.operationNotifications,
+        theme: user.theme,
+        avatarUrl: user.avatarUrl,
       })
       if (admin) await saveSettings({ platform: { nodeName, signInMessage, defaultView } })
       onPlatform?.({ defaultView })
@@ -729,6 +784,15 @@ function GeneralPanel({
     <div className="max-w-2xl">
       <Heading title="General" hint="Everyday behavior and how this Storebase node presents itself." />
       <div className="space-y-4">
+        <SettingsCard title="Appearance" hint="Choose how Storebase looks for this account on every device.">
+          <div className="grid grid-cols-3 gap-2">
+            {(['light', 'dark', 'system'] as const).map((value) => (
+              <button key={value} type="button" onClick={() => setTheme(value)} className={cn('h-10 rounded-xl text-sm capitalize', theme === value ? 'bg-white text-[#1a1a1a]' : 'bg-white/[0.08] text-[#e8e8e8]')}>
+                {value}
+              </button>
+            ))}
+          </div>
+        </SettingsCard>
         <SettingsCard title="Operations" hint="Control feedback for file uploads, copies, scans, and other actions.">
           <Toggle on={operationNotifications} onChange={setOperationNotifications} label="Show operation notifications" />
         </SettingsCard>
@@ -773,7 +837,7 @@ function VirusPanel({
   data: SettingsPayload
   admin: boolean
   onSaved: () => Promise<void>
-  onAccount: (next: { name: string; email: string; virusScanEnabled?: boolean; operationNotifications?: boolean }) => void
+  onAccount: (next: AccountUpdate) => void
   onToast: (message: string) => void
 }) {
   const [virusScan, setVirusScan] = useState(data.account.virusScanEnabled === true)

@@ -19,6 +19,11 @@ import {
   CodeXml,
   Database,
   Gem,
+  Download,
+  Code2,
+  Music2,
+  Archive,
+  BriefcaseBusiness,
 } from 'lucide-react'
 
 const styles: Record<FileKind, { icon: typeof Folder; color: string; bg: string }> = {
@@ -42,6 +47,29 @@ function appStyle(name: string) {
   if (ext === 'iso') return { icon: Disc3, color: '#e8eaed', bg: 'rgba(232,234,237,0.12)' }
   if (['bat', 'cmd', 'ps1'].includes(ext)) return { icon: SquareTerminal, color: '#a7f3d0', bg: 'rgba(167,243,208,0.12)' }
   return styles.app
+}
+
+const folderPalette = [
+  { color: '#8ab4f8', bg: 'rgba(138,180,248,.14)' },
+  { color: '#c4b5fd', bg: 'rgba(196,181,253,.14)' },
+  { color: '#78d9ec', bg: 'rgba(120,217,236,.14)' },
+  { color: '#81c995', bg: 'rgba(129,201,149,.14)' },
+  { color: '#f28b82', bg: 'rgba(242,139,130,.14)' },
+  { color: '#fdd663', bg: 'rgba(253,214,99,.14)' },
+]
+
+function folderStyle(name: string) {
+  const base = name.trim().toLowerCase()
+  if (/^(downloads?|incoming)$/.test(base)) return { icon: Download, ...folderPalette[0] }
+  if (/^(code|source|src|projects?|repos?|development)$/.test(base)) return { icon: Code2, ...folderPalette[1] }
+  if (/^(photos?|pictures?|images?)$/.test(base)) return { icon: Image, ...folderPalette[2] }
+  if (/^(videos?|movies?)$/.test(base)) return { icon: Film, ...folderPalette[4] }
+  if (/^(music|audio)$/.test(base)) return { icon: Music2, ...folderPalette[3] }
+  if (/^(archives?|backups?)$/.test(base)) return { icon: Archive, ...folderPalette[5] }
+  if (/^(work|business|clients?)$/.test(base)) return { icon: BriefcaseBusiness, ...folderPalette[1] }
+  let hash = 0
+  for (const character of base) hash = (hash * 31 + character.charCodeAt(0)) >>> 0
+  return { icon: Folder, ...folderPalette[hash % folderPalette.length] }
 }
 
 const codeBadges: Record<string, { label?: string; icon?: typeof File; color: string; bg: string }> = {
@@ -80,7 +108,7 @@ export function FileGlyph({
   const base = name.toLowerCase()
   const codeStyle = codeBadges[ext] ?? (base === 'dockerfile' ? { label: 'DK', color: '#2496ed', bg: 'rgba(36,150,237,.14)' } : base === 'makefile' ? { label: 'MK', color: '#a7f3d0', bg: 'rgba(167,243,208,.12)' } : undefined)
   const nativeStyle = codeStyle ?? fileBadges[ext]
-  const { icon: Icon = File, color, bg, label } = nativeStyle ?? (kind === 'app' ? appStyle(name) : styles[kind]) ?? {
+  const { icon: Icon = File, color, bg, label } = nativeStyle ?? (kind === 'folder' ? folderStyle(name) : kind === 'app' ? appStyle(name) : styles[kind]) ?? {
     icon: File,
     color: '#bdc1c6',
     bg: 'rgba(189,193,198,0.12)',

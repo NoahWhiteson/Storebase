@@ -24,6 +24,9 @@ export type UserRecord = {
   quotaBytes?: number | null
   virusScanEnabled?: boolean
   operationNotifications?: boolean
+  theme?: 'light' | 'dark' | 'system'
+  avatarMime?: string
+  avatarUpdatedAt?: string
 }
 
 export type PublicUser = {
@@ -35,6 +38,8 @@ export type PublicUser = {
   quotaBytes: number | null
   virusScanEnabled: boolean
   operationNotifications: boolean
+  theme?: 'light' | 'dark' | 'system'
+  avatarUrl?: string | null
 }
 
 function normalizeEmail(email: string): string {
@@ -76,6 +81,8 @@ export function toPublic(user: UserRecord): PublicUser {
     quotaBytes: personalQuota(user),
     virusScanEnabled: user.virusScanEnabled === true,
     operationNotifications: user.operationNotifications !== false,
+    theme: user.theme ?? 'system',
+    avatarUrl: user.avatarMime && user.avatarUpdatedAt ? `/api/avatars/${user.id}?v=${encodeURIComponent(user.avatarUpdatedAt)}` : null,
   }
 }
 

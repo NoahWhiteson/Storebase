@@ -1,5 +1,5 @@
 import { StorebaseLogo } from '@/components/StorebaseLogo'
-import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -24,6 +24,7 @@ type TopBarProps = {
   view: 'grid' | 'list'
   account: { name: string; email: string }
   initials: string
+  avatarUrl?: string | null
   settingsOpen: boolean
   terminalsOpen: boolean
   terminalsEnabled?: boolean
@@ -40,6 +41,7 @@ export function TopBar({
   view,
   account,
   initials,
+  avatarUrl,
   settingsOpen,
   terminalsOpen,
   terminalsEnabled = true,
@@ -126,6 +128,7 @@ export function TopBar({
             <DropdownMenuTrigger asChild>
               <button className="ml-1 rounded-full outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-white/30">
                 <Avatar>
+                  {avatarUrl ? <AvatarImage src={avatarUrl} alt="" className="object-cover" /> : null}
                   <AvatarFallback className="bg-[#2a2a2a] text-sm font-medium text-white">
                     {initials}
                   </AvatarFallback>

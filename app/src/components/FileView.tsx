@@ -102,11 +102,13 @@ export function FileView(props: FileViewProps) {
   const [infoItem, setInfoItem] = useState<DriveItem | null>(null)
   const draggingRef = useRef(false)
   const marqueeStart = useRef<{ x: number; y: number; append: boolean } | null>(null)
+  const marqueeMoved = useRef(false)
   const [marquee, setMarquee] = useState<{ left: number; top: number; width: number; height: number } | null>(null)
 
   function beginMarquee(e: ReactPointerEvent<HTMLDivElement>) {
     if (e.button !== 0 || (e.target as HTMLElement).closest('[data-file-id],button,input,textarea,a')) return
     marqueeStart.current = { x: e.clientX, y: e.clientY, append: e.metaKey || e.ctrlKey }
+    marqueeMoved.current = false
     setMarquee({ left: e.clientX, top: e.clientY, width: 0, height: 0 })
     const move = (event: PointerEvent) => {
       const start = marqueeStart.current
@@ -117,6 +119,7 @@ export function FileView(props: FileViewProps) {
         width: Math.abs(event.clientX - start.x),
         height: Math.abs(event.clientY - start.y),
       }
+      if (rect.width > 3 || rect.height > 3) marqueeMoved.current = true
       setMarquee(rect)
       const right = rect.left + rect.width
       const bottom = rect.top + rect.height
@@ -248,7 +251,15 @@ export function FileView(props: FileViewProps) {
       {blankMenu}
     </ContextMenu>
   ) : (
-    <div className="relative min-h-[320px] select-none" onPointerDown={beginMarquee}>
+    <div
+      className="relative min-h-[320px] select-none"
+      onPointerDown={beginMarquee}
+      onClick={(event) => {
+        if (!marqueeMoved.current) return
+        event.stopPropagation()
+        marqueeMoved.current = false
+      }}
+    >
       <ContextMenu>
         <ContextMenuTrigger asChild>
           <div className="absolute inset-0 z-0" />
@@ -361,7 +372,7 @@ function GridView({
                   onOpen={props.onOpen}
                   className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left hover:bg-white/5 [content-visibility:auto] [contain-intrinsic-size:auto_52px]"
                 >
-                  <FileGlyph kind="folder" size="sm" />
+                  <FileGlyph kind="folder" name={item.name} size="sm" />
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-sm font-medium">{item.name}</span>
                     {item.expiresAt && !item.trashed ? (

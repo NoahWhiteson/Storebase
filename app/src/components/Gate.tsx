@@ -208,6 +208,8 @@ function AppGate() {
           terminalsEnabled: me.terminalsEnabled !== false,
           virusScanEnabled: me.virusScanEnabled,
           operationNotifications: me.user.operationNotifications !== false,
+          theme: me.user.theme ?? 'system',
+          avatarUrl: me.user.avatarUrl ?? null,
         }}
         onSignedOut={() => {
           clearGateCache()

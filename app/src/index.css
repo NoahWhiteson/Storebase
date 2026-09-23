@@ -46,6 +46,59 @@
   }
 }
 
+.theme-light {
+  --color-background: #f7f8fa;
+  --color-foreground: #202124;
+  --color-card: #ffffff;
+  --color-card-foreground: #202124;
+  --color-popover: #ffffff;
+  --color-popover-foreground: #202124;
+  --color-primary: #202124;
+  --color-primary-foreground: #ffffff;
+  --color-secondary: #eef1f5;
+  --color-secondary-foreground: #202124;
+  --color-muted: #eef1f5;
+  --color-muted-foreground: #68707a;
+  --color-accent: #e7ebf0;
+  --color-accent-foreground: #202124;
+  --color-border: #dfe3e8;
+  --color-input: #dfe3e8;
+  --color-ring: #202124;
+}
+
+.theme-light .bg-\[\#1a1a1a\] { background-color: #f7f8fa; }
+.theme-light .bg-\[\#141414\] { background-color: #eef1f5; }
+.theme-light .bg-\[\#1c1c1c\],
+.theme-light .bg-\[\#212121\],
+.theme-light .bg-\[\#242424\] { background-color: #ffffff; }
+.theme-light .bg-\[\#2a2a2a\],
+.theme-light .bg-\[\#2c2c2c\],
+.theme-light .bg-\[\#2e2e2e\] { background-color: #e7ebf0; }
+.theme-light .text-white,
+.theme-light .text-\[\#e8e8e8\] { color: #202124; }
+.theme-light .text-\[\#b3b3b3\] { color: #505761; }
+.theme-light .text-\[\#9a9a9a\],
+.theme-light .text-\[\#8d8d8d\],
+.theme-light .text-\[\#777\] { color: #68707a; }
+.theme-light .bg-white { background-color: #202124; }
+.theme-light .text-\[\#1a1a1a\] { color: #ffffff; }
+.theme-light [class*="bg-white/"] { background-color: rgb(32 33 36 / 0.07); }
+.theme-light [class*="border-white/"] { border-color: rgb(32 33 36 / 0.12); }
+.theme-light [class*="ring-white/"] { --tw-ring-color: rgb(32 33 36 / 0.25); }
+.theme-light img,
+.theme-light video { color-scheme: normal; }
+
+.syntax-keyword { color: #c792ea; }
+.syntax-string { color: #c3e88d; }
+.syntax-comment { color: #697098; font-style: italic; }
+.syntax-number { color: #f78c6c; }
+.syntax-literal { color: #82aaff; }
+.theme-light .syntax-keyword { color: #7c3aed; }
+.theme-light .syntax-string { color: #15803d; }
+.theme-light .syntax-comment { color: #77808c; }
+.theme-light .syntax-number { color: #c2410c; }
+.theme-light .syntax-literal { color: #1d4ed8; }
+
 .onboard-stage {
   position: relative;
   width: 100%;

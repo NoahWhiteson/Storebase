@@ -156,6 +156,7 @@ export async function saveAccount(body: {
   newPassword?: string
   virusScanEnabled?: boolean
   operationNotifications?: boolean
+  theme?: 'light' | 'dark' | 'system'
 }): Promise<PublicUser> {
   const res = await api<{ user: PublicUser }>('/api/me', { method: 'PATCH', body: JSON.stringify(body) })
   return res.user
@@ -213,6 +214,18 @@ export async function installVirusEngine(): Promise<VirusInstallProgress> {
     method: 'POST',
   })
   return res.virusInstall
+}
+
+export async function uploadAvatar(file: File): Promise<PublicUser> {
+  const form = new FormData()
+  form.set('avatar', file)
+  const res = await api<{ user: PublicUser }>('/api/me/avatar', { method: 'POST', body: form })
+  return res.user
+}
+
+export async function removeAvatar(): Promise<PublicUser> {
+  const res = await api<{ user: PublicUser }>('/api/me/avatar', { method: 'DELETE' })
+  return res.user
 }
 
 export async function fetchVirusInstall(): Promise<VirusInstallProgress> {

@@ -1,4 +1,4 @@
-import { rm } from 'node:fs/promises'
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { hostname } from 'node:os'
 import { join } from 'node:path'
 import type { Hono } from 'hono'
@@ -507,6 +507,7 @@ export function mountAdmin(app: Hono<{ Variables: Vars }>, config: ServerConfig,
       newPassword?: string
       virusScanEnabled?: boolean
       operationNotifications?: boolean
+      theme?: 'light' | 'dark' | 'system'
     }>()
     const users = await loadUsers(config)
     const person = findById(users, user.id)
@@ -527,8 +528,54 @@ export function mountAdmin(app: Hono<{ Variables: Vars }>, config: ServerConfig,
     }
     if (typeof body.virusScanEnabled === 'boolean') person.virusScanEnabled = body.virusScanEnabled
     if (typeof body.operationNotifications === 'boolean') person.operationNotifications = body.operationNotifications
+    if (body.theme === 'light' || body.theme === 'dark' || body.theme === 'system') person.theme = body.theme
     await saveUsers(config, users)
     c.set('user', person)
+    return c.json({ user: toPublic(person) })
+  })
+
+  app.get('/api/avatars/:id', async (c) => {
+    const users = await loadUsers(config)
+    const person = findById(users, c.req.param('id'))
+    if (!person?.avatarMime) return c.json({ error: 'Avatar not found' }, 404)
+    try {
+      const bytes = await readFile(join(config.dataDir, 'avatars', person.id))
+      c.header('Content-Type', person.avatarMime)
+      c.header('X-Content-Type-Options', 'nosniff')
+      c.header('Cache-Control', 'private, max-age=31536000, immutable')
+      return c.body(new Uint8Array(bytes))
+    } catch {
+      return c.json({ error: 'Avatar not found' }, 404)
+    }
+  })
+
+  app.post('/api/me/avatar', async (c) => {
+    const body = await c.req.parseBody()
+    const avatar = body.avatar
+    if (!(avatar instanceof File)) return c.json({ error: 'Choose an image' }, 400)
+    if (!['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(avatar.type)) {
+      return c.json({ error: 'Use a JPG, PNG, WebP, or GIF image' }, 400)
+    }
+    if (avatar.size > 5 * 1024 * 1024) return c.json({ error: 'Avatar must be under 5 MB' }, 400)
+    const users = await loadUsers(config)
+    const person = findById(users, c.get('user').id)
+    if (!person) return c.json({ error: 'User not found' }, 404)
+    await mkdir(join(config.dataDir, 'avatars'), { recursive: true })
+    await writeFile(join(config.dataDir, 'avatars', person.id), new Uint8Array(await avatar.arrayBuffer()))
+    person.avatarMime = avatar.type
+    person.avatarUpdatedAt = new Date().toISOString()
+    await saveUsers(config, users)
+    return c.json({ user: toPublic(person) })
+  })
+
+  app.delete('/api/me/avatar', async (c) => {
+    const users = await loadUsers(config)
+    const person = findById(users, c.get('user').id)
+    if (!person) return c.json({ error: 'User not found' }, 404)
+    await rm(join(config.dataDir, 'avatars', person.id), { force: true })
+    delete person.avatarMime
+    delete person.avatarUpdatedAt
+    await saveUsers(config, users)
     return c.json({ user: toPublic(person) })
   })
 }

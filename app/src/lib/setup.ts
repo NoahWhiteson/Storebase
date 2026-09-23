@@ -12,6 +12,8 @@ export type PublicUser = {
   quotaBytes?: number | null
   virusScanEnabled?: boolean
   operationNotifications?: boolean
+  theme?: 'light' | 'dark' | 'system'
+  avatarUrl?: string | null
 }
 
 export type SetupState =

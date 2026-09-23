@@ -52,6 +52,7 @@ import {
   type SystemAlert,
 } from '@/lib/api'
 import { formatTtl } from '@/lib/format'
+import { applyTheme, type ThemePreference } from '@/lib/theme'
 import type { DriveItem, FileKind, SectionId } from '@/types'
 import { ChevronRight } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState, useLayoutEffect, type DragEvent } from 'react'
@@ -112,6 +113,8 @@ type Account = {
   terminalsEnabled?: boolean
   virusScanEnabled?: boolean
   operationNotifications?: boolean
+  theme?: ThemePreference
+  avatarUrl?: string | null
 }
 
 type UploadBatch = {
@@ -128,7 +131,7 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
   const quota = account.reservedBytes > 0 ? account.reservedBytes : 100 * 1024 ** 3
   const [items, setItems] = useState<DriveItem[]>([])
   const [usedBytes, setUsedBytes] = useState(account.usedBytes)
-  const [profile, setProfile] = useState({ name: account.name, email: account.email })
+  const [profile, setProfile] = useState({ name: account.name, email: account.email, avatarUrl: account.avatarUrl ?? null, theme: account.theme ?? 'system' as ThemePreference })
   const me = { owner: profile.name, ownerInitials: initials(profile.name) }
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('account')
@@ -152,6 +155,8 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
   const [dialog, setDialog] = useState<null | { mode: 'create' | 'create-file' | 'rename'; id?: string }>(null)
   const [nameDraft, setNameDraft] = useState('')
   const [shareLabel, setShareLabel] = useState('Shared')
+
+  useEffect(() => applyTheme(profile.theme), [profile.theme])
   const [shareTarget, setShareTarget] = useState<DriveItem | null>(null)
   const [confirm, setConfirm] = useState<
     | null
@@ -916,6 +921,7 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
         view={view}
         account={profile}
         initials={me.ownerInitials}
+        avatarUrl={profile.avatarUrl}
         settingsOpen={settingsOpen}
         terminalsOpen={terminalsOpen}
         terminalsEnabled={terminalsEnabled}
@@ -943,7 +949,12 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
             initialSection={settingsSection}
             onClose={() => setSettingsOpen(false)}
             onAccount={(next) => {
-              setProfile({ name: next.name, email: next.email })
+              setProfile((current) => ({
+                name: next.name,
+                email: next.email,
+                avatarUrl: next.avatarUrl === undefined ? current.avatarUrl : next.avatarUrl,
+                theme: next.theme ?? current.theme,
+              }))
               if (next.operationNotifications !== undefined) setOperationNotifications(next.operationNotifications)
             }}
             onPlatform={(next) => {
