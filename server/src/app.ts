@@ -53,7 +53,7 @@ import { dropPath, loadMeta, rewritePath, setStarred, touchRecent } from './meta
 import { loadPlatform, terminalsAllowed, virusScanEnabled } from './platform.ts'
 import { copyScanPath, copyScanToTree, dropScanPath, loadScanResults, rewriteScanPath, scanFile, scanResultFor, scanResultFrom, setScanResult, type VirusScanResult } from './virus.ts'
 import { requirePool } from './pool.ts'
-import { QuotaError, cachedFolderSize } from './quota.ts'
+import { QuotaError, cachedFolderSize, invalidateSizeCache } from './quota.ts'
 import { clearSession, issueLinkUnlock, issueSession, linkUnlocked, readSessionUserId } from './session.ts'
 import { completeSetup, getSetupState, SetupError } from './setup.ts'
 import { pingDrive, startDriveWatch, subscribeDrive } from './drive-events.ts'
@@ -105,6 +105,7 @@ import {
   listTempItems,
   moveIntoTemp,
   purgeExpiredTemp,
+  clearTemp,
   rewriteTempPath,
   setTempTtlHours,
   trackTemp,
@@ -140,11 +141,13 @@ import { acmeKeyAuthorization } from './gateway.ts'
 import { mountApp } from './web.ts'
 import {
   dropVersionsForPath,
+  clearVersions,
   listVersions,
   restoreVersion,
   rewriteVersions,
   snapshotExisting,
 } from './versions.ts'
+import { scanUserStorage, waitForStorageScan } from './storage-analysis.ts'
 
 import type { ServerType } from '@hono/node-server'
 
@@ -1294,14 +1297,52 @@ export function createApp(config: ServerConfig) {
   app.post('/api/files/empty-trash', async (c) => {
     const user = c.get('user')
     const root = c.get('root')
+    const trashPaths = (await listTrashItems(root)).map((item) => item.path)
     const originals = await emptyTrash(root)
+    for (const path of trashPaths) await dropScanPath(root, path)
     for (const path of originals) {
       await dropPath(root, path)
       await dropSharesForPath(config, user.id, path)
       await dropLinksForPath(config, user.id, path)
       await dropVersionsForPath(root, path)
     }
+    invalidateSizeCache(root)
+    invalidateSizeCache(config.driveDir)
     return c.json({ ok: true })
+  })
+
+  app.post('/api/files/storage-cleanup', async (c) => {
+    const user = c.get('user')
+    const root = c.get('root')
+    const body = await c.req.json<{ target?: 'temporary' | 'trash' | 'history' }>()
+    await waitForStorageScan(root)
+    if (body.target === 'temporary') {
+      const dropped = await clearTemp(root)
+      for (const path of dropped) {
+        await dropPath(root, path)
+        await dropScanPath(root, path)
+        await dropSharesForPath(config, user.id, path)
+        await dropLinksForPath(config, user.id, path)
+        await dropVersionsForPath(root, path)
+      }
+    } else if (body.target === 'trash') {
+      const trashPaths = (await listTrashItems(root)).map((item) => item.path)
+      const originals = await emptyTrash(root)
+      for (const path of trashPaths) await dropScanPath(root, path)
+      for (const path of originals) {
+        await dropPath(root, path)
+        await dropSharesForPath(config, user.id, path)
+        await dropLinksForPath(config, user.id, path)
+        await dropVersionsForPath(root, path)
+      }
+    } else if (body.target === 'history') {
+      await clearVersions(root)
+    } else {
+      return c.json({ error: 'Choose temporary, trash, or history' }, 400)
+    }
+    invalidateSizeCache(root)
+    invalidateSizeCache(config.driveDir)
+    return c.json({ userStorage: await scanUserStorage(root) })
   })
 
   app.get('/api/files/download', async (c) => {

@@ -27,12 +27,14 @@ export type StorageCategoryId =
   | 'code'
   | 'temporary'
   | 'trash'
+  | 'history'
   | 'storebase'
   | 'other'
 
 export type UserStorageBreakdown = {
   totalBytes: number
   scannedAt: string | null
+  nextScanAt: string | null
   detailed: boolean
   categories: Array<{ id: StorageCategoryId; bytes: number; files: number }>
 }
@@ -163,6 +165,14 @@ export async function fetchSettings(section: string = 'account'): Promise<Settin
 
 export async function scanUserStorage(): Promise<UserStorageBreakdown> {
   const res = await api<{ userStorage: UserStorageBreakdown }>('/api/settings/storage-scan', { method: 'POST' })
+  return res.userStorage
+}
+
+export async function cleanupUserStorage(target: 'temporary' | 'trash' | 'history'): Promise<UserStorageBreakdown> {
+  const res = await api<{ userStorage: UserStorageBreakdown }>('/api/files/storage-cleanup', {
+    method: 'POST',
+    body: JSON.stringify({ target }),
+  })
   return res.userStorage
 }
 

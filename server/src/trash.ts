@@ -159,17 +159,14 @@ async function emptyTrashUnlocked(root: string): Promise<string[]> {
   const items = await loadIndex(root)
   const originals = items.map((item) => item.originalPath)
   const trash = join(root, TRASH_DIR)
+  await ensureDir(trash)
+  for (const name of await readdir(trash)) {
+    await removePath(root, `${TRASH_DIR}/${name}`)
+    if (!items.some((item) => item.trashPath === `${TRASH_DIR}/${name}`)) originals.push(name)
+  }
   await rm(trash, { recursive: true, force: true })
   await ensureDir(trash)
   await saveIndex(root, [])
-  try {
-    const leftover = await readdir(trash)
-    for (const name of leftover) {
-      originals.push(name)
-    }
-  } catch {
-    // empty
-  }
   return [...new Set(originals)]
 }
 

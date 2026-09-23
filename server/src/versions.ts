@@ -145,3 +145,7 @@ export async function dropVersionsForPath(root: string, path: string): Promise<v
     await rm(blobPath(root, item.id), { force: true })
   }
 }
+
+export async function clearVersions(root: string): Promise<void> {
+  await rm(join(root, VERSIONS_DIR), { recursive: true, force: true })
+}

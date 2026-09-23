@@ -4,6 +4,8 @@ import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { cachedStorageBreakdown, scanUserStorage } from '../src/storage-analysis.ts'
+import { clearTemp } from '../src/temp.ts'
+import { clearVersions } from '../src/versions.ts'
 
 test('storage analysis stays inside one user root and groups useful cleanup categories', async t => {
   const parent = await mkdtemp(join(tmpdir(), 'storebase-storage-'))
@@ -34,10 +36,22 @@ test('storage analysis stays inside one user root and groups useful cleanup cate
   assert.equal(sizes.archives, 30)
   assert.equal(sizes.temporary, 40)
   assert.equal(sizes.trash, 50)
-  assert.equal(sizes.storebase, 60)
+  assert.equal(sizes.history, 60)
   assert.equal(result.detailed, true)
   assert.ok(result.scannedAt)
+  assert.ok(result.nextScanAt)
 
   const cached = await cachedStorageBreakdown(root, 999)
   assert.deepEqual(cached, result)
+  const otherSchedule = await cachedStorageBreakdown(otherUser, 1_000)
+  assert.ok(otherSchedule.nextScanAt)
+  assert.notEqual(otherSchedule.nextScanAt, result.nextScanAt)
+
+  await clearTemp(root)
+  await clearVersions(root)
+  const cleaned = await scanUserStorage(root)
+  const cleanedSizes = Object.fromEntries(cleaned.categories.map(category => [category.id, category.bytes]))
+  assert.equal(cleanedSizes.temporary, 0)
+  assert.equal(cleanedSizes.history, 0)
+  assert.equal(cleanedSizes.media, 10)
 })

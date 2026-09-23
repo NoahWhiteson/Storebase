@@ -177,6 +177,21 @@ async function purgeExpiredTempUnlocked(root: string): Promise<string[]> {
   return dropped
 }
 
+async function clearTempUnlocked(root: string): Promise<string[]> {
+  const dir = await ensureTemp(root)
+  const names = await readdir(dir)
+  const dropped: string[] = []
+  for (const name of names) {
+    const path = `${TEMP_DIR}/${name}`
+    await removePath(root, path)
+    dropped.push(path)
+  }
+  const data = await loadIndex(root)
+  data.items = []
+  await saveIndex(root, data)
+  return dropped
+}
+
 export async function listTempItems(root: string, sub = ''): Promise<{
   ttlHours: number
   items: Array<DriveEntry & { addedAt: string; expiresAt: string }>
@@ -227,3 +242,6 @@ export const moveIntoTemp = (...args: Parameters<typeof moveIntoTempUnlocked>): 
 
 export const purgeExpiredTemp = (...args: Parameters<typeof purgeExpiredTempUnlocked>): ReturnType<typeof purgeExpiredTempUnlocked> =>
   withLock(args[0] + ':temp', () => purgeExpiredTempUnlocked(...args))
+
+export const clearTemp = (...args: Parameters<typeof clearTempUnlocked>): ReturnType<typeof clearTempUnlocked> =>
+  withLock(args[0] + ':temp', () => clearTempUnlocked(...args))

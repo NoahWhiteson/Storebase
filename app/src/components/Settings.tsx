@@ -1,12 +1,21 @@
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Progress } from '@/components/ui/progress'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { copyText } from '@/lib/clipboard'
 import { formatBytes, formatDate } from '@/lib/format'
 import {
   addStorageBackend,
   applyUpdate,
   checkUpdate,
+  cleanupUserStorage,
   createUser,
   deleteStorageBackend,
   deleteUser,
@@ -53,6 +62,7 @@ import {
   ChevronUp,
   Globe,
   HardDrive,
+  History,
   Images,
   KeyRound,
   Code2,
@@ -463,13 +473,16 @@ const storageCategoryView: Record<StorageCategoryId, { label: string; color: str
   code: { label: 'Code', color: '#81c995', icon: Code2, tip: 'Projects and source files' },
   temporary: { label: 'Temporary', color: '#ff9f6e', icon: Package, tip: 'Files in your temporary area' },
   trash: { label: 'Trash', color: '#f28b82', icon: Trash2, tip: 'Deleted files that can be emptied' },
-  storebase: { label: 'Storebase', color: '#34a853', icon: HardDrive, tip: 'Versions, indexes, and Storebase data' },
+  storebase: { label: 'Storebase', color: '#34a853', icon: HardDrive, tip: 'Account indexes and Storebase metadata' },
+  history: { label: 'File history', color: '#a78bfa', icon: History, tip: 'Older versions kept for recovery' },
   other: { label: 'Other', color: '#9aa0a6', icon: Boxes, tip: 'Everything outside these groups' },
 }
 
 function UserStoragePanel({ data, onToast }: { data: SettingsPayload; onToast: (message: string) => void }) {
   const [breakdown, setBreakdown] = useState<UserStorageBreakdown | undefined>(data.userStorage)
   const [scanning, setScanning] = useState(false)
+  const [cleanupTarget, setCleanupTarget] = useState<'temporary' | 'trash' | 'history' | null>(null)
+  const [cleaning, setCleaning] = useState(false)
 
   async function scan() {
     setScanning(true)
@@ -484,10 +497,26 @@ function UserStoragePanel({ data, onToast }: { data: SettingsPayload; onToast: (
     }
   }
 
+  async function clean() {
+    if (!cleanupTarget) return
+    setCleaning(true)
+    try {
+      const next = await cleanupUserStorage(cleanupTarget)
+      setBreakdown(next)
+      onToast('Storage optimized')
+      setCleanupTarget(null)
+    } catch (error) {
+      onToast(error instanceof Error ? error.message : 'Could not optimize storage')
+    } finally {
+      setCleaning(false)
+    }
+  }
+
   const categories = (breakdown?.categories ?? []).filter((category) => category.bytes > 0)
   const measuredBytes = Math.max(1, categories.reduce((sum, category) => sum + category.bytes, 0))
   const limit = data.account.reservedBytes
-  const available = Math.max(0, limit - data.account.usedBytes)
+  const currentUsed = breakdown?.detailed ? breakdown.totalBytes : data.account.usedBytes
+  const available = Math.max(0, limit - currentUsed)
   const largest = categories.reduce<(typeof categories)[number] | undefined>(
     (current, category) => !current || category.bytes > current.bytes ? category : current,
     undefined,
@@ -512,7 +541,7 @@ function UserStoragePanel({ data, onToast }: { data: SettingsPayload; onToast: (
       </div>
 
       <div className="mb-6 grid gap-3 sm:grid-cols-3">
-        <MetricCard label="Used" value={formatBytes(data.account.usedBytes)} detail={`${Math.min(100, Math.round((data.account.usedBytes / Math.max(1, limit)) * 100))}% of your limit`} />
+        <MetricCard label="Used" value={formatBytes(currentUsed)} detail={`${Math.min(100, Math.round((currentUsed / Math.max(1, limit)) * 100))}% of your limit`} />
         <MetricCard label="Available" value={formatBytes(available)} detail={`${formatBytes(limit)} total`} />
         <MetricCard
           label="Largest category"
@@ -523,7 +552,9 @@ function UserStoragePanel({ data, onToast }: { data: SettingsPayload; onToast: (
 
       <SettingsCard
         title="Space by file type"
-        hint={breakdown?.scannedAt ? `Last scanned ${formatDate(breakdown.scannedAt)}` : 'Run your first scan to sort usage into categories.'}
+        hint={breakdown?.scannedAt
+          ? `Last scanned ${formatDate(breakdown.scannedAt)} · Next automatic scan ${breakdown.nextScanAt ? formatDate(breakdown.nextScanAt) : 'within a week'}`
+          : `Run your first scan for categories. Automatic scan ${breakdown?.nextScanAt ? formatDate(breakdown.nextScanAt) : 'will run weekly'}.`}
       >
         <div className="mb-5 flex h-3 w-full overflow-hidden rounded-full bg-white/[0.08]" aria-label="Storage usage by category">
           {categories.map((category) => (
@@ -571,11 +602,67 @@ function UserStoragePanel({ data, onToast }: { data: SettingsPayload; onToast: (
         )}
       </SettingsCard>
 
+      <div className="mt-5">
+        <SettingsCard title="Free up space" hint="Choose what Storebase can safely clear. Your regular files are never included in these actions.">
+          <div className="divide-y divide-white/[0.07]">
+            {([
+              { id: 'temporary' as const, title: 'Temporary files', detail: 'Clear everything in your Temp area.' },
+              { id: 'trash' as const, title: 'Trash', detail: 'Permanently remove files already in Trash.' },
+              { id: 'history' as const, title: 'File history', detail: 'Remove older versions while keeping current files.' },
+            ]).map((option) => {
+              const bytes = breakdown?.categories.find((category) => category.id === option.id)?.bytes ?? 0
+              return (
+                <div key={option.id} className="flex flex-wrap items-center justify-between gap-3 py-3 first:pt-0 last:pb-0">
+                  <div>
+                    <p className="text-sm font-medium text-white">{option.title}</p>
+                    <p className="mt-0.5 text-xs text-[#8d8d8d]">{option.detail}</p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="text-sm text-[#8d8d8d] tabular-nums">{breakdown?.detailed ? formatBytes(bytes) : 'Scan to measure'}</span>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="rounded-full border-white/15 bg-transparent text-white hover:bg-white/10 hover:text-white"
+                      disabled={cleaning || scanning || (breakdown?.detailed && bytes === 0)}
+                      onClick={() => setCleanupTarget(option.id)}
+                    >
+                      Clear
+                    </Button>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </SettingsCard>
+      </div>
+
       {largest && breakdown?.detailed ? (
         <p className="mt-4 text-sm text-[#8d8d8d]">
           Start with <span className="font-medium text-white">{storageCategoryView[largest.id].label}</span>. It uses {formatBytes(largest.bytes)}, or {Math.round((largest.bytes / measuredBytes) * 100)}% of the scanned space.
         </p>
       ) : null}
+
+      <Dialog open={cleanupTarget !== null} onOpenChange={(open) => { if (!open && !cleaning) setCleanupTarget(null) }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Clear {cleanupTarget ? storageCategoryView[cleanupTarget].label.toLowerCase() : 'storage'}?</DialogTitle>
+            <DialogDescription>
+              {cleanupTarget === 'history'
+                ? 'Older file versions will be permanently removed. Your current files stay untouched.'
+                : cleanupTarget === 'trash'
+                  ? 'Files in Trash will be permanently removed and cannot be restored.'
+                  : 'Everything in your Temp area will be permanently removed.'}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button type="button" variant="ghost" disabled={cleaning} onClick={() => setCleanupTarget(null)}>Cancel</Button>
+            <Button type="button" className="bg-[#c5221f] text-white hover:bg-[#a50e0e]" disabled={cleaning} onClick={() => void clean()}>
+              {cleaning ? 'Clearing…' : 'Clear permanently'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

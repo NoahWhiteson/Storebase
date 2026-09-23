@@ -9,6 +9,7 @@ import { purgeExpiredTemp } from './temp.ts'
 import { startDomainGateway } from './gateway.ts'
 import { ensureUserDrive, isConfigured, loadUsers } from './users.ts'
 import { cachedFolderSize } from './quota.ts'
+import { startStorageScanSchedule } from './storage-analysis.ts'
 import { join } from 'node:path'
 import type { ServerConfig } from './config.ts'
 
@@ -81,6 +82,7 @@ async function start(): Promise<void> {
     } else {
       console.log('Not configured. Open the app to finish onboarding.')
     }
+    startStorageScanSchedule(config)
     startUpdateLoop(config, async () => (await loadPlatform(config)).autoUpdate)
   })
   app.attach(server)
