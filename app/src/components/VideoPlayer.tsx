@@ -151,7 +151,7 @@ export function VideoPlayer({ src, title, onLoadError }: { src: string; title: s
 
       <div
         className={cn(
-          'pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent px-4 pt-16 pb-3 transition-opacity',
+          'pointer-events-none absolute inset-x-3 bottom-3 rounded-xl bg-black/75 px-3 py-2.5 shadow-lg backdrop-blur-sm transition-opacity',
           chrome ? 'opacity-100' : 'opacity-0',
         )}
       >

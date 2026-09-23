@@ -23,6 +23,7 @@ import {
   ArrowDownAz,
   Calendar,
   Check,
+  Clock,
   Copy,
   Download,
   FilePlus,
@@ -34,6 +35,7 @@ import {
   List,
   Pencil,
   Share2,
+  SearchX,
   ShieldCheck,
   Star,
   Timer,
@@ -306,8 +308,8 @@ type DragApi = {
 function ListView(props: FileViewProps & { items: DriveItem[]; drag: DragApi; onGetInfo: (item: DriveItem) => void }) {
   const selected = useMemo(() => new Set(props.selectedIds), [props.selectedIds])
   return (
-    <div>
-      <div className="hidden grid-cols-[minmax(0,2fr)_140px_160px_100px] gap-3 px-3 py-2 text-xs font-medium text-[#8d8d8d] md:grid">
+    <div className="overflow-hidden rounded-2xl border border-white/[0.07] bg-white/[0.018] [&>[data-drive-item]:not(:last-child)>button]:border-b [&>[data-drive-item]:not(:last-child)>button]:border-white/[0.055]">
+      <div className="hidden grid-cols-[minmax(0,2fr)_140px_160px_100px] gap-3 border-b border-white/[0.07] bg-white/[0.025] px-4 py-2.5 text-[11px] font-semibold tracking-wide text-[#8d8d8d] uppercase md:grid">
         <span>Name</span>
         <span>Owner</span>
         <span>
@@ -323,7 +325,7 @@ function ListView(props: FileViewProps & { items: DriveItem[]; drag: DragApi; on
             drag={props.drag}
             onSelect={props.onSelect}
             onOpen={props.onOpen}
-            className="grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-full px-3 py-2.5 text-left hover:bg-white/5 [content-visibility:auto] [contain-intrinsic-size:auto_52px] md:grid-cols-[minmax(0,2fr)_140px_160px_100px]"
+            className="file-tile grid min-h-13 w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-3 px-4 py-2.5 text-left hover:bg-white/[0.045] [content-visibility:auto] [contain-intrinsic-size:auto_52px] md:grid-cols-[minmax(0,2fr)_140px_160px_100px]"
           >
             <span className="flex min-w-0 items-center gap-3">
               <ItemThumb item={item} size="sm" />
@@ -360,7 +362,7 @@ function GridView({
     <div className="flex flex-col gap-8">
       {folders.length > 0 ? (
         <section>
-          {showSplit ? <h2 className="mb-3 text-sm font-medium text-[#8d8d8d]">Folders</h2> : null}
+          {showSplit ? <h2 className="mb-3 flex items-center gap-2 text-xs font-semibold tracking-wide text-[#8d8d8d] uppercase">Folders <span className="rounded-md bg-white/[0.06] px-1.5 py-0.5 text-[10px] tabular-nums">{folders.length}</span></h2> : null}
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
             {folders.map((item) => (
               <ItemMenu key={item.id} item={item} items={props.items} selectedIds={props.selectedIds} {...handlers(props)}>
@@ -370,7 +372,7 @@ function GridView({
                   drag={drag}
                   onSelect={props.onSelect}
                   onOpen={props.onOpen}
-                  className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left hover:bg-white/5 [content-visibility:auto] [contain-intrinsic-size:auto_52px]"
+                  className="file-tile flex min-h-15 w-full items-center gap-3 rounded-xl border border-white/[0.07] bg-white/[0.025] px-3.5 py-3 text-left shadow-sm hover:border-white/[0.12] hover:bg-white/[0.055] [content-visibility:auto] [contain-intrinsic-size:auto_60px]"
                 >
                   <FileGlyph kind="folder" name={item.name} size="sm" />
                   <span className="min-w-0 flex-1">
@@ -388,7 +390,7 @@ function GridView({
       ) : null}
       {files.length > 0 ? (
         <section>
-          {showSplit ? <h2 className="mb-3 text-sm font-medium text-[#8d8d8d]">Files</h2> : null}
+          {showSplit ? <h2 className="mb-3 flex items-center gap-2 text-xs font-semibold tracking-wide text-[#8d8d8d] uppercase">Files <span className="rounded-md bg-white/[0.06] px-1.5 py-0.5 text-[10px] tabular-nums">{files.length}</span></h2> : null}
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
             {files.map((item) => {
               const preview = item.kind === 'image' || item.kind === 'video'
@@ -402,13 +404,13 @@ function GridView({
                   onOpen={props.onOpen}
                   className={
                     preview
-                      ? 'flex w-full flex-col items-stretch rounded-xl p-2 text-left hover:bg-white/5 [content-visibility:auto] [contain-intrinsic-size:auto_168px]'
-                      : 'flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left hover:bg-white/5 [content-visibility:auto] [contain-intrinsic-size:auto_52px]'
+                      ? 'file-tile flex w-full flex-col items-stretch rounded-xl border border-white/[0.07] bg-white/[0.02] p-2 text-left shadow-sm hover:border-white/[0.12] hover:bg-white/[0.05] [content-visibility:auto] [contain-intrinsic-size:auto_190px]'
+                      : 'file-tile flex min-h-15 w-full items-center gap-3 rounded-xl border border-white/[0.07] bg-white/[0.02] px-3.5 py-3 text-left shadow-sm hover:border-white/[0.12] hover:bg-white/[0.05] [content-visibility:auto] [contain-intrinsic-size:auto_60px]'
                   }
                 >
                   {preview ? (
                     <>
-                      <div className="flex h-28 items-center justify-center overflow-hidden rounded-lg bg-[#141414]">
+                      <div className="flex aspect-[4/3] items-center justify-center overflow-hidden rounded-lg bg-[#141414]">
                         <ItemThumb item={item} size="lg" />
                       </div>
                       <div className="mt-2 flex items-start gap-2 px-1 pb-0.5">
@@ -520,9 +522,10 @@ function Tile({
         drag.dropOn(item.id, e)
       }}
       className={cn(
+        'outline-none transition-[background-color,border-color,box-shadow,opacity,transform] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] focus-visible:ring-2 focus-visible:ring-blue-400/50 active:scale-[0.985]',
         className,
-        selected && 'bg-white/10 hover:bg-white/10',
-        over && 'bg-white/15 ring-1 ring-white/40',
+        selected && 'border-blue-400/45 bg-blue-400/[0.11] shadow-[inset_0_0_0_1px_rgb(96_165_250/0.12)] hover:border-blue-400/55 hover:bg-blue-400/[0.14]',
+        over && 'border-blue-300/70 bg-blue-400/15 ring-2 ring-blue-300/30',
         drag.dragIds.includes(item.id) && 'opacity-50',
       )}
     >
@@ -803,11 +806,29 @@ function EmptyState({ section, search }: { section: SectionId; search: string })
     body = 'Files here delete on the timer you set. Upload, or move something from My files.'
   }
 
+  const Icon = search.trim()
+    ? SearchX
+    : section === 'starred'
+      ? Star
+      : section === 'trash'
+        ? Trash2
+        : section === 'shared'
+          ? Users
+          : section === 'recent'
+            ? Clock
+            : section === 'temp'
+              ? Timer
+              : section === 'spam'
+                ? ShieldCheck
+                : FolderOpen
+
   return (
-    <div className="flex min-h-[320px] flex-col items-center justify-center px-6 text-center">
-      <FileGlyph kind="folder" size="lg" />
-      <h2 className="mt-4 text-lg font-medium">{title}</h2>
-      <p className="mt-1 max-w-sm text-sm text-[#8d8d8d]">{body}</p>
+    <div className="flex min-h-[340px] flex-col items-center justify-center rounded-2xl border border-dashed border-white/[0.1] bg-white/[0.015] px-6 text-center">
+      <span className="flex size-14 items-center justify-center rounded-2xl border border-white/[0.08] bg-white/[0.045] text-[#b3b3b3]">
+        <Icon className="size-6" strokeWidth={1.6} />
+      </span>
+      <h2 className="mt-4 text-lg font-semibold tracking-tight">{title}</h2>
+      <p className="mt-1.5 max-w-md text-sm leading-6 text-[#8d8d8d]">{body}</p>
     </div>
   )
 }

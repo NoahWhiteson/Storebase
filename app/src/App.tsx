@@ -54,7 +54,7 @@ import {
 import { formatTtl } from '@/lib/format'
 import { applyTheme, type ThemePreference } from '@/lib/theme'
 import type { DriveItem, FileKind, SectionId } from '@/types'
-import { ChevronRight } from 'lucide-react'
+import { AlertCircle, ChevronRight, RefreshCw, UploadCloud } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState, useLayoutEffect, type DragEvent } from 'react'
 
 const titles: Record<SectionId, string> = {
@@ -121,6 +121,35 @@ type UploadBatch = {
   files: File[]
   dir: string
   operation: ReturnType<typeof beginOperation>
+}
+
+function FileLoadingState({ view }: { view: 'grid' | 'list' }) {
+  if (view === 'list') {
+    return (
+      <div aria-label="Loading files" className="overflow-hidden rounded-2xl border border-white/[0.08] bg-white/[0.018]">
+        <div className="h-11 border-b border-white/[0.07] bg-white/[0.025]" />
+        {Array.from({ length: 6 }, (_, index) => (
+          <div key={index} className="flex h-14 animate-pulse items-center gap-3 border-b border-white/[0.06] px-4 last:border-0">
+            <span className="size-7 rounded-lg bg-white/[0.07]" />
+            <span className="h-3 w-32 rounded-full bg-white/[0.07] sm:w-48" />
+            <span className="ml-auto hidden h-3 w-16 rounded-full bg-white/[0.05] sm:block" />
+          </div>
+        ))}
+      </div>
+    )
+  }
+
+  return (
+    <div aria-label="Loading files" className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
+      {Array.from({ length: 8 }, (_, index) => (
+        <div key={index} className="animate-pulse rounded-2xl border border-white/[0.07] bg-white/[0.018] p-3">
+          <div className="aspect-[4/3] rounded-xl bg-white/[0.06]" />
+          <div className="mt-3 h-3 w-3/4 rounded-full bg-white/[0.07]" />
+          <div className="mt-2 h-2.5 w-1/3 rounded-full bg-white/[0.045]" />
+        </div>
+      ))}
+    </div>
+  )
 }
 
 function joinPath(dir: string, name: string): string {
@@ -914,8 +943,16 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
       onDrop={appDrop}
     >
       {fileDragActive ? (
-        <div className="pointer-events-none fixed inset-3 z-[70] flex items-center justify-center rounded-3xl border-2 border-dashed border-blue-300 bg-[#1a1a1a]/90 text-lg font-medium text-white shadow-2xl backdrop-blur-sm">
-          Drop files to add them to the upload queue
+        <div className="pointer-events-none fixed inset-3 z-[70] flex items-center justify-center rounded-3xl border-2 border-dashed border-blue-300 bg-[#1a1a1a]/95 text-white shadow-[0_24px_80px_rgba(0,0,0,0.45)] backdrop-blur-sm">
+          <div className="flex flex-col items-center gap-3 px-6 text-center">
+            <span className="flex size-14 items-center justify-center rounded-2xl border border-blue-300/30 bg-blue-400/10 text-blue-300">
+              <UploadCloud className="size-7" />
+            </span>
+            <div>
+              <p className="text-lg font-semibold tracking-tight">Drop to upload</p>
+              <p className="mt-1 text-sm font-normal text-white/60">Files will be added to the upload queue</p>
+            </div>
+          </div>
         </div>
       ) : null}
       <TopBar
@@ -991,10 +1028,10 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
         ) : (
         <main className="flex min-w-0 flex-1 flex-col overflow-hidden bg-[#1a1a1a]">
           <div
-            className="flex flex-col gap-6 overflow-y-auto px-4 py-4 md:px-6 md:py-5"
+            className="flex flex-col gap-5 overflow-y-auto px-4 py-4 md:px-7 md:py-6"
             onClick={() => setSelectedIds([])}
           >
-            <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+            <div className="flex min-h-12 flex-wrap items-center gap-2 rounded-2xl border border-white/[0.06] bg-white/[0.015] px-4 py-3 text-sm text-muted-foreground">
               {folderPath && !search.trim() ? (
                 <>
                   <button
@@ -1026,6 +1063,9 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
                   {selectedIds.length > 1 ? (
                     <span className="ml-2 text-xs text-[#8d8d8d]">{selectedIds.length} selected</span>
                   ) : null}
+                  <span className="ml-auto rounded-lg bg-white/[0.05] px-2 py-1 text-xs tabular-nums text-[#8d8d8d]">
+                    {visible.length} {visible.length === 1 ? 'item' : 'items'}
+                  </span>
                 </>
               ) : (
                 <div className="flex w-full flex-wrap items-center justify-between gap-3">
@@ -1034,6 +1074,9 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
                     {selectedIds.length > 1 ? (
                       <span className="text-sm text-[#8d8d8d]">{selectedIds.length} selected</span>
                     ) : null}
+                    <span className="rounded-lg bg-white/[0.05] px-2 py-1 text-xs tabular-nums text-[#8d8d8d]">
+                      {visible.length} {visible.length === 1 ? 'item' : 'items'}
+                    </span>
                   </div>
                   {section === 'temp' ? (
                     <TempTtlBar
@@ -1056,7 +1099,22 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
               )}
             </div>
 
-            {loadError ? <p className="text-sm text-[#f28b82]">{loadError}</p> : null}
+            {loadError ? (
+              <div role="alert" className="flex flex-wrap items-center gap-3 rounded-xl border border-red-400/20 bg-red-400/[0.07] p-3 text-sm text-red-100">
+                <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-red-400/10 text-red-300">
+                  <AlertCircle className="size-4" />
+                </span>
+                <p className="min-w-0 flex-1">{loadError}</p>
+                <Button
+                  variant="ghost"
+                  className="h-8 rounded-lg px-2.5 text-red-100 hover:bg-red-400/10 hover:text-red-50"
+                  onClick={() => void refresh()}
+                >
+                  <RefreshCw className="size-3.5" />
+                  Retry
+                </Button>
+              </div>
+            ) : null}
 
             {section === 'temp' && folderPath && !search.trim() ? (
               <TempTtlBar
@@ -1068,7 +1126,7 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
             ) : null}
 
             {loading && items.length === 0 ? (
-              <p className="text-sm text-[#8d8d8d]">Loading your files…</p>
+              <FileLoadingState view={view} />
             ) : (
               <FileView
                 items={visible}
@@ -1281,7 +1339,7 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
 
       <OperationPanel enabled={operationNotifications} />
       {toast ? (
-        <div className="pointer-events-none fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-lg bg-[#e3e3e3] px-4 py-2.5 text-sm font-medium text-[#1a1a1a] shadow-lg">
+        <div role="status" className="app-toast pointer-events-none fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-xl border border-white/10 bg-[#e3e3e3] px-4 py-2.5 text-sm font-medium text-[#1a1a1a] shadow-[0_12px_36px_rgba(0,0,0,0.28)]">
           {toast}
         </div>
       ) : null}
