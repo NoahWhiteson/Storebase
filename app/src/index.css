@@ -291,6 +291,40 @@
   cursor: pointer;
 }
 
+.skeleton-shimmer {
+  position: relative;
+  overflow: hidden;
+  background: rgb(255 255 255 / 0.07);
+}
+
+.skeleton-shimmer::after {
+  position: absolute;
+  inset-block: -25%;
+  left: -45%;
+  width: 35%;
+  content: '';
+  background: rgb(255 255 255 / 0.1);
+  filter: blur(8px);
+  animation: skeleton-shimmer 1.5s cubic-bezier(.4, 0, .2, 1) infinite;
+}
+
+.theme-light .skeleton-shimmer {
+  background: rgb(32 33 36 / 0.08);
+}
+
+.theme-light .skeleton-shimmer::after {
+  background: rgb(255 255 255 / 0.7);
+}
+
+@keyframes skeleton-shimmer {
+  from { transform: translateX(0); }
+  to { transform: translateX(420%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton-shimmer::after { animation: none; }
+}
+
 
 
 @keyframes operation-slide { from { transform: translateX(-100%); } to { transform: translateX(300%); } }

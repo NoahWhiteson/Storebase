@@ -123,6 +123,50 @@ type UploadBatch = {
   operation: ReturnType<typeof beginOperation>
 }
 
+function FileLoadingSkeleton({ view }: { view: 'grid' | 'list' }) {
+  if (view === 'list') {
+    return (
+      <div aria-busy="true" aria-label="Loading files" className="overflow-hidden rounded-xl border border-white/10">
+        <span className="sr-only">Loading files</span>
+        <div className="hidden grid-cols-[minmax(0,2fr)_140px_160px_100px] gap-3 border-b border-white/10 px-3 py-2 md:grid">
+          {Array.from({ length: 4 }, (_, index) => (
+            <span key={index} className="skeleton-shimmer h-3 w-14 rounded-full" />
+          ))}
+        </div>
+        {Array.from({ length: 7 }, (_, index) => (
+          <div key={index} className="grid min-h-[52px] grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-b border-white/[0.06] px-3 py-2.5 last:border-0 md:grid-cols-[minmax(0,2fr)_140px_160px_100px]">
+            <span className="flex min-w-0 items-center gap-3">
+              <span className="skeleton-shimmer size-8 shrink-0 rounded-lg" />
+              <span className="skeleton-shimmer h-3.5 w-[min(70%,240px)] rounded-full" />
+            </span>
+            <span className="skeleton-shimmer hidden h-3 w-16 rounded-full md:block" />
+            <span className="skeleton-shimmer hidden h-3 w-24 rounded-full md:block" />
+            <span className="skeleton-shimmer h-3 w-12 rounded-full" />
+          </div>
+        ))}
+      </div>
+    )
+  }
+
+  return (
+    <div aria-busy="true" aria-label="Loading files" className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
+      <span className="sr-only">Loading files</span>
+      {Array.from({ length: 10 }, (_, index) => (
+        <div key={index} className="rounded-xl p-2">
+          <div className="skeleton-shimmer aspect-[4/3] rounded-lg" />
+          <div className="mt-2 flex items-center gap-2 px-1 pb-0.5">
+            <span className="skeleton-shimmer size-5 shrink-0 rounded-md" />
+            <span className="min-w-0 flex-1">
+              <span className="skeleton-shimmer block h-3.5 w-4/5 rounded-full" />
+              <span className="skeleton-shimmer mt-2 block h-2.5 w-2/5 rounded-full" />
+            </span>
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 function joinPath(dir: string, name: string): string {
   return dir ? `${dir}/${name}` : name
 }
@@ -1068,7 +1112,7 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
             ) : null}
 
             {loading && items.length === 0 ? (
-              <p className="text-sm text-[#8d8d8d]">Loading your files…</p>
+              <FileLoadingSkeleton view={view} />
             ) : (
               <FileView
                 items={visible}
