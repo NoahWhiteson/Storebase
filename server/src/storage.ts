@@ -14,7 +14,7 @@ import {
   writePointerFile,
 } from './network.ts'
 import { logicalFileSize, readPointerAt } from './pointer.ts'
-import { reserveWriteSpace, folderSize, QuotaError } from './quota.ts'
+import { reserveWriteSpace, folderSize, cachedFolderSize, pendingPoolReservations, QuotaError } from './quota.ts'
 import { inspectZipArchive } from './zip.ts'
 
 let networkConfig: ServerConfig | null = null
@@ -186,6 +186,7 @@ export async function saveFile(
     userQuota: quota.userQuota,
     config: networkConfig ?? undefined,
   })
+  let committed = false
   try {
     if (networkConfig) {
       const existing = await readPointerAt(full)
@@ -195,10 +196,13 @@ export async function saveFile(
           await putBlob(backend, existing.key, bytes)
           await writePointerFile(full, { ...existing, size: bytes.byteLength })
           const info = await stat(full)
-          return toEntry(root, full, info, bytes.byteLength)
+          const item = toEntry(root, full, info, bytes.byteLength)
+          committed = true
+          return item
         }
       }
-      const localReal = await folderSize(quota.poolRoot, { real: true })
+      const localReal = await cachedFolderSize(quota.poolRoot, { real: true })
+        + Math.max(0, pendingPoolReservations(quota.poolRoot) - extra)
       let target
       try {
         target = await pickTarget(networkConfig, extra, localReal, quota.nodeReserved)
@@ -213,13 +217,17 @@ export async function saveFile(
         await putBlob(target.backend, key, bytes)
         await writePointerFile(full, { sb: 1, backend: target.backend.id, key, size: bytes.byteLength })
         const info = await stat(full)
-        return toEntry(root, full, info, bytes.byteLength)
+        const item = toEntry(root, full, info, bytes.byteLength)
+        committed = true
+        return item
       }
     }
     await writeFile(full, bytes)
     const info = await stat(full)
-    return entryFrom(root, full, info)
-  } finally { release() }
+    const item = await entryFrom(root, full, info)
+    committed = true
+    return item
+  } finally { release(committed) }
 }
 
 export async function writeFileContent(
@@ -243,6 +251,7 @@ export async function writeFileContent(
     userQuota: quota.userQuota,
     config: networkConfig ?? undefined,
   })
+  let committed = false
   try {
     const pointer = await readPointerAt(full)
     if (pointer && networkConfig) {
@@ -251,13 +260,17 @@ export async function writeFileContent(
         await putBlob(backend, pointer.key, buf)
         await writePointerFile(full, { ...pointer, size: buf.byteLength })
         const next = await stat(full)
-        return toEntry(root, full, next, buf.byteLength)
+        const item = toEntry(root, full, next, buf.byteLength)
+        committed = true
+        return item
       }
     }
     await writeFile(full, buf)
     const next = await stat(full)
-    return entryFrom(root, full, next)
-  } finally { release() }
+    const item = await entryFrom(root, full, next)
+    committed = true
+    return item
+  } finally { release(committed) }
 }
 
 export type MovedEntry = { from: string; to: string; item: DriveEntry }
@@ -327,6 +340,7 @@ export async function copyEntries(
     userQuota: quota.userQuota,
     config: networkConfig ?? undefined,
   })
+  let committed = false
   try {
     if (destDir != null) {
       const destFull = resolveSafe(root, destDir)
@@ -339,8 +353,7 @@ export async function copyEntries(
       }
     }
 
-    const copied: MovedEntry[] = []
-    for (const rel of top) {
+    const copied = await mapConcurrent(top, 4, async rel => {
       const full = resolveSafe(root, rel)
       const parent = destDir == null ? parentRel(rel) : destDir
       const destParent = resolveSafe(root, parent)
@@ -359,10 +372,11 @@ export async function copyEntries(
       catch (error) { await rm(dest, { recursive: true, force: true }); throw error }
       const info = await stat(dest)
       const item = await entryFrom(root, dest, info)
-      copied.push({ from: rel, to: item.path, item })
-    }
+      return { from: rel, to: item.path, item }
+    })
+    committed = true
     return copied
-  } finally { release() }
+  } finally { release(committed) }
 }
 
 export async function renameEntry(root: string, relPath: string, nextName: string): Promise<DriveEntry> {
@@ -460,9 +474,7 @@ async function copyTree(src: string, dest: string, userId: string): Promise<void
   if (info.isDirectory()) {
     await mkdir(dest, { recursive: true })
     const entries = await readdir(src, { withFileTypes: true })
-    for (const entry of entries) {
-      await copyTree(join(src, entry.name), join(dest, entry.name), userId)
-    }
+    await mapConcurrent(entries, 8, entry => copyTree(join(src, entry.name), join(dest, entry.name), userId))
     return
   }
   if (networkConfig) {
@@ -560,6 +572,7 @@ export async function unzipArchive(root: string, relPath: string, quota: QuotaGa
   }
   const names = accepted.map(entry => entry.name)
   const release = await reserveWriteSpace({ userRoot: root, poolRoot: quota.poolRoot, incoming, nodeReserved: quota.nodeReserved, userQuota: quota.userQuota, config: networkConfig ?? undefined })
+  let committed = false
   try {
     progress('Decompressing archive')
     const packed = await new Promise<Record<string, Uint8Array>>((resolve, reject) => {
@@ -608,6 +621,8 @@ export async function unzipArchive(root: string, relPath: string, quota: QuotaGa
       throw err
     }
     const destInfo = await stat(destRoot)
-    return toEntry(root, destRoot, destInfo)
-  } finally { release() }
+    const item = toEntry(root, destRoot, destInfo)
+    committed = true
+    return item
+  } finally { release(committed) }
 }

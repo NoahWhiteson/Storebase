@@ -54,7 +54,7 @@ import {
   UserRound,
   Users,
 } from 'lucide-react'
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 
 const fieldClass =
   'h-11 rounded-xl border-0 bg-[#242424] text-white shadow-none placeholder:text-[#8d8d8d] outline-none focus:outline-none focus-visible:outline-none focus-visible:ring-0'
@@ -141,22 +141,40 @@ export function Settings({
   const [data, setData] = useState<SettingsPayload | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  const loadedSections = useRef(new Set<SettingsSection>())
+  const loadSequence = useRef(0)
 
-  async function reload() {
+  async function loadSection(target: SettingsSection, force = false) {
+    const request = ++loadSequence.current
+    if (!force && loadedSections.current.has(target)) {
+      setLoading(false)
+      return
+    }
     setLoading(true)
     setError(null)
     try {
-      setData(await fetchSettings())
+      const next = await fetchSettings(target)
+      setData((current) => current ? {
+        ...current,
+        ...next,
+        account: { ...current.account, ...next.account },
+        platform: { ...current.platform, ...next.platform },
+      } : next)
+      loadedSections.current.add(target)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not load settings')
+      if (request === loadSequence.current) setError(err instanceof Error ? err.message : 'Could not load settings')
     } finally {
-      setLoading(false)
+      if (request === loadSequence.current) setLoading(false)
     }
   }
 
+  async function reload() {
+    await loadSection(section, true)
+  }
+
   useEffect(() => {
-    void reload()
-  }, [])
+    void loadSection(section)
+  }, [section])
 
   const admin = Boolean(data?.admin ?? account.role === 'admin')
 
@@ -191,7 +209,12 @@ export function Settings({
           <SettingsNavigation admin={admin} section={section} onSection={setSection} />
         </div>
 
-        {loading && !data ? <p className="text-sm text-[#8d8d8d]">Loading settings…</p> : null}
+        {loading ? (
+          <div className="mb-5 flex items-center gap-2 text-sm text-[#8d8d8d]" role="status">
+            <span className="size-3.5 animate-spin rounded-full border-2 border-white/15 border-t-white/70" />
+            Loading this section…
+          </div>
+        ) : null}
         {error ? (
           <div className="mb-4 max-w-lg">
             <p className="text-sm text-[#f28b82]">{error}</p>
@@ -203,41 +226,41 @@ export function Settings({
           </div>
         ) : null}
 
-        {data && section === 'account' ? (
+        {!loading && data && section === 'account' ? (
           <AccountPanel data={data} onSaved={onAccount} onToast={onToast} />
         ) : null}
         {section === 'devices' ? <DevicesPanel onToast={onToast} /> : null}
-        {data && section === 'general' ? (
+        {!loading && data && section === 'general' ? (
           <GeneralPanel data={data} admin={admin} onSaved={reload} onAccount={onAccount} onPlatform={onPlatform} onToast={onToast} />
         ) : null}
-        {data && section === 'virus' ? (
+        {!loading && data && section === 'virus' ? (
           <VirusPanel data={data} admin={admin} onSaved={reload} onAccount={onAccount} onToast={onToast} />
         ) : null}
-        {data && admin && section === 'server' ? (
+        {!loading && data && admin && section === 'server' ? (
           <ServerPanel data={data} onSaved={reload} onToast={onToast} />
         ) : null}
-        {data && admin && section === 'domain' ? (
+        {!loading && data && admin && section === 'domain' ? (
           <DomainPanel data={data} onSaved={reload} onToast={onToast} />
         ) : null}
-        {data && admin && section === 'storage' ? (
+        {!loading && data && admin && section === 'storage' ? (
           <StoragePanel data={data} onSaved={reload} onToast={onToast} />
         ) : null}
-        {data && admin && section === 'users' ? (
+        {!loading && data && admin && section === 'users' ? (
           <UsersPanel
             meId={account.id}
             users={data.users ?? []}
-            nodeGb={data.storage?.reservedGb ?? 0}
+            nodeGb={(data.account.nodeReservedBytes ?? 0) / 1024 ** 3}
             onSaved={reload}
             onToast={onToast}
           />
         ) : null}
-        {data && admin && section === 'terminals' ? (
+        {!loading && data && admin && section === 'terminals' ? (
           <TerminalsPanel data={data} onSaved={reload} onPlatform={onPlatform} onToast={onToast} />
         ) : null}
-        {data && admin && section === 'updates' ? (
+        {!loading && data && admin && section === 'updates' ? (
           <UpdatesPanel data={data} onSaved={reload} onToast={onToast} />
         ) : null}
-        {data && admin && section === 'security' ? <SecurityPanel onToast={onToast} /> : null}
+        {!loading && data && admin && section === 'security' ? <SecurityPanel onToast={onToast} /> : null}
       </main>
     </div>
   )
@@ -303,30 +326,42 @@ function SettingsNavigation({
                 aria-expanded={open}
               >
                 {group.label}
-                {open ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
+                <ChevronRight
+                  className={cn(
+                    'size-3.5 transition-transform duration-200 ease-out motion-reduce:transition-none',
+                    open && 'rotate-90',
+                  )}
+                />
               </button>
-              {open ? (
-                <div className="mb-2 space-y-0.5">
-                  {group.items.map((item) => {
-                    const Icon = item.icon
-                    const active = section === item.id
-                    return (
-                      <button
-                        key={item.id}
-                        type="button"
-                        onClick={() => onSection(item.id)}
-                        className={cn(
-                          'flex h-10 w-full items-center gap-3 rounded-full px-4 text-sm font-medium',
-                          active ? 'bg-white/10 text-white' : 'text-[#b3b3b3] hover:bg-white/5 hover:text-white',
-                        )}
-                      >
-                        <Icon className="size-[18px]" />
-                        {item.label}
-                      </button>
-                    )
-                  })}
+              <div
+                className={cn(
+                  'grid transition-[grid-template-rows,opacity] duration-200 ease-out motion-reduce:transition-none',
+                  open ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0',
+                )}
+              >
+                <div className="overflow-hidden">
+                  <div className="mb-2 space-y-0.5">
+                    {group.items.map((item) => {
+                      const Icon = item.icon
+                      const active = section === item.id
+                      return (
+                        <button
+                          key={item.id}
+                          type="button"
+                          onClick={() => onSection(item.id)}
+                          className={cn(
+                            'flex h-10 w-full items-center gap-3 rounded-full px-4 text-sm font-medium transition-[background-color,color,transform] duration-150 motion-reduce:transition-none',
+                            active ? 'bg-white/10 text-white' : 'text-[#b3b3b3] hover:bg-white/5 hover:text-white',
+                          )}
+                        >
+                          <Icon className="size-[18px]" />
+                          {item.label}
+                        </button>
+                      )
+                    })}
+                  </div>
                 </div>
-              ) : null}
+              </div>
             </div>
           )
         })}

@@ -99,8 +99,8 @@ export type DomainInfo = {
   configs?: { nginx: string; caddy: string; apache: string }
 }
 
-export async function fetchSettings(): Promise<SettingsPayload> {
-  return api<SettingsPayload>('/api/settings')
+export async function fetchSettings(section: string = 'account'): Promise<SettingsPayload> {
+  return api<SettingsPayload>(`/api/settings?section=${encodeURIComponent(section)}`)
 }
 
 export async function saveSettings(body: {

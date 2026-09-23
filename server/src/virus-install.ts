@@ -4,7 +4,7 @@ import { platform as osPlatform, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { findExecutable } from './executables.ts'
-import { resetScannerAvailabilityCache } from './virus.ts'
+import { resetScannerAvailabilityCache, scanFile } from './virus.ts'
 
 const execFileAsync = promisify(execFile)
 
@@ -73,6 +73,13 @@ async function performInstall(): Promise<void> {
       step('Updating virus definitions', 80)
       try { await run(await privileged([refresher, ...manager.refresh.slice(1)], manager.needsRoot)) } catch { /* freshclam may be locked by its service */ }
     }
+    if (osPlatform() === 'linux') {
+      const systemctl = await findExecutable('systemctl')
+      if (systemctl) {
+        step('Starting the ClamAV scan service', 90)
+        try { await run(await privileged([systemctl, 'enable', '--now', 'clamav-daemon'], true)) } catch { /* clamscan remains available as a fallback */ }
+      }
+    }
     step('Verifying the scanner and definitions', 95)
     const version = await scannerVersion()
     state.engineVersion = version
@@ -108,10 +115,8 @@ async function scannerCanScan(): Promise<boolean> {
   const file = join(dir, 'empty.txt')
   try {
     await writeFile(file, '')
-    const scanner = await findExecutable('clamscan')
-    if (!scanner) return false
-    await execFileAsync(scanner, ['--no-summary', file], { timeout: 30_000 })
-    return true
+    const result = await scanFile(file)
+    return result.status === 'clean'
   } catch { return false }
   finally { await rm(dir, { recursive: true, force: true }).catch(() => {}) }
 }

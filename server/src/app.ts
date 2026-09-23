@@ -51,7 +51,7 @@ import {
 } from './network.ts'
 import { dropPath, loadMeta, rewritePath, setStarred, touchRecent } from './meta.ts'
 import { loadPlatform, terminalsAllowed, virusScanEnabled } from './platform.ts'
-import { copyScanPath, copyScanToTree, dropScanPath, loadScanResults, rewriteScanPath, scanFile, scanResultFor, scanResultFrom, scanUpload, setScanResult, type VirusScanResult } from './virus.ts'
+import { copyScanPath, copyScanToTree, dropScanPath, loadScanResults, rewriteScanPath, scanFile, scanResultFor, scanResultFrom, setScanResult, type VirusScanResult } from './virus.ts'
 import { requirePool } from './pool.ts'
 import { QuotaError, cachedFolderSize } from './quota.ts'
 import { clearSession, issueLinkUnlock, issueSession, linkUnlocked, readSessionUserId } from './session.ts'
@@ -988,22 +988,32 @@ export function createApp(config: ServerConfig) {
 
   app.post('/api/files/upload', async (c) => {
     const root = c.get('root')
+    const user = c.get('user')
     const dir = c.req.query('path') ?? ''
     const form = await c.req.parseBody()
     const file = form.file
     if (!(file instanceof File)) return c.json({ error: 'file field required' }, 400)
     const buf = Buffer.from(await file.arrayBuffer())
     try {
-      const quota = await quotaGate(config, c.get('user'))
+      const quota = await quotaGate(config, user)
       const rel = [dir.replaceAll('\\', '/').replace(/^\/+|\/+$/g, ''), file.name].filter(Boolean).join('/')
       const platform = await loadPlatform(config)
-      const scan = virusScanEnabled(c.get('user'), platform) ? await scanUpload(buf, file.name) : null
       await snapshotExisting(root, rel, quota)
       const item = await saveFile(root, dir, file.name, buf, quota)
-      if (scan) await setScanResult(root, item.path, scan)
       await touchRecent(root, item.path)
       if (isTempPath(item.path)) await trackTemp(root, item.path)
-      return c.json({ item: { ...item, starred: false, trashed: false, virusScan: scan } }, 201)
+      if (virusScanEnabled(user, platform)) {
+        void (async () => {
+          try {
+            const result = await scanOpenedFile(config, await openDownload(root, item.path))
+            await setScanResult(root, item.path, result)
+            pingDrive(user.id)
+          } catch {
+            // The upload is already durable. A later manual scan can retry.
+          }
+        })()
+      }
+      return c.json({ item: { ...item, starred: false, trashed: false, virusScan: null } }, 201)
     } catch (err) {
       if (err instanceof QuotaError) return c.json({ error: err.message, code: err.code }, 507)
       throw err

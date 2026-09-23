@@ -7,6 +7,7 @@ import type { ServerConfig } from './config.ts'
 import { encodePointer, readPointerAt, type FilePointer } from './pointer.ts'
 import { s3Delete, s3Get, s3Probe, s3Put, type S3Target } from './s3.ts'
 import { cachedComputation } from './quota.ts'
+import { mapConcurrent } from './concurrency.ts'
 
 export type BackendKind = 's3' | 'node'
 
@@ -346,7 +347,7 @@ export async function dropStored(config: ServerConfig, full: string): Promise<vo
   }
   if (info.isDirectory()) {
     const entries = await readdir(full, { withFileTypes: true })
-    for (const entry of entries) await dropStored(config, join(full, entry.name))
+    await mapConcurrent(entries, 8, entry => dropStored(config, join(full, entry.name)))
     return
   }
   const pointer = await readPointerAt(full)

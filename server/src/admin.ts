@@ -83,16 +83,20 @@ export function mountAdmin(app: Hono<{ Variables: Vars }>, config: ServerConfig,
   app.get('/api/settings', async (c) => {
     const user = c.get('user')
     const root = c.get('root')
-    const manifest = await requirePool(config)
-    const usedBytes = await cachedFolderSize(root)
-    const platform = await loadPlatform(config)
+    const section = c.req.query('section')
+    const [manifest, usedBytes, platform, virusScannerAvailable] = await Promise.all([
+      requirePool(config),
+      cachedFolderSize(root),
+      loadPlatform(config),
+      scannerAvailable(),
+    ])
     const account = {
       ...toPublic(user),
       usedBytes,
       reservedBytes: effectiveReserved(user, manifest.reservedBytes),
       quotaBytes: personalQuota(user),
       nodeReservedBytes: manifest.reservedBytes,
-      virusScannerAvailable: await scannerAvailable(),
+      virusScannerAvailable,
     }
     if (user.role !== 'admin') {
       return c.json({
@@ -101,26 +105,14 @@ export function mountAdmin(app: Hono<{ Variables: Vars }>, config: ServerConfig,
         platform: { nodeName: platform.nodeName, defaultView: platform.defaultView, virusScanPolicy: platform.virusScanPolicy },
       })
     }
-    const users = await loadUsers(config)
-    const disk = await diskInfo(config.dataDir)
-    const poolUsedBytes = await cachedFolderSize(config.driveDir)
-    const localUsedBytes = await cachedFolderSize(config.driveDir, { real: true })
-    const network = await loadNetwork(config)
-    const backends = await listBackends(config)
-    const remoteBytes = await remoteCapacity(config)
-    const people = await Promise.all(
-      users.map(async (person) => ({
-        ...toPublic(person),
-        usedBytes: await cachedFolderSize(join(config.driveDir, person.id)),
-        quotaBytes: personalQuota(person),
-      })),
-    )
-    return c.json({
+    const response: Record<string, unknown> = {
       admin: true,
       account,
       platform,
-      virusInstall: virusInstallSnapshot(),
-      server: {
+    }
+    const wants = (name: string) => !section || section === name
+    if (wants('virus')) response.virusInstall = virusInstallSnapshot()
+    if (wants('server')) response.server = {
         liveHost: config.host,
         livePort: config.port,
         hostname: hostname(),
@@ -130,9 +122,18 @@ export function mountAdmin(app: Hono<{ Variables: Vars }>, config: ServerConfig,
         bindHost: platform.bindHost,
         bindPort: platform.bindPort,
         restartNeeded: platform.bindHost !== config.host || platform.bindPort !== config.port,
-      },
-      domain: await domainView(config),
-      storage: {
+      }
+    if (wants('domain')) response.domain = await domainView(config)
+    if (wants('storage')) {
+      const [disk, poolUsedBytes, localUsedBytes, network, backends, remoteBytes] = await Promise.all([
+        diskInfo(config.dataDir),
+        cachedFolderSize(config.driveDir),
+        cachedFolderSize(config.driveDir, { real: true }),
+        loadNetwork(config),
+        listBackends(config),
+        remoteCapacity(config),
+      ])
+      response.storage = {
         reservedBytes: manifest.reservedBytes,
         reservedGb: bytesToGb(manifest.reservedBytes),
         poolUsedBytes,
@@ -143,10 +144,20 @@ export function mountAdmin(app: Hono<{ Variables: Vars }>, config: ServerConfig,
         inboundEnabled: network.inboundEnabled,
         backends,
         order: network.order,
-      },
-      users: people,
-      update: { ...updateStatus(), autoUpdate: platform.autoUpdate },
-    })
+      }
+    }
+    if (wants('users')) {
+      const users = await loadUsers(config)
+      response.users = await Promise.all(
+        users.map(async (person) => ({
+          ...toPublic(person),
+          usedBytes: await cachedFolderSize(join(config.driveDir, person.id)),
+          quotaBytes: personalQuota(person),
+        })),
+      )
+    }
+    if (wants('updates')) response.update = { ...updateStatus(), autoUpdate: platform.autoUpdate }
+    return c.json(response)
   })
 
   app.patch('/api/settings', async (c) => {

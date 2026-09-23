@@ -1,9 +1,10 @@
 import { execFile } from 'node:child_process'
 import { mkdtemp, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { platform as osPlatform, tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { promisify } from 'node:util'
 import { findExecutable } from './executables.ts'
+import { withLock } from './concurrency.ts'
 
 const execFileAsync = promisify(execFile)
 const SCAN_FILE = '.storebase-virus.json'
@@ -22,6 +23,8 @@ const writes = new Map<string, Promise<void>>()
 
 let scannerCache: boolean | null = null
 let scannerCacheAt = 0
+let daemonUnavailableUntil = 0
+let daemonStartAttemptedAt = 0
 
 function cleanPath(path: string): string {
   return path.replaceAll('\\', '/').replace(/^\/+|\/+$/g, '')
@@ -53,7 +56,7 @@ async function mutate(root: string, update: (store: ScanStore) => boolean): Prom
 export async function scannerAvailable(): Promise<boolean> {
   const now = Date.now()
   if (scannerCache !== null && now - scannerCacheAt < 30_000) return scannerCache
-  scannerCache = Boolean(await findExecutable('clamscan'))
+  scannerCache = Boolean(await findExecutable('clamdscan') ?? await findExecutable('clamscan'))
   scannerCacheAt = now
   return scannerCache
 }
@@ -70,11 +73,53 @@ function signatureFrom(output: string): string | undefined {
 
 export async function scanFile(path: string): Promise<VirusScanResult> {
   const scannedAt = new Date().toISOString()
+  if (Date.now() >= daemonUnavailableUntil) {
+    const daemon = await findExecutable('clamdscan')
+    if (daemon) {
+      let result = await runScanner(daemon, ['--fdpass', '--no-summary', path], scannedAt, 30 * 60_000)
+      if (result.status === 'error') {
+        result = await runScanner(daemon, ['--stream', '--no-summary', path], scannedAt, 30 * 60_000)
+      }
+      if (result.status === 'error' && await tryStartDaemon()) {
+        result = await runScanner(daemon, ['--fdpass', '--no-summary', path], scannedAt, 30 * 60_000)
+      }
+      if (result.status === 'clean' || result.status === 'infected') {
+        daemonUnavailableUntil = 0
+        return result
+      }
+      daemonUnavailableUntil = Date.now() + 30_000
+    }
+  }
   const scanner = await findExecutable('clamscan')
   if (!scanner) return { status: 'unavailable', score: null, scannedAt, engine: 'clamav' }
+  // clamscan reloads the signature database for every process. Serialize this
+  // fallback so concurrent scans do not exhaust the node while clamd is down.
+  return withLock('virus:clamscan', () => runScanner(scanner, ['--stdout', '--no-summary', path], scannedAt, 30 * 60_000))
+}
+
+async function tryStartDaemon(): Promise<boolean> {
+  if (osPlatform() !== 'linux' || typeof process.getuid !== 'function' || process.getuid() !== 0) return false
+  if (Date.now() - daemonStartAttemptedAt < 5 * 60_000) return false
+  daemonStartAttemptedAt = Date.now()
+  const systemctl = await findExecutable('systemctl')
+  if (!systemctl) return false
   try {
-    const result = await execFileAsync(scanner, ['--stdout', '--no-summary', path], {
-      timeout: 30 * 60_000,
+    await execFileAsync(systemctl, ['start', 'clamav-daemon'], { timeout: 30_000 })
+    return true
+  } catch {
+    return false
+  }
+}
+
+async function runScanner(
+  executable: string,
+  args: string[],
+  scannedAt: string,
+  timeout: number,
+): Promise<VirusScanResult> {
+  try {
+    const result = await execFileAsync(executable, args, {
+      timeout,
       maxBuffer: 1024 * 1024,
     })
     return { status: 'clean', score: 100, scannedAt, engine: 'clamav', signature: signatureFrom(result.stdout) }
@@ -90,8 +135,7 @@ export async function scanFile(path: string): Promise<VirusScanResult> {
 }
 
 export async function scanUpload(bytes: Buffer, filename: string): Promise<VirusScanResult> {
-  const scanner = await findExecutable('clamscan')
-  if (!scanner) return { status: 'unavailable', score: null, scannedAt: new Date().toISOString(), engine: 'clamav' }
+  if (!(await scannerAvailable())) return { status: 'unavailable', score: null, scannedAt: new Date().toISOString(), engine: 'clamav' }
   const dir = await mkdtemp(join(tmpdir(), 'storebase-scan-'))
   const target = join(dir, basename(filename).replace(/[^a-zA-Z0-9._-]/g, '_') || 'upload')
   try {

@@ -108,6 +108,14 @@ test('capacity reservations reject concurrent oversubscription and release clean
   again()
 })
 
+test('successful writes remain counted while the usage cache refreshes', async t => {
+  const { root, quota } = await fixture(t)
+  const options = { userRoot: root, poolRoot: quota.poolRoot, incoming: 60, nodeReserved: 100, userQuota: null }
+  const committed = await reserveWriteSpace(options)
+  committed(true)
+  await assert.rejects(reserveWriteSpace(options), /space/)
+})
+
 test('bounded concurrency settles in-flight writes before rejecting', async () => {
   let completed = false
   await assert.rejects(mapConcurrent([0, 1, 2], 2, async value => {
