@@ -91,7 +91,7 @@ export type Me = {
   user: PublicUser
   host: string
   reservedBytes: number
-  usedBytes: number
+  usedBytes: number | null
   quotaBytes?: number | null
   nodeReservedBytes?: number
   nodeName?: string
@@ -173,7 +173,7 @@ async function parse<T>(res: Response): Promise<T> {
 
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers)
-  if (init.body && !(init.body instanceof FormData) && !headers.has('content-type')) {
+  if (init.body && !(init.body instanceof FormData) && !(init.body instanceof File) && !headers.has('content-type')) {
     headers.set('content-type', 'application/json')
   }
   const action = path.split('?')[0].split('/').pop() ?? ''
@@ -185,12 +185,12 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   } else if (init.body instanceof FormData) {
     const file = init.body.get('file')
     if (file instanceof File) detail = file.name
-  }
+  } else if (init.body instanceof File) detail = init.body.name
   if (!detail && init.method === 'DELETE') detail = new URLSearchParams(path.split('?')[1]).get('path') ?? ''
   const operation = tracked ? beginOperation(labels[action] ?? 'Updating files', detail) : undefined
   if (action === 'unzip') headers.set('accept', 'application/x-ndjson')
   try {
-    const res = init.body instanceof FormData && action === 'upload'
+    const res = (init.body instanceof FormData || init.body instanceof File) && action === 'upload'
       ? await new Promise<Response>((resolve, reject) => {
           const xhr = new XMLHttpRequest()
           xhr.open(init.method ?? 'POST', path)
@@ -203,7 +203,7 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
           xhr.onload = () => resolve(new Response(xhr.responseText, { status: xhr.status, headers: { 'content-type': 'application/json' } }))
           xhr.onerror = () => reject(new Error('Upload connection failed'))
           xhr.onabort = () => reject(new Error('Upload cancelled'))
-          xhr.send(init.body as FormData)
+          xhr.send(init.body as FormData | File)
         })
       : await fetch(path, { credentials: 'include', ...init, headers })
     let result: T
@@ -243,7 +243,7 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
 }
 
 export async function fetchMe(): Promise<Me | null> {
-  const res = await fetch('/api/me', { credentials: 'include' })
+  const res = await fetch('/api/me?usage=deferred', { credentials: 'include' })
   if (res.status === 401) return null
   return parse<Me>(res)
 }
@@ -257,7 +257,7 @@ export async function login(email: string, password: string): Promise<Me> {
   const body = await api<{
     user: PublicUser
     reservedBytes: number
-    usedBytes: number
+    usedBytes: number | null
     host?: string
     quotaBytes?: number | null
     nodeReservedBytes?: number
@@ -266,7 +266,7 @@ export async function login(email: string, password: string): Promise<Me> {
     terminalsEnabled?: boolean
     virusScanPolicy?: 'user' | 'on' | 'off'
     virusScanEnabled?: boolean
-  }>('/api/login', {
+  }>('/api/login?usage=deferred', {
     method: 'POST',
     body: JSON.stringify({ email, password }),
   })
@@ -295,14 +295,14 @@ export function parseSharePath(id: string): { shareId: string; sub: string } | n
   return { shareId: match[1], sub: match[2] ?? '' }
 }
 
-export async function listFiles(opts: { path?: string; view?: string; q?: string; share?: string }): Promise<FileEntry[]> {
+export async function listFiles(opts: { path?: string; view?: string; q?: string; share?: string }, signal?: AbortSignal): Promise<FileEntry[]> {
   const params = new URLSearchParams()
   if (opts.path) params.set('path', opts.path)
   if (opts.view) params.set('view', opts.view)
   if (opts.q) params.set('q', opts.q)
   if (opts.share) params.set('share', opts.share)
   const qs = params.toString()
-  const body = await api<{ items: FileEntry[] }>(`/api/files${qs ? `?${qs}` : ''}`)
+  const body = await api<{ items: FileEntry[] }>(`/api/files${qs ? `?${qs}` : ''}`, { signal })
   return body.items
 }
 
@@ -315,10 +315,10 @@ export async function mkdir(path: string): Promise<FileEntry> {
 }
 
 export async function uploadFile(dir: string, file: File): Promise<FileEntry> {
-  const form = new FormData()
-  form.set('file', file)
-  const qs = dir ? `?path=${encodeURIComponent(dir)}` : ''
-  const body = await api<{ item: FileEntry }>(`/api/files/upload${qs}`, { method: 'POST', body: form })
+  const qs = new URLSearchParams({ path: dir, name: file.name })
+  const body = await api<{ item: FileEntry }>(`/api/files/upload?${qs}`, {
+    method: 'POST', body: file, headers: { 'content-type': 'application/octet-stream' },
+  })
   return body.item
 }
 

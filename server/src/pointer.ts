@@ -34,10 +34,10 @@ export function encodePointer(pointer: FilePointer): Buffer {
   return Buffer.from(`${JSON.stringify(pointer)}\n`, 'utf8')
 }
 
-export async function readPointerAt(full: string): Promise<FilePointer | null> {
+export async function readPointerAt(full: string, knownSize?: number): Promise<FilePointer | null> {
   try {
-    const info = await stat(full)
-    if (!info.isFile() || info.size < 12 || info.size > 2048) return null
+    const size = knownSize ?? (await stat(full)).size
+    if (size < 12 || size > 2048) return null
     return parsePointer(await readFile(full))
   } catch {
     return null
@@ -46,7 +46,7 @@ export async function readPointerAt(full: string): Promise<FilePointer | null> {
 
 export async function logicalFileSize(full: string, size?: number): Promise<number> {
   const bytes = size ?? (await stat(full)).size
-  if (bytes > 2048) return bytes
-  const pointer = await readPointerAt(full)
+  if (bytes < 12 || bytes > 2048) return bytes
+  const pointer = await readPointerAt(full, bytes)
   return pointer ? pointer.size : bytes
 }

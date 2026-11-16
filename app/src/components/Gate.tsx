@@ -1,12 +1,13 @@
-import App from '@/App'
-import { Login } from '@/components/Login'
-import { Onboarding } from '@/components/Onboarding'
-import { PublicViewer } from '@/components/PublicViewer'
 import { StorebaseLogo } from '@/components/StorebaseLogo'
 import { Button } from '@/components/ui/button'
 import { fetchMe, type Me } from '@/lib/api'
 import { fetchSetup, type SetupState } from '@/lib/setup'
-import { useCallback, useEffect, useState, type ReactNode } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useState, type ReactNode } from 'react'
+
+const App = lazy(() => import('@/App'))
+const Login = lazy(() => import('./Login').then(module => ({ default: module.Login })))
+const Onboarding = lazy(() => import('./Onboarding').then(module => ({ default: module.Onboarding })))
+const PublicViewer = lazy(() => import('./PublicViewer').then(module => ({ default: module.PublicViewer })))
 
 const GATE_CACHE_KEY = 'storebase:gate:v1'
 
@@ -56,8 +57,9 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
 
 export function Gate() {
   const token = window.location.pathname.match(/^\/s\/([^/]+)/)?.[1]
-  if (token) return <PublicViewer token={decodeURIComponent(token)} />
-  return <AppGate />
+  return <Suspense fallback={<Shell><p role="status" className="text-sm text-[#8d8d8d]">Loading Storebase…</p></Shell>}>
+    {token ? <PublicViewer token={decodeURIComponent(token)} /> : <AppGate />}
+  </Suspense>
 }
 
 function AppGate() {
@@ -105,13 +107,19 @@ function AppGate() {
         window.clearTimeout(slow)
         return
       }
+      // Start both round trips together; an unconfigured node can reject /me.
+      const sessionRequest = withTimeout(fetchMe(), 50000).then(
+        value => ({ value }), error => ({ error }),
+      )
       const state = await withTimeout(fetchSetup(), 50000)
       setSetup(state)
       if (!state.configured) {
         setPhase('setup')
         return
       }
-      const session = await withTimeout(fetchMe(), 50000)
+      const result = await sessionRequest
+      if ('error' in result) throw result.error
+      const session = result.value
       if (!session) {
         setPhase('login')
         return

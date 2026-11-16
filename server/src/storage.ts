@@ -1,7 +1,11 @@
 import { Worker } from 'node:worker_threads'
+import { createHash, randomUUID } from 'node:crypto'
+import { createWriteStream } from 'node:fs'
+import { Readable, Transform } from 'node:stream'
+import { pipeline } from 'node:stream/promises'
 import { mapConcurrent } from './concurrency.ts'
 import type { Dirent } from 'node:fs'
-import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, mkdtemp, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname, join, relative, resolve, sep } from 'node:path'
 import type { ServerConfig } from './config.ts'
 import {
@@ -16,6 +20,7 @@ import {
 import { logicalFileSize, readPointerAt } from './pointer.ts'
 import { reserveWriteSpace, folderSize, cachedFolderSize, pendingPoolReservations, QuotaError } from './quota.ts'
 import { inspectZipArchive } from './zip.ts'
+import type { BlobFile } from './s3.ts'
 
 let networkConfig: ServerConfig | null = null
 
@@ -158,11 +163,31 @@ export type QuotaGate = {
   userId?: string
 }
 
+export type UploadSource = { stream: ReadableStream; size: number }
+
+/** Stage beside the drive, with bounded memory, then publish only complete files. */
+async function stageUpload(source: UploadSource, directory: string): Promise<BlobFile> {
+  const path = join(directory, randomUUID())
+  const hash = createHash('sha256')
+  let size = 0
+  const measure = new Transform({
+    transform(chunk: Buffer, _encoding, callback) {
+      size += chunk.length
+      if (size > source.size) return callback(new Error('Upload exceeds its declared size'))
+      hash.update(chunk)
+      callback(null, chunk)
+    },
+  })
+  await pipeline(Readable.fromWeb(source.stream as never), measure, createWriteStream(path, { flags: 'wx' }))
+  if (size !== source.size) throw new Error('Upload ended before the complete file arrived')
+  return { path, size, sha256: hash.digest('hex') }
+}
+
 export async function saveFile(
   root: string,
   relDir: string,
   filename: string,
-  bytes: Buffer,
+  bytes: Buffer | UploadSource,
   quota: QuotaGate,
 ): Promise<DriveEntry> {
   const dir = resolveSafe(root, relDir)
@@ -172,9 +197,11 @@ export async function saveFile(
     throw new Error('Invalid file name')
   }
   const full = resolveSafe(root, join(relDir, safeName))
-  let extra = bytes.byteLength
+  const size = Buffer.isBuffer(bytes) ? bytes.byteLength : bytes.size
+  if (!Number.isSafeInteger(size) || size < 0) throw new Error('Invalid upload size')
+  let extra = size
   try {
-    extra = Math.max(0, bytes.byteLength - await logicalFileSize(full))
+    extra = Math.max(0, size - await logicalFileSize(full))
   } catch {
     // new file
   }
@@ -187,16 +214,23 @@ export async function saveFile(
     config: networkConfig ?? undefined,
   })
   let committed = false
+  let staging: string | undefined
   try {
+    let body: Buffer | BlobFile
+    if (Buffer.isBuffer(bytes)) body = bytes
+    else {
+      staging = await mkdtemp(join(dirname(quota.poolRoot), '.storebase-upload-'))
+      body = await stageUpload(bytes, staging)
+    }
     if (networkConfig) {
       const existing = await readPointerAt(full)
       if (existing) {
         const backend = await findBackend(networkConfig, existing.backend)
         if (backend) {
-          await putBlob(backend, existing.key, bytes)
-          await writePointerFile(full, { ...existing, size: bytes.byteLength })
+          await putBlob(backend, existing.key, body)
+          await writePointerFile(full, { ...existing, size })
           const info = await stat(full)
-          const item = toEntry(root, full, info, bytes.byteLength)
+          const item = toEntry(root, full, info, size)
           committed = true
           return item
         }
@@ -214,20 +248,33 @@ export async function saveFile(
       }
       if (target.kind === 'remote') {
         const key = newObjectKey(quota.userId ?? 'drive')
-        await putBlob(target.backend, key, bytes)
-        await writePointerFile(full, { sb: 1, backend: target.backend.id, key, size: bytes.byteLength })
+        await putBlob(target.backend, key, body)
+        await writePointerFile(full, { sb: 1, backend: target.backend.id, key, size })
         const info = await stat(full)
-        const item = toEntry(root, full, info, bytes.byteLength)
+        const item = toEntry(root, full, info, size)
         committed = true
         return item
       }
     }
-    await writeFile(full, bytes)
+    if (Buffer.isBuffer(body)) await writeFile(full, body)
+    else {
+      try { await rename(body.path, full) }
+      catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EXDEV') throw error
+        // A user drive can be mounted on a separate filesystem.
+        const adjacent = join(dir, `.storebase-upload-${randomUUID()}`)
+        try { await copyFile(body.path, adjacent); await rename(adjacent, full) }
+        finally { await rm(adjacent, { force: true }) }
+      }
+    }
     const info = await stat(full)
     const item = await entryFrom(root, full, info)
     committed = true
     return item
-  } finally { release(committed) }
+  } finally {
+    release(committed)
+    if (staging) await rm(staging, { recursive: true, force: true })
+  }
 }
 
 export async function writeFileContent(
