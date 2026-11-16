@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { ServerConfig } from './config.ts'
 import { entryAt, listPath, openDownload, resolveSafe, type DriveEntry } from './storage.ts'
+import { isBlocked, loadMeta, lockFields, LockError } from './meta.ts'
 import { ensureUserDrive, findByEmail, findById, loadUsers, type UserRecord } from './users.ts'
 import { loadScanResults, scanResultFrom, type VirusScanResult } from './virus.ts'
 
@@ -14,6 +15,8 @@ type SharedDriveEntry = DriveEntry & {
   ownerId: string
   shared: true
   virusScan: VirusScanResult | null
+  locked?: boolean
+  lockOpen?: boolean
 }
 
 export type ShareStatus = 'ok' | 'pending'
@@ -226,6 +229,7 @@ export async function listSharesForPath(config: ServerConfig, owner: UserRecord,
 export async function listIncoming(
   config: ServerConfig,
   user: UserRecord,
+  open: string[] = [],
 ): Promise<SharedDriveEntry[]> {
   const shares = (await loadAll(config)).filter(
     (share) => share.toUserId === user.id && shareStatus(share) === 'ok',
@@ -241,8 +245,10 @@ export async function listIncoming(
     if (!item) continue
     const scans = scanCache.get(root) ?? await loadScanResults(root)
     scanCache.set(root, scans)
+    const locks = (await loadMeta(root)).locks
     out.push({
       ...item,
+      ...lockFields(locks, open, owner.id, item.path),
       path: virtualPath(share.id, item.path, share.path),
       shareId: share.id,
       shareName: item.name,
@@ -293,6 +299,7 @@ export async function listSharedFolder(
   user: UserRecord,
   shareId: string,
   sub = '',
+  open: string[] = [],
 ): Promise<{ shareName: string; items: SharedDriveEntry[] }> {
   const share = (await loadAll(config)).find((item) => item.id === shareId)
   if (!share || share.toUserId !== user.id || shareStatus(share) !== 'ok') throw new ShareError('Share not found', 404)
@@ -306,12 +313,15 @@ export async function listSharedFolder(
   const rel = sub ? `${share.path}/${sub.replace(/^\/+/, '')}` : share.path
   resolveSafe(root, rel)
   if (!covers(share.path, rel)) throw new ShareError('Path escapes the share', 400)
+  const locks = (await loadMeta(root)).locks
+  if (isBlocked(locks, open, owner.id, rel)) throw new LockError()
   const items = await listPath(root, rel)
   const scans = await loadScanResults(root)
   return {
     shareName: base.name,
     items: items.map((item) => ({
       ...item,
+      ...lockFields(locks, open, owner.id, item.path),
       path: virtualPath(share.id, item.path, share.path),
       shareId: share.id,
       shareName: base.name,
@@ -328,14 +338,14 @@ export async function resolveSharedPath(
   user: UserRecord,
   shareId: string,
   sub = '',
-): Promise<{ root: string; rel: string }> {
+): Promise<{ root: string; rel: string; ownerId: string }> {
   const share = (await loadAll(config)).find((item) => item.id === shareId)
   if (!share || share.toUserId !== user.id) throw new ShareError('Share not found', 404)
   const root = await ensureUserDrive(config, share.ownerId)
   const rel = sub ? `${share.path}/${sub.replace(/^\/+/, '')}` : share.path
   resolveSafe(root, rel)
   if (!covers(share.path, rel)) throw new ShareError('Path escapes the share', 400)
-  return { root, rel }
+  return { root, rel, ownerId: share.ownerId }
 }
 
 export async function openSharedDownload(

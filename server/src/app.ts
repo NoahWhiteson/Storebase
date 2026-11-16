@@ -4,7 +4,7 @@ import { hostname, tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
-import { Hono } from 'hono'
+import { Hono, type Context } from 'hono'
 import { cors } from 'hono/cors'
 import { stream, streamSSE } from 'hono/streaming'
 import { mountAdmin } from './admin.ts'
@@ -31,6 +31,7 @@ import {
   listPublicFolder,
   openPublicFile,
   publicLink,
+  publicRel,
   resolveLink,
   rewriteLinks,
   unlockLink,
@@ -49,12 +50,12 @@ import {
   readInbound,
   remoteCapacity,
 } from './network.ts'
-import { dropPath, loadMeta, rewritePath, setStarred, touchRecent } from './meta.ts'
+import { ancestorBlocked, clearItemLock, dropPath, isBlocked, itemPasswordMatches, loadMeta, lockFields, LockError, rewritePath, setItemLock, setStarred, touchRecent } from './meta.ts'
 import { loadPlatform, terminalsAllowed, virusScanEnabled } from './platform.ts'
 import { copyScanPath, copyScanToTree, dropScanPath, loadScanResults, rewriteScanPath, scanFile, scanResultFor, scanResultFrom, setScanResult, type VirusScanResult } from './virus.ts'
 import { requirePool } from './pool.ts'
 import { QuotaError, cachedFolderSize, folderSizeSnapshot, invalidateSizeCache } from './quota.ts'
-import { clearSession, issueLinkUnlock, issueSession, linkUnlocked, readSessionUserId } from './session.ts'
+import { clearSession, issueFileUnlock, issueLinkUnlock, issueSession, linkUnlocked, readFileUnlocks, readSessionUserId } from './session.ts'
 import { completeSetup, getSetupState, SetupError } from './setup.ts'
 import { pingDrive, startDriveWatch, subscribeDrive } from './drive-events.ts'
 import {
@@ -258,6 +259,8 @@ async function sendFile(
   })
 }
 
+let remoteScanChain: Promise<void> = Promise.resolve()
+
 async function scanOpenedFile(config: ServerConfig, file: OpenedFile): Promise<VirusScanResult> {
   if (file.full) return scanFile(file.full)
   if (!file.pointer) throw new Error('File is missing')
@@ -272,6 +275,28 @@ async function scanOpenedFile(config: ServerConfig, file: OpenedFile): Promise<V
   } finally {
     await rm(dir, { recursive: true, force: true }).catch(() => {})
   }
+}
+
+async function assertOpen(c: Context, config: ServerConfig, scope: string, ownerId: string, root: string, rel: string): Promise<void> {
+  const locks = (await loadMeta(root)).locks
+  if (isBlocked(locks, await readFileUnlocks(c, config, scope), ownerId, rel)) throw new LockError()
+}
+
+async function denyIfLocked(c: Context, config: ServerConfig, scope: string, ownerId: string, root: string, rel: string): Promise<Response | null> {
+  try {
+    await assertOpen(c, config, scope, ownerId, root, rel)
+    return null
+  } catch (err) {
+    if (err instanceof LockError) return c.json({ error: err.message, code: err.code }, 401)
+    throw err
+  }
+}
+
+async function lockTarget(config: ServerConfig, user: UserRecord, root: string, path: string, shareId = ''): Promise<{ ownerId: string; root: string; rel: string }> {
+  if (shareId) return resolveSharedPath(config, user, shareId, path)
+  const parsed = parseSharePath(path)
+  if (parsed) return resolveSharedPath(config, user, parsed.shareId, parsed.sub)
+  return { ownerId: user.id, root, rel: path }
 }
 
 async function touchTempMove(root: string, from: string, to: string): Promise<void> {
@@ -488,6 +513,10 @@ export function createApp(config: ServerConfig) {
       if (link.passwordHash && !unlocked) {
         return c.json({ error: 'Password required', code: 'PASSWORD' }, 401)
       }
+      const open = await readFileUnlocks(c, config, `public:${token}`)
+      if (isBlocked((await loadMeta(root)).locks, open, owner.id, item.path)) {
+        return c.json({ error: 'Password required', code: 'LOCK' }, 401)
+      }
       return c.json({
         token: link.token,
         name: item.name,
@@ -518,6 +547,31 @@ export function createApp(config: ServerConfig) {
     }
   })
 
+  app.post('/api/public/:token/unlock-file', async (c) => {
+    try {
+      const token = c.req.param('token')
+      const { link, root, owner } = await resolveLink(config, token)
+      if (link.expiresAt && Date.parse(link.expiresAt) <= Date.now()) {
+        return c.json({ error: 'This link has expired', code: 'EXPIRED' }, 401)
+      }
+      if (link.passwordHash && !(await linkUnlocked(c, config, token))) {
+        return c.json({ error: 'Password required', code: 'PASSWORD' }, 401)
+      }
+      const body = await c.req.json<{ password?: string; path?: string }>().catch(() => ({ password: '', path: '' }))
+      const rel = await publicRel(link.path, body.path ?? '')
+      if (!(rel === link.path || rel.startsWith(`${link.path}/`))) throw new LinkError('Path escapes the share', 400)
+      if (!(await itemPasswordMatches(root, rel, body.password ?? ''))) {
+        return c.json({ error: 'Wrong password', code: 'LOCK' }, 401)
+      }
+      await issueFileUnlock(c, config, `public:${token}`, `${owner.id}:${rel}`)
+      return c.json({ ok: true })
+    } catch (err) {
+      if (err instanceof LinkError) return c.json({ error: err.message, code: err.code }, err.status)
+      if (err instanceof LockError) return c.json({ error: err.message, code: err.code }, 401)
+      throw err
+    }
+  })
+
   app.get('/api/public/:token/items', async (c) => {
     try {
       const token = c.req.param('token')
@@ -526,9 +580,11 @@ export function createApp(config: ServerConfig) {
         token,
         c.req.query('path') ?? '',
         await linkUnlocked(c, config, token),
+        await readFileUnlocks(c, config, `public:${token}`),
       )
       return c.json(listed)
     } catch (err) {
+      if (err instanceof LockError) return c.json({ error: err.message, code: err.code }, 401)
       if (err instanceof LinkError) return c.json({ error: err.message, code: err.code }, err.status)
       throw err
     }
@@ -542,9 +598,11 @@ export function createApp(config: ServerConfig) {
         token,
         c.req.query('path') ?? '',
         await linkUnlocked(c, config, token),
+        await readFileUnlocks(c, config, `public:${token}`),
       )
       return sendFile(file, true, c.req.header('range'), config)
     } catch (err) {
+      if (err instanceof LockError) return c.json({ error: err.message, code: err.code }, 401)
       if (err instanceof LinkError) return c.json({ error: err.message, code: err.code }, err.status)
       throw err
     }
@@ -558,9 +616,11 @@ export function createApp(config: ServerConfig) {
         token,
         c.req.query('path') ?? '',
         await linkUnlocked(c, config, token),
+        await readFileUnlocks(c, config, `public:${token}`),
       )
       return sendFile(file, false, c.req.header('range'), config)
     } catch (err) {
+      if (err instanceof LockError) return c.json({ error: err.message, code: err.code }, 401)
       if (err instanceof LinkError) return c.json({ error: err.message, code: err.code }, err.status)
       throw err
     }
@@ -809,16 +869,18 @@ export function createApp(config: ServerConfig) {
     if (view === 'shared') {
       try {
         if (shareId) {
-          const listed = await listSharedFolder(config, user, shareId, path)
+          const open = await readFileUnlocks(c, config, user.id)
+          const listed = await listSharedFolder(config, user, shareId, path, open)
           return c.json({
             path: path ? `share:${shareId}/${path}` : `share:${shareId}`,
             shareName: listed.shareName,
             items: listed.items.map((item) => ({ ...item, starred: false, trashed: false })),
           })
         }
-        const items = await listIncoming(config, user)
+        const items = await listIncoming(config, user, await readFileUnlocks(c, config, user.id))
         return c.json({ path: '', items: items.map((item) => ({ ...item, starred: false, trashed: false })) })
       } catch (err) {
+        if (err instanceof LockError) return c.json({ error: err.message, code: err.code }, 401)
         if (err instanceof ShareError) return c.json({ error: err.message }, err.status)
         throw err
       }
@@ -831,13 +893,15 @@ export function createApp(config: ServerConfig) {
       })
     }
 
-    const [meta, scans, outgoing, links] = await Promise.all([
+    const [meta, scans, outgoing, links, open] = await Promise.all([
       loadMeta(root),
       loadScanResults(root),
       listOutgoing(config, user.id),
       listLinks(config, user.id),
+      readFileUnlocks(c, config, user.id),
     ])
     const starred = new Set(meta.starred)
+    const locks = meta.locks
     const sharedFlag = (rel: string) =>
       outgoing.some((share) => share.path === rel || rel.startsWith(`${share.path}/`)) ||
       links.some((link) => link.path === rel || rel.startsWith(`${link.path}/`))
@@ -845,6 +909,7 @@ export function createApp(config: ServerConfig) {
     function decorate(items: Awaited<ReturnType<typeof listPath>>, trashed = false) {
       return items.map((item) => ({
         ...item,
+        ...lockFields(locks, open, user.id, item.path),
         virusScan: scanResultFrom(scans, item.path, item.type),
         starred: starred.has(item.path),
         trashed,
@@ -885,8 +950,8 @@ export function createApp(config: ServerConfig) {
     if (view === 'starred') {
       const resolved = await mapConcurrent(meta.starred, 16, async (rel) => {
         const item = await entryAt(root, rel)
-        return item
-          ? { ...item, starred: true, trashed: false, shared: sharedFlag(item.path), virusScan: scanResultFrom(scans, item.path, item.type) }
+        return item && !ancestorBlocked(locks, open, user.id, item.path)
+          ? { ...item, ...lockFields(locks, open, user.id, item.path), starred: true, trashed: false, shared: sharedFlag(item.path), virusScan: scanResultFrom(scans, item.path, item.type) }
           : null
       })
       const items = resolved.filter((item) => item !== null)
@@ -895,9 +960,10 @@ export function createApp(config: ServerConfig) {
     if (view === 'recent') {
       const resolved = await mapConcurrent(meta.recents, 16, async (rec) => {
         const item = await entryAt(root, rec.path)
-        if (item && item.type === 'file') {
+        if (item && item.type === 'file' && !ancestorBlocked(locks, open, user.id, item.path)) {
           return {
             ...item,
+            ...lockFields(locks, open, user.id, item.path),
             virusScan: scanResultFrom(scans, item.path, item.type),
             starred: starred.has(item.path),
             trashed: false,
@@ -911,9 +977,11 @@ export function createApp(config: ServerConfig) {
     }
     if (view === 'search' || q) {
       const all = await walkVisible(root)
-      const items = all.filter((item) => item.name.toLowerCase().includes(q || path.toLowerCase()))
+      const items = all.filter((item) => item.name.toLowerCase().includes(q || path.toLowerCase()) && !ancestorBlocked(locks, open, user.id, item.path))
       return c.json({ path, items: decorate(items) })
     }
+    const denied = await denyIfLocked(c, config, user.id, user.id, root, path)
+    if (denied) return denied
     const items = decorate(await listPath(root, path))
     return c.json({ path, items })
   })
@@ -922,6 +990,9 @@ export function createApp(config: ServerConfig) {
     const root = c.get('root')
     const body = await c.req.json<{ path?: string }>()
     if (!body.path) return c.json({ error: 'path required' }, 400)
+    const parent = body.path.includes('/') ? body.path.slice(0, body.path.lastIndexOf('/')) : ''
+    const denied = await denyIfLocked(c, config, c.get('user').id, c.get('user').id, root, parent)
+    if (denied) return denied
     const item = await makeFolder(root, body.path)
     await touchRecent(root, item.path)
     if (isTempPath(item.path)) await trackTemp(root, item.path)
@@ -1009,22 +1080,25 @@ export function createApp(config: ServerConfig) {
       return stream(c, async output => {
         const send = (event: unknown) => output.write(JSON.stringify(event) + '\n').catch(() => {})
         try {
+          await assertOpen(c, config, c.get('user').id, c.get('user').id, root, path)
           const item = await unzipArchive(root, path, await quotaGate(config, c.get('user')), (detail, progress) => { void send({ detail, progress }) })
           await copyScanToTree(root, path, item.path)
           if (isTempPath(item.path)) await trackTemp(root, item.path)
           pingDrive(c.get('user').id)
           await send({ result: { item: { ...item, starred: false, trashed: false } } })
         } catch (error) {
-          await send({ error: error instanceof Error ? error.message : 'Extraction failed', code: error instanceof QuotaError ? error.code : undefined })
+          await send({ error: error instanceof Error ? error.message : 'Extraction failed', code: error instanceof QuotaError || error instanceof LockError ? error.code : undefined })
         }
       })
     }
     try {
+      await assertOpen(c, config, c.get('user').id, c.get('user').id, root, body.path)
       const item = await unzipArchive(root, body.path, await quotaGate(config, c.get('user')))
       await copyScanToTree(root, body.path, item.path)
       if (isTempPath(item.path)) await trackTemp(root, item.path)
       return c.json({ item: { ...item, starred: false, trashed: false } }, 201)
     } catch (err) {
+      if (err instanceof LockError) return c.json({ error: err.message, code: err.code }, 401)
       if (err instanceof QuotaError) return c.json({ error: err.message, code: err.code }, 507)
       throw err
     }
@@ -1034,6 +1108,8 @@ export function createApp(config: ServerConfig) {
     const root = c.get('root')
     const user = c.get('user')
     const dir = c.req.query('path') ?? ''
+    const denied = await denyIfLocked(c, config, user.id, user.id, root, dir)
+    if (denied) return denied
     const raw = c.req.header('content-type')?.split(';')[0] === 'application/octet-stream'
     let name: string
     let source: Parameters<typeof saveFile>[3]
@@ -1064,15 +1140,18 @@ export function createApp(config: ServerConfig) {
       await touchRecent(root, item.path)
       if (isTempPath(item.path)) await trackTemp(root, item.path)
       if (virusScanEnabled(user, platform)) {
-        void (async () => {
+        const opened = await openDownload(root, item.path)
+        const scan = async () => {
           try {
-            const result = await scanOpenedFile(config, await openDownload(root, item.path))
+            const result = await scanOpenedFile(config, opened)
             await setScanResult(root, item.path, result)
             pingDrive(user.id)
           } catch {
             // The upload is already durable. A later manual scan can retry.
           }
-        })()
+        }
+        if (opened.pointer) remoteScanChain = remoteScanChain.then(scan, scan)
+        else void scan()
       }
       return c.json({ item: { ...item, starred: false, trashed: false, virusScan: null } }, 201)
     } catch (err) {
@@ -1086,6 +1165,7 @@ export function createApp(config: ServerConfig) {
     const body = await c.req.json<{ path?: string; content?: string }>()
     if (!body.path || typeof body.content !== 'string') return c.json({ error: 'path and content required' }, 400)
     try {
+      await assertOpen(c, config, c.get('user').id, c.get('user').id, root, body.path)
       const quota = await quotaGate(config, c.get('user'))
       await snapshotExisting(root, body.path, quota)
       const item = await writeFileContent(root, body.path, body.content, quota)
@@ -1099,6 +1179,7 @@ export function createApp(config: ServerConfig) {
         },
       })
     } catch (err) {
+      if (err instanceof LockError) return c.json({ error: err.message, code: err.code }, 401)
       if (err instanceof QuotaError) return c.json({ error: err.message, code: err.code }, 507)
       throw err
     }
@@ -1112,6 +1193,8 @@ export function createApp(config: ServerConfig) {
     if (!paths.length) return c.json({ error: 'paths required' }, 400)
     const dest = body.dest ?? ''
     try {
+      const destLock = await lockTarget(config, user, root, dest)
+      await assertOpen(c, config, user.id, destLock.ownerId, destLock.root, destLock.rel)
       if (dest === TEMP_DIR) await ensureTemp(root)
       const moved = await moveEntries(root, paths, dest)
       for (const entry of moved) {
@@ -1134,6 +1217,7 @@ export function createApp(config: ServerConfig) {
         ),
       })
     } catch (err) {
+      if (err instanceof LockError) return c.json({ error: err.message, code: err.code }, 401)
       const message = err instanceof Error ? err.message : 'Could not move'
       if (message.includes('itself') || message.includes('trash') || message.includes('Destination')) {
         return c.json({ error: message }, 400)
@@ -1148,9 +1232,18 @@ export function createApp(config: ServerConfig) {
     const paths = (body.paths ?? []).filter((path) => typeof path === 'string' && path.length > 0)
     if (!paths.length) return c.json({ error: 'paths required' }, 400)
     try {
+      const user = c.get('user')
+      for (const path of paths) {
+        const source = await lockTarget(config, user, root, path)
+        await assertOpen(c, config, user.id, source.ownerId, source.root, source.rel)
+      }
       const dest = body.dest === undefined ? null : body.dest
+      if (typeof dest === 'string') {
+        const destLock = await lockTarget(config, user, root, dest)
+        await assertOpen(c, config, user.id, destLock.ownerId, destLock.root, destLock.rel)
+      }
       if (dest === TEMP_DIR) await ensureTemp(root)
-      const copied = await copyEntries(root, paths, dest, await quotaGate(config, c.get('user')))
+      const copied = await copyEntries(root, paths, dest, await quotaGate(config, user))
       for (const entry of copied) {
         await copyScanPath(root, entry.from, entry.to)
         await touchRecent(root, entry.to)
@@ -1165,6 +1258,7 @@ export function createApp(config: ServerConfig) {
         })),
       }, 201)
     } catch (err) {
+      if (err instanceof LockError) return c.json({ error: err.message, code: err.code }, 401)
       if (err instanceof QuotaError) return c.json({ error: err.message, code: err.code }, 507)
       const message = err instanceof Error ? err.message : 'Could not copy'
       if (message.includes('itself') || message.includes('trash') || message.includes('Destination') || message.includes('Nothing')) {
@@ -1254,6 +1348,57 @@ export function createApp(config: ServerConfig) {
         shared: await pathIsShared(config, c.get('user').id, item.path),
       },
     })
+  })
+
+  app.post('/api/files/lock', async (c) => {
+    const user = c.get('user')
+    const root = c.get('root')
+    const body = await c.req.json<{ path?: string; password?: string }>()
+    if (!body.path || typeof body.password !== 'string') return c.json({ error: 'path and password required' }, 400)
+    if (parseSharePath(body.path)) return c.json({ error: 'Only the owner can lock this' }, 403)
+    const item = await entryAt(root, body.path)
+    if (!item) return c.json({ error: 'Not found' }, 404)
+    try {
+      await setItemLock(root, body.path, body.password)
+      await issueFileUnlock(c, config, user.id, `${user.id}:${body.path.replaceAll('\\', '/').replace(/^\/+|\/+$/g, '')}`)
+      return c.json({ ok: true, locked: true, lockOpen: true })
+    } catch (err) {
+      if (err instanceof LockError) return c.json({ error: err.message, code: err.code }, 401)
+      const message = err instanceof Error ? err.message : 'Could not lock'
+      return c.json({ error: message }, 400)
+    }
+  })
+
+  app.post('/api/files/lock/remove', async (c) => {
+    const root = c.get('root')
+    const body = await c.req.json<{ path?: string; password?: string }>()
+    if (!body.path || typeof body.password !== 'string') return c.json({ error: 'path and password required' }, 400)
+    if (parseSharePath(body.path)) return c.json({ error: 'Only the owner can change this lock' }, 403)
+    try {
+      await clearItemLock(root, body.path, body.password)
+      return c.json({ ok: true, locked: false })
+    } catch (err) {
+      if (err instanceof LockError) return c.json({ error: err.message, code: err.code }, 401)
+      throw err
+    }
+  })
+
+  app.post('/api/files/unlock', async (c) => {
+    const user = c.get('user')
+    const root = c.get('root')
+    const body = await c.req.json<{ path?: string; password?: string }>()
+    if (!body.path || typeof body.password !== 'string') return c.json({ error: 'path and password required' }, 400)
+    try {
+      const target = await lockTarget(config, user, root, body.path)
+      if (!(await itemPasswordMatches(target.root, target.rel, body.password))) {
+        return c.json({ error: 'Wrong password', code: 'LOCK' }, 401)
+      }
+      await issueFileUnlock(c, config, user.id, `${target.ownerId}:${target.rel.replaceAll('\\', '/').replace(/^\/+|\/+$/g, '')}`)
+      return c.json({ ok: true })
+    } catch (err) {
+      if (err instanceof ShareError) return c.json({ error: err.message }, err.status)
+      throw err
+    }
   })
 
   app.post('/api/files/star', async (c) => {
@@ -1370,6 +1515,8 @@ export function createApp(config: ServerConfig) {
     const path = c.req.query('path') ?? ''
     const inline = c.req.query('inline') === '1' || c.req.path.endsWith('/raw')
     async function openOwned() {
+      const target = await lockTarget(config, user, root, path, shareId)
+      await assertOpen(c, config, user.id, target.ownerId, target.root, target.rel)
       if (shareId) return openSharedDownload(config, user, shareId, path)
       if (!path) throw new Error('path required')
       const parsed = parseSharePath(path)
@@ -1381,6 +1528,7 @@ export function createApp(config: ServerConfig) {
     try {
       return sendFile(await openOwned(), inline, c.req.header('range'), config)
     } catch (err) {
+      if (err instanceof LockError) return c.json({ error: err.message, code: err.code }, 401)
       if (err instanceof ShareError) return c.json({ error: err.message }, err.status)
       throw err
     }
@@ -1393,6 +1541,8 @@ export function createApp(config: ServerConfig) {
     const path = c.req.query('path') ?? ''
     const range = c.req.header('range')
     try {
+      const target = await lockTarget(config, user, root, path, shareId)
+      await assertOpen(c, config, user.id, target.ownerId, target.root, target.rel)
       if (shareId) {
         return sendFile(await openSharedDownload(config, user, shareId, path), true, range, config)
       }
@@ -1401,6 +1551,7 @@ export function createApp(config: ServerConfig) {
       if (parsed) return sendFile(await openSharedDownload(config, user, parsed.shareId, parsed.sub), true, range, config)
       return sendFile(await openDownload(root, path), true, range, config)
     } catch (err) {
+      if (err instanceof LockError) return c.json({ error: err.message, code: err.code }, 401)
       if (err instanceof ShareError) return c.json({ error: err.message }, err.status)
       throw err
     }
@@ -1413,7 +1564,8 @@ export function createApp(config: ServerConfig) {
     if (!body.path) return c.json({ error: 'path required' }, 400)
     try {
       const shared = parseSharePath(body.path)
-      const target = shared ? await resolveSharedPath(config, user, shared.shareId, shared.sub) : { root, rel: body.path }
+      const target = shared ? await resolveSharedPath(config, user, shared.shareId, shared.sub) : { root, rel: body.path, ownerId: user.id }
+      await assertOpen(c, config, user.id, target.ownerId, target.root, target.rel)
       const item = await entryAt(target.root, target.rel)
       if (!item) return c.json({ error: 'File not found' }, 404)
       if (item.type === 'folder') return c.json({ error: 'Choose a file to scan' }, 400)
@@ -1423,6 +1575,7 @@ export function createApp(config: ServerConfig) {
       if (result.status === 'error') return c.json({ error: 'ClamAV could not scan this file' }, 500)
       return c.json({ virusScan: result })
     } catch (error) {
+      if (error instanceof LockError) return c.json({ error: error.message, code: error.code }, 401)
       if (error instanceof ShareError) return c.json({ error: error.message }, error.status)
       throw error
     }

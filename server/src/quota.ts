@@ -124,6 +124,12 @@ export function invalidateSizeCache(dir: string): void {
   sizeCache.delete(`real:${dir}`)
 }
 
+export function adjustCachedComputation(key: string, delta: number): void {
+  const hit = sizeCache.get(key)
+  if (!hit) return
+  sizeCache.set(key, { at: hit.at, bytes: Math.max(0, hit.bytes + delta) })
+}
+
 export function assertFits(used: number, incoming: number, reserved: number, message?: string): void {
   if (used + incoming > reserved) {
     const over = used + incoming - reserved

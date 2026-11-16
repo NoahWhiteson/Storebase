@@ -129,6 +129,49 @@ export async function linkUnlocked(c: Context, config: ServerConfig, token: stri
   return tokens.includes(token)
 }
 
+const FILE_LOCK_COOKIE = 'sbf'
+const FILE_LOCK_MAX_AGE = 12 * 60 * 60
+
+type FileUnlockCookie = { exp: number; keys: string[] }
+
+async function readFileUnlockCookie(c: Context, config: ServerConfig): Promise<string[]> {
+  const raw = getCookie(c, FILE_LOCK_COOKIE)
+  if (!raw) return []
+  const dot = raw.lastIndexOf('.')
+  if (dot <= 0) return []
+  const payload = raw.slice(0, dot)
+  const sig = raw.slice(dot + 1)
+  if (!payload || !sig) return []
+  const secret = await loadSecret(config)
+  if (!safeEqual(sig, sign(secret, payload))) return []
+  try {
+    const parsed = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as FileUnlockCookie
+    if (!parsed || !Number.isFinite(parsed.exp) || parsed.exp < Date.now() || !Array.isArray(parsed.keys)) return []
+    return parsed.keys.filter((key): key is string => typeof key === 'string' && key.includes('\t'))
+  } catch {
+    return []
+  }
+}
+
+export async function readFileUnlocks(c: Context, config: ServerConfig, scope: string): Promise<string[]> {
+  const prefix = `${scope}\t`
+  return (await readFileUnlockCookie(c, config)).filter((key) => key.startsWith(prefix)).map((key) => key.slice(prefix.length))
+}
+
+export async function issueFileUnlock(c: Context, config: ServerConfig, scope: string, key: string): Promise<void> {
+  const secret = await loadSecret(config)
+  const keys = [...new Set([...(await readFileUnlockCookie(c, config)), `${scope}\t${key}`])].slice(-24)
+  while (JSON.stringify(keys).length > 2800 && keys.length > 1) keys.shift()
+  const payload = Buffer.from(JSON.stringify({ exp: Date.now() + FILE_LOCK_MAX_AGE * 1000, keys } satisfies FileUnlockCookie), 'utf8').toString('base64url')
+  setCookie(c, FILE_LOCK_COOKIE, `${payload}.${sign(secret, payload)}`, {
+    httpOnly: true,
+    path: '/',
+    sameSite: 'Lax',
+    maxAge: FILE_LOCK_MAX_AGE,
+    secure: isHttps(c),
+  })
+}
+
 export async function rotateSecret(config: ServerConfig): Promise<void> {
   const secret = randomBytes(32).toString('hex')
   await mkdir(dirname(config.secretPath), { recursive: true })

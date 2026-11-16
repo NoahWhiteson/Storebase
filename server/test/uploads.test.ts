@@ -73,7 +73,7 @@ test('cold usage snapshots return unknown immediately, then populate', async t =
   assert.equal(folderSizeSnapshot(root), 100)
 })
 
-test('S3 uploads stream staged bytes with their signed hash and content length', async t => {
+test('S3 uploads stream once with content length and without a local staging copy', async t => {
   const { parent, config, root, quota } = await fixture(t)
   const bytes = Buffer.alloc(3 * 1024 * 1024, 37)
   let received = false
@@ -84,7 +84,8 @@ test('S3 uploads stream staged bytes with their signed hash and content length',
     assert.equal(req.method, 'PUT')
     assert.equal(size, bytes.length)
     assert.equal(req.headers['content-length'], String(size))
-    assert.equal(req.headers['x-amz-content-sha256'], hash.digest('hex'))
+    assert.equal(req.headers['x-amz-content-sha256'], 'UNSIGNED-PAYLOAD')
+    hash.digest('hex')
     assert.match(req.headers.authorization ?? '', /^AWS4-HMAC-SHA256 /)
     received = true
     res.end()

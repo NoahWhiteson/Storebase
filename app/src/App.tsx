@@ -20,6 +20,7 @@ import {
   ApiError,
   HARD_DELETE_BYTES,
   acceptShare,
+  clearFileLock,
   copyFiles,
   deleteFile,
   deleteShare,
@@ -31,6 +32,7 @@ import {
   isTempId,
   keepFromTemp,
   listFiles,
+  lockFile,
   logout,
   mkdir,
   moveFiles,
@@ -46,6 +48,7 @@ import {
   starFile,
   toDriveItem,
   trashFile,
+  unlockFile,
   unzipFile,
   uploadFile,
   type FileEntry,
@@ -96,6 +99,8 @@ function itemsMatch(a: DriveItem[], b: DriveItem[]): boolean {
       item.spam === other.spam
       && item.safetyScore === other.safetyScore
       && item.scanStatus === other.scanStatus
+      && item.locked === other.locked
+      && item.lockOpen === other.lockOpen
     )
   })
 }
@@ -198,6 +203,11 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
   const dismissedAlerts = useRef(new Set<string>())
   const [dialog, setDialog] = useState<null | { mode: 'create' | 'create-file' | 'rename'; id?: string }>(null)
   const [nameDraft, setNameDraft] = useState('')
+  const [lockDialog, setLockDialog] = useState<null | { mode: 'open' | 'set' | 'clear'; item: DriveItem; retry?: boolean }>(null)
+  const [lockPassword, setLockPassword] = useState('')
+  const [lockConfirm, setLockConfirm] = useState('')
+  const [lockError, setLockError] = useState<string | null>(null)
+  const [lockBusy, setLockBusy] = useState(false)
   const [shareLabel, setShareLabel] = useState('Shared')
 
   useEffect(() => applyTheme(profile.theme), [profile.theme])
@@ -362,7 +372,35 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
           .catch(() => { lastStatus.current = 0 })
       }
     } catch (err) {
-      if (!controller.signal.aborted && request === refreshSequence.current && requestedView === currentView.current && !silent) setLoadError(err instanceof Error ? err.message : 'Could not load files')
+      if (!controller.signal.aborted && request === refreshSequence.current && requestedView === currentView.current) {
+        if (err instanceof ApiError && err.code === 'LOCK') {
+          setLoadError(null)
+          setLockPassword('')
+          setLockError(null)
+          setLockDialog((current) => current ?? {
+            mode: 'open',
+            retry: true,
+            item: {
+              id: folderPath,
+              name: folderPath.split('/').pop() || 'Folder',
+              kind: 'folder',
+              parentId: null,
+              owner: profile.name,
+              ownerInitials: initials(profile.name),
+              modifiedAt: '',
+              size: null,
+              starred: false,
+              shared: false,
+              trashed: false,
+              spam: false,
+              computer: false,
+              locked: true,
+            },
+          })
+          return
+        }
+        if (!silent) setLoadError(err instanceof Error ? err.message : 'Could not load files')
+      }
     } finally {
       if (request === refreshSequence.current) {
         refreshing.current = false
@@ -485,15 +523,7 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
     })
   }
 
-  function openItem(item: DriveItem) {
-    if (item.spam) {
-      notify('Accept this share first')
-      return
-    }
-    if (item.trashed) {
-      notify('Restore this item to open it')
-      return
-    }
+  function revealItem(item: DriveItem) {
     if (item.kind === 'folder') {
       if (item.shareName) setShareLabel(item.shareName)
       setSection(isTempId(item.id) ? 'temp' : item.id.startsWith('share:') ? 'shared' : 'my-drive')
@@ -503,6 +533,59 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
       return
     }
     setPreview(item)
+  }
+
+  function openItem(item: DriveItem) {
+    if (item.spam) {
+      notify('Accept this share first')
+      return
+    }
+    if (item.trashed) {
+      notify('Restore this item to open it')
+      return
+    }
+    if (item.locked && !item.lockOpen) {
+      setLockPassword('')
+      setLockConfirm('')
+      setLockError(null)
+      setLockDialog({ mode: 'open', item })
+      return
+    }
+    revealItem(item)
+  }
+
+  async function submitLock() {
+    const current = lockDialog
+    if (!current) return
+    if (current.mode === 'set' && lockPassword !== lockConfirm) {
+      setLockError('Passwords do not match')
+      return
+    }
+    setLockBusy(true)
+    setLockError(null)
+    try {
+      if (current.mode === 'set') {
+        await lockFile(current.item.id, lockPassword)
+        notify(`Locked ${current.item.name}`)
+      } else if (current.mode === 'clear') {
+        await clearFileLock(current.item.id, lockPassword)
+        notify(`Removed the password from ${current.item.name}`)
+      } else {
+        await unlockFile(current.item.id, lockPassword)
+        setItems((prev) => prev.map((entry) => entry.id === current.item.id ? { ...entry, lockOpen: true } : entry))
+      }
+      setLockDialog(null)
+      setLockPassword('')
+      setLockConfirm('')
+      if (current.mode === 'open') {
+        if (current.retry) await refreshCurrent.current()
+        else revealItem({ ...current.item, lockOpen: true })
+      } else await refreshCurrent.current({ silent: true })
+    } catch (err) {
+      setLockError(err instanceof Error ? err.message : 'Wrong password')
+    } finally {
+      setLockBusy(false)
+    }
   }
 
   async function star(ids: string[]) {
@@ -1196,6 +1279,18 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
                 onCopy={(ids) => void duplicate(ids)}
                 onAcceptShare={(id) => void acceptIncoming(id)}
                 onVirusScan={(ids) => void scanForViruses(ids)}
+                onLock={(item) => {
+                  setLockPassword('')
+                  setLockConfirm('')
+                  setLockError(null)
+                  setLockDialog({ mode: 'set', item })
+                }}
+                onClearLock={(item) => {
+                  setLockPassword('')
+                  setLockConfirm('')
+                  setLockError(null)
+                  setLockDialog({ mode: 'clear', item })
+                }}
               />
             )}
           </div>
@@ -1214,6 +1309,57 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
           e.target.value = ''
         }}
       />
+
+      <Dialog open={lockDialog !== null} onOpenChange={(open) => !open && !lockBusy && setLockDialog(null)}>
+        <DialogContent showCloseButton={false}>
+          <DialogHeader>
+            <DialogTitle>
+              {lockDialog?.mode === 'set' ? 'Password lock' : lockDialog?.mode === 'clear' ? 'Remove password' : 'Password required'}
+            </DialogTitle>
+            <DialogDescription className="text-[#8d8d8d]">
+              {lockDialog?.mode === 'set'
+                ? `${lockDialog.item.name} stays in the list. Opening it asks for this password.`
+                : lockDialog?.mode === 'clear'
+                  ? `Enter the current password to unlock ${lockDialog.item.name}.`
+                  : `Enter the password to open ${lockDialog?.item.name ?? 'this item'}.`}
+            </DialogDescription>
+          </DialogHeader>
+          <Input
+            autoFocus
+            type="password"
+            value={lockPassword}
+            placeholder="Password"
+            onChange={(e) => setLockPassword(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && lockDialog?.mode !== 'set') void submitLock()
+            }}
+          />
+          {lockDialog?.mode === 'set' ? (
+            <Input
+              type="password"
+              value={lockConfirm}
+              placeholder="Confirm password"
+              onChange={(e) => setLockConfirm(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') void submitLock()
+              }}
+            />
+          ) : null}
+          {lockError ? <p className="text-sm text-[#f28b82]">{lockError}</p> : null}
+          <DialogFooter>
+            <Button variant="ghost" className="rounded-full" onClick={() => setLockDialog(null)} disabled={lockBusy}>
+              Cancel
+            </Button>
+            <Button
+              className="rounded-full bg-white text-[#1a1a1a] hover:bg-[#f2f2f2]"
+              onClick={() => void submitLock()}
+              disabled={lockBusy || !lockPassword || (lockDialog?.mode === 'set' && !lockConfirm)}
+            >
+              {lockDialog?.mode === 'set' ? 'Lock' : lockDialog?.mode === 'clear' ? 'Remove' : 'Open'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={dialog !== null} onOpenChange={(open) => !open && setDialog(null)}>
         <DialogContent showCloseButton={false}>

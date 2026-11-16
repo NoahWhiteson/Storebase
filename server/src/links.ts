@@ -5,6 +5,7 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { ServerConfig } from './config.ts'
 import { entryAt, listPath, openDownload, resolveSafe } from './storage.ts'
+import { isBlocked, loadMeta, lockFields, LockError } from './meta.ts'
 import { ensureUserDrive, findById, hashPassword, loadUsers, type UserRecord, verifyPasswordHash } from './users.ts'
 import { loadScanResults, scanResultFrom } from './virus.ts'
 
@@ -234,29 +235,33 @@ export async function publicRel(linkPath: string, sub: string): Promise<string> 
   return `${linkPath}/${clean}`
 }
 
-export async function listPublicFolder(config: ServerConfig, token: string, sub = '', unlocked = false) {
+export async function listPublicFolder(config: ServerConfig, token: string, sub = '', unlocked = false, open: string[] = []) {
   const { link, owner, root, item } = await resolveLink(config, token)
   assertLinkAccess(link, unlocked)
   if (item.type !== 'folder') throw new LinkError('Not a folder', 400)
   const rel = await publicRel(link.path, sub)
   resolveSafe(root, rel)
   if (!(rel === link.path || rel.startsWith(`${link.path}/`))) throw new LinkError('Path escapes the share', 400)
+  const locks = (await loadMeta(root)).locks
+  if (isBlocked(locks, open, owner.id, rel)) throw new LockError()
   const items = await listPath(root, rel)
   const scans = await loadScanResults(root)
   return {
     name: item.name,
     ownerName: owner.name,
     path: sub,
-    items: items.map((entry) => ({ ...entry, virusScan: scanResultFrom(scans, entry.path, entry.type) })),
+    items: items.map((entry) => ({ ...entry, ...lockFields(locks, open, owner.id, entry.path), virusScan: scanResultFrom(scans, entry.path, entry.type) })),
   }
 }
 
-export async function openPublicFile(config: ServerConfig, token: string, sub = '', unlocked = false) {
-  const { link, root, item } = await resolveLink(config, token)
+export async function openPublicFile(config: ServerConfig, token: string, sub = '', unlocked = false, open: string[] = []) {
+  const { link, root, item, owner } = await resolveLink(config, token)
   assertLinkAccess(link, unlocked)
   const rel = await publicRel(link.path, sub)
   resolveSafe(root, rel)
   if (!(rel === link.path || rel.startsWith(`${link.path}/`))) throw new LinkError('Path escapes the share', 400)
+  const locks = (await loadMeta(root)).locks
+  if (isBlocked(locks, open, owner.id, rel)) throw new LockError()
   const target = sub ? await entryAt(root, rel) : item
   if (!target) throw new LinkError('File not found', 404)
   if (target.type === 'folder') throw new LinkError('Cannot download a folder', 400)

@@ -24,6 +24,8 @@ export type FileEntry = {
     score: number | null
     signature?: string
   } | null
+  locked?: boolean
+  lockOpen?: boolean
 }
 
 export const HARD_DELETE_BYTES = 20 * 1024 ** 3
@@ -153,6 +155,8 @@ export function toDriveItem(entry: FileEntry, owner: { name: string }): DriveIte
     safetyScore: entry.virusScan?.score ?? null,
     scanStatus: entry.virusScan?.status ?? null,
     scanSignature: entry.virusScan?.signature,
+    locked: Boolean(entry.locked),
+    lockOpen: Boolean(entry.lockOpen),
   }
 }
 
@@ -177,7 +181,7 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
     headers.set('content-type', 'application/json')
   }
   const action = path.split('?')[0].split('/').pop() ?? ''
-  const labels: Record<string, string> = { unzip: 'Extracting archive', copy: 'Duplicating files', trash: 'Moving to trash', files: 'Deleting file', 'empty-trash': 'Emptying trash', 'storage-cleanup': 'Optimizing storage', upload: 'Uploading file', move: 'Moving files', keep: 'Keeping file', restore: 'Restoring file', rename: 'Renaming file', mkdir: 'Creating folder', content: 'Saving file', star: 'Updating star', 'virus-scan': 'Checking for viruses' }
+  const labels: Record<string, string> = { unzip: 'Extracting archive', copy: 'Duplicating files', trash: 'Moving to trash', files: 'Deleting file', 'empty-trash': 'Emptying trash', 'storage-cleanup': 'Optimizing storage', upload: 'Uploading file', move: 'Moving files', keep: 'Keeping file', restore: 'Restoring file', rename: 'Renaming file', mkdir: 'Creating folder', content: 'Saving file', star: 'Updating star', 'virus-scan': 'Checking for viruses', lock: 'Locking item', remove: 'Removing password', unlock: 'Unlocking item' }
   const tracked = init.method && init.method !== 'GET' && (path.startsWith('/api/files') || path.startsWith('/api/temp/'))
   let detail = ''
   if (typeof init.body === 'string') {
@@ -344,6 +348,18 @@ export async function moveFiles(paths: string[], dest: string): Promise<FileEntr
     body: JSON.stringify({ paths, dest }),
   })
   return body.items
+}
+
+export async function lockFile(path: string, password: string): Promise<void> {
+  await api('/api/files/lock', { method: 'POST', body: JSON.stringify({ path, password }) })
+}
+
+export async function unlockFile(path: string, password: string): Promise<void> {
+  await api('/api/files/unlock', { method: 'POST', body: JSON.stringify({ path, password }) })
+}
+
+export async function clearFileLock(path: string, password: string): Promise<void> {
+  await api('/api/files/lock/remove', { method: 'POST', body: JSON.stringify({ path, password }) })
 }
 
 export async function starFile(path: string, starred: boolean): Promise<void> {

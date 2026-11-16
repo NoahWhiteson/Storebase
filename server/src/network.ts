@@ -5,8 +5,8 @@ import { dirname, join } from 'node:path'
 import { Readable } from 'node:stream'
 import type { ServerConfig } from './config.ts'
 import { encodePointer, readPointerAt, type FilePointer } from './pointer.ts'
-import { s3Delete, s3Get, s3Probe, s3Put, type S3Target, type BlobFile } from './s3.ts'
-import { cachedComputation } from './quota.ts'
+import { s3Delete, s3Get, s3Probe, s3Put, type S3Target, type PutBody } from './s3.ts'
+import { adjustCachedComputation, cachedComputation } from './quota.ts'
 import { mapConcurrent } from './concurrency.ts'
 
 export type BackendKind = 's3' | 'node'
@@ -187,7 +187,6 @@ export async function sumBackendUsed(driveDir: string, backendId: string): Promi
       return next
     })
     directories = children.flat()
-    await new Promise<void>(resolve => setImmediate(resolve))
   }
   return total
 }
@@ -270,12 +269,12 @@ export async function probeBackend(backend: StorageBackend): Promise<void> {
   }
 }
 
-export async function putBlob(backend: StorageBackend, key: string, body: Buffer | BlobFile): Promise<void> {
+export async function putBlob(backend: StorageBackend, key: string, body: PutBody): Promise<void> {
   if (backend.type === 's3') {
     await s3Put(s3Of(backend), key, body)
     return
   }
-  const source = !Buffer.isBuffer(body) ? createReadStream(body.path) : undefined
+  const source = Buffer.isBuffer(body) ? undefined : 'stream' in body ? body.stream : createReadStream(body.path)
   try {
     const res = await fetch(nodeUrl(backend, key), {
       method: 'PUT',
@@ -325,18 +324,19 @@ export async function findBackend(config: ServerConfig, id: string): Promise<Sto
 export async function pickTarget(
   config: ServerConfig,
   incoming: number,
-  localRealUsed: number,
+  localRealUsed: number | (() => Promise<number>),
   localReserved: number,
 ): Promise<{ kind: 'local' } | { kind: 'remote'; backend: StorageBackend }> {
   const state = await loadNetwork(config)
   for (const id of normalizeOrder(state.backends, state.order)) {
     if (id === LOCAL_STORE_ID) {
-      if (localRealUsed + incoming <= localReserved) return { kind: 'local' }
+      const used = typeof localRealUsed === 'function' ? await localRealUsed() : localRealUsed
+      if (used + incoming <= localReserved) return { kind: 'local' }
       continue
     }
     const backend = state.backends.find((item) => item.id === id)
     if (!backend) continue
-    const used = await sumBackendUsed(config.driveDir, backend.id)
+    const used = await cachedComputation(`backend:${backend.id}`, () => sumBackendUsed(config.driveDir, backend.id))
     if (used + incoming <= backend.capacityBytes) return { kind: 'remote', backend }
   }
   throw new NetworkError('Every store in the fill order is full', 409)
@@ -372,7 +372,10 @@ export async function dropStored(config: ServerConfig, full: string): Promise<vo
   const pointer = await readPointerAt(full)
   if (!pointer) return
   const backend = await findBackend(config, pointer.backend)
-  if (backend) await deleteBlob(backend, pointer.key).catch(() => {})
+  if (backend) {
+    await deleteBlob(backend, pointer.key).catch(() => {})
+    adjustCachedComputation(`backend:${pointer.backend}`, -pointer.size)
+  }
 }
 
 export async function copyStored(config: ServerConfig, src: string, dest: string, userId: string): Promise<void> {

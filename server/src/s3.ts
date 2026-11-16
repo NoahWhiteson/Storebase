@@ -1,7 +1,14 @@
 import { createHash, createHmac } from 'node:crypto'
 import { createReadStream } from 'node:fs'
+import type { Readable } from 'node:stream'
 
 export type BlobFile = { path: string; size: number; sha256: string }
+export type BlobStream = { stream: Readable; size: number }
+export type PutBody = Buffer | BlobFile | BlobStream
+
+function isBlobStream(body: PutBody): body is BlobStream {
+  return !Buffer.isBuffer(body) && 'stream' in body
+}
 
 export type S3Target = {
   endpoint: string
@@ -37,7 +44,7 @@ export async function s3Request(
   target: S3Target,
   method: string,
   key: string,
-  opts: { body?: Buffer | BlobFile; range?: string; query?: string } = {},
+  opts: { body?: PutBody; range?: string; query?: string } = {},
 ): Promise<Response> {
   const base = target.endpoint.replace(/\/+$/, '')
   const object = key.replace(/^\/+/, '')
@@ -48,7 +55,7 @@ export async function s3Request(
   const amzDate = now.toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z')
   const date = amzDate.slice(0, 8)
   const region = target.region.trim() || 'us-east-1'
-  const payloadHash = Buffer.isBuffer(body) ? hashHex(body) : body.sha256
+  const payloadHash = Buffer.isBuffer(body) ? hashHex(body) : isBlobStream(body) ? 'UNSIGNED-PAYLOAD' : body.sha256
   const headers: Record<string, string> = {
     host: url.host,
     'x-amz-date': amzDate,
@@ -75,7 +82,7 @@ export async function s3Request(
     .update(stringToSign, 'utf8')
     .digest('hex')
   headers.authorization = `AWS4-HMAC-SHA256 Credential=${target.accessKey}/${scope}, SignedHeaders=${signedNames}, Signature=${signature}`
-  const source = !Buffer.isBuffer(body) ? createReadStream(body.path) : undefined
+  const source = Buffer.isBuffer(body) ? undefined : isBlobStream(body) ? body.stream : createReadStream(body.path)
   try {
     return await fetch(url, {
       method,
@@ -87,7 +94,7 @@ export async function s3Request(
   } finally { source?.destroy() }
 }
 
-export async function s3Put(target: S3Target, key: string, body: Buffer | BlobFile): Promise<void> {
+export async function s3Put(target: S3Target, key: string, body: PutBody): Promise<void> {
   const res = await s3Request(target, 'PUT', key, { body })
   if (!res.ok) throw new Error(await s3Error(res, 'Could not write to the bucket'))
 }

@@ -9,8 +9,8 @@ import { VideoThumb } from '@/components/VideoThumb'
 import { formatBytes } from '@/lib/format'
 import { previewKind } from '@/lib/preview'
 import { saveOriginalFromUrl } from '@/lib/api'
-import { ChevronRight } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { ChevronRight, Lock } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
 
 type PublicMeta = {
   token: string
@@ -31,12 +31,17 @@ type PublicItem = {
   size: number
   modifiedAt: string
   virusScan?: VirusScan | null
+  locked?: boolean
+  lockOpen?: boolean
 }
 
 export function PublicViewer({ token }: { token: string }) {
   const [meta, setMeta] = useState<PublicMeta | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [locked, setLocked] = useState(false)
+  const [lockKind, setLockKind] = useState<'link' | 'file'>('link')
+  const [fileLockPath, setFileLockPath] = useState('')
+  const pendingOpen = useRef<{ kind: 'file' | 'folder'; path: string; item?: PublicItem } | null>(null)
   const [password, setPassword] = useState('')
   const [unlocking, setUnlocking] = useState(false)
   const [folderPath, setFolderPath] = useState('')
@@ -47,7 +52,8 @@ export function PublicViewer({ token }: { token: string }) {
   async function loadMeta() {
     const res = await fetch(`/api/public/${token}`, { credentials: 'include' })
     const body = (await res.json()) as PublicMeta & { error?: string; code?: string }
-    if (res.status === 401 && body.code === 'PASSWORD') {
+    if (res.status === 401 && (body.code === 'PASSWORD' || body.code === 'LOCK')) {
+      setLockKind(body.code === 'LOCK' ? 'file' : 'link')
       setLocked(true)
       setMeta(null)
       setError(null)
@@ -81,7 +87,15 @@ export function PublicViewer({ token }: { token: string }) {
     const qs = folderPath ? `?path=${encodeURIComponent(folderPath)}` : ''
     void fetch(`/api/public/${token}/items${qs}`, { credentials: 'include' })
       .then(async (res) => {
-        const body = (await res.json()) as { items?: PublicItem[]; error?: string }
+        const body = (await res.json()) as { items?: PublicItem[]; error?: string; code?: string }
+        if (res.status === 401 && (body.code === 'LOCK' || body.code === 'PASSWORD')) {
+          if (!gone) {
+            setLockKind(body.code === 'LOCK' ? 'file' : 'link')
+            setFileLockPath(folderPath)
+            setLocked(true)
+          }
+          return
+        }
         if (!res.ok) throw new Error(body.error ?? 'Could not list folder')
         if (!gone) setItems(body.items ?? [])
       })
@@ -97,15 +111,20 @@ export function PublicViewer({ token }: { token: string }) {
     setUnlocking(true)
     setError(null)
     try {
-      const res = await fetch(`/api/public/${token}/unlock`, {
+      const res = await fetch(lockKind === 'file' ? `/api/public/${token}/unlock-file` : `/api/public/${token}/unlock`, {
         method: 'POST',
         credentials: 'include',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ password }),
+        body: JSON.stringify({ password, path: fileLockPath }),
       })
       const body = (await res.json()) as { error?: string; code?: string }
       if (!res.ok) throw new Error(body.error ?? 'Wrong password')
       setPassword('')
+      const next = pendingOpen.current
+      pendingOpen.current = null
+      setLocked(false)
+      if (next?.kind === 'folder') setFolderPath(next.path)
+      else if (next?.kind === 'file' && next.item) setPreview({ ...next.item, path: next.path, lockOpen: true })
       await loadMeta()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Wrong password')
@@ -158,7 +177,9 @@ export function PublicViewer({ token }: { token: string }) {
     return (
       <Shell>
         <h1 className="text-2xl font-medium">Password required</h1>
-        <p className="mt-2 max-w-sm text-sm text-[#8d8d8d]">This link is locked. Enter the password the owner set.</p>
+        <p className="mt-2 max-w-sm text-sm text-[#8d8d8d]">
+          {lockKind === 'file' ? 'This item is password locked. Enter the password to open it.' : 'This link is locked. Enter the password the owner set.'}
+        </p>
         {error ? <p className="mt-3 text-sm text-[#f28b82]">{error}</p> : null}
         <form
           className="mt-6 flex w-full max-w-sm flex-col gap-3"
@@ -266,6 +287,15 @@ export function PublicViewer({ token }: { token: string }) {
               className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-left hover:bg-white/5"
               onClick={() => {
                 const rel = relativeToShare(item.path, folderPath)
+                if (item.locked && !item.lockOpen) {
+                  pendingOpen.current = { kind: item.type, path: rel, item }
+                  setFileLockPath(rel)
+                  setLockKind('file')
+                  setPassword('')
+                  setError(null)
+                  setLocked(true)
+                  return
+                }
                 if (item.type === 'folder') {
                   setFolderPath(rel)
                   return
@@ -275,6 +305,7 @@ export function PublicViewer({ token }: { token: string }) {
             >
               <PublicMark token={token} item={item} folderPath={folderPath} />
               <span className="min-w-0 flex-1 truncate text-sm">{item.name}</span>
+              {item.locked ? <Lock className="size-3.5 text-[#8d8d8d]" /> : null}
               {item.type === 'file' ? <SafetyGauge score={item.virusScan?.score} status={item.virusScan?.status} signature={item.virusScan?.signature} /> : null}
               <span className="text-xs text-[#8d8d8d]">{item.type === 'folder' ? '' : formatBytes(item.size)}</span>
             </button>
@@ -305,6 +336,7 @@ function PublicMark({
   const kind = previewKind(item.name)
   const qs = rel ? `?path=${encodeURIComponent(rel)}` : ''
   if (item.type === 'folder') return <FileGlyph kind="folder" size="sm" />
+  if (item.locked && !item.lockOpen) return <FileGlyph kind="doc" name={item.name} size="sm" />
   if (kind === 'video') {
     return <VideoThumb url={`/api/public/${token}/raw${qs}`} className="size-8 shrink-0 rounded-md" />
   }

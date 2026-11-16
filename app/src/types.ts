@@ -42,4 +42,6 @@ export type DriveItem = {
   safetyScore?: number | null
   scanStatus?: 'clean' | 'infected' | 'unavailable' | 'error' | 'disabled' | null
   scanSignature?: string
+  locked?: boolean
+  lockOpen?: boolean
 }

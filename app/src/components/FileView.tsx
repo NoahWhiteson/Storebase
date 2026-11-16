@@ -32,6 +32,7 @@ import {
   Info,
   LayoutGrid,
   List,
+  Lock,
   Pencil,
   Share2,
   ShieldCheck,
@@ -89,6 +90,8 @@ type FileViewProps = {
   onCopy: (ids: string[]) => void
   onAcceptShare: (id: string) => void
   onVirusScan: (ids: string[]) => void
+  onLock: (item: DriveItem) => void
+  onClearLock: (item: DriveItem) => void
 }
 
 export function FileView(props: FileViewProps) {
@@ -106,39 +109,55 @@ export function FileView(props: FileViewProps) {
   const [marquee, setMarquee] = useState<{ left: number; top: number; width: number; height: number } | null>(null)
 
   function beginMarquee(e: ReactPointerEvent<HTMLDivElement>) {
-    if (e.button !== 0 || (e.target as HTMLElement).closest('[data-file-id],button,input,textarea,a')) return
-    marqueeStart.current = { x: e.clientX, y: e.clientY, append: e.metaKey || e.ctrlKey }
+    if (e.button !== 0 || draggingRef.current) return
+    const target = e.target
+    if (!(target instanceof Element)) return
+    if (target.closest('[data-drive-item],button,input,textarea,a,[role="menu"]')) return
+    const origin = { x: e.clientX, y: e.clientY, append: e.metaKey || e.ctrlKey }
+    marqueeStart.current = origin
     marqueeMoved.current = false
-    setMarquee({ left: e.clientX, top: e.clientY, width: 0, height: 0 })
-    const move = (event: PointerEvent) => {
-      const start = marqueeStart.current
-      if (!start) return
-      const rect = {
-        left: Math.min(start.x, event.clientX),
-        top: Math.min(start.y, event.clientY),
-        width: Math.abs(event.clientX - start.x),
-        height: Math.abs(event.clientY - start.y),
-      }
-      if (rect.width > 3 || rect.height > 3) marqueeMoved.current = true
-      setMarquee(rect)
-      const right = rect.left + rect.width
-      const bottom = rect.top + rect.height
-      const ids = Array.from(document.querySelectorAll<HTMLElement>('[data-file-id]'))
-        .filter((element) => {
-          const box = element.getBoundingClientRect()
-          return box.left < right && box.right > rect.left && box.top < bottom && box.bottom > rect.top
-        })
-        .map((element) => element.dataset.fileId!)
-      props.onSelectMany([...new Set(ids)], start.append)
-    }
-    const up = () => {
+    let active = false
+    let lastKey = ''
+    const finish = () => {
       marqueeStart.current = null
       setMarquee(null)
       window.removeEventListener('pointermove', move)
-      window.removeEventListener('pointerup', up)
+      window.removeEventListener('pointerup', finish)
+      window.removeEventListener('dragstart', finish)
+    }
+    const move = (event: PointerEvent) => {
+      if (draggingRef.current) {
+        finish()
+        return
+      }
+      const width = Math.abs(event.clientX - origin.x)
+      const height = Math.abs(event.clientY - origin.y)
+      if (!active && width < 8 && height < 8) return
+      active = true
+      marqueeMoved.current = true
+      const rect = {
+        left: Math.min(origin.x, event.clientX),
+        top: Math.min(origin.y, event.clientY),
+        width,
+        height,
+      }
+      setMarquee(rect)
+      const right = rect.left + rect.width
+      const bottom = rect.top + rect.height
+      const ids = [...new Set(Array.from(document.querySelectorAll<HTMLElement>('[data-file-id]'))
+        .filter((element) => {
+          const box = element.getBoundingClientRect()
+          return box.width > 0 && box.height > 0 && box.left < right && box.right > rect.left && box.top < bottom && box.bottom > rect.top
+        })
+        .map((element) => element.dataset.fileId!))]
+      const key = ids.join('\n')
+      if (key === lastKey) return
+      lastKey = key
+      props.onSelectMany(ids, origin.append)
     }
     window.addEventListener('pointermove', move)
-    window.addEventListener('pointerup', up, { once: true })
+    window.addEventListener('pointerup', finish)
+    window.addEventListener('dragstart', finish)
   }
 
   function beginDrag(item: DriveItem, e: DragEvent) {
@@ -323,7 +342,7 @@ function ListView(props: FileViewProps & { items: DriveItem[]; drag: DragApi; on
             drag={props.drag}
             onSelect={props.onSelect}
             onOpen={props.onOpen}
-            className="grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-full px-3 py-2.5 text-left hover:bg-white/5 [content-visibility:auto] [contain-intrinsic-size:auto_52px] md:grid-cols-[minmax(0,2fr)_140px_160px_100px]"
+            className="grid h-full w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-full px-3 py-2.5 text-left hover:bg-white/5 md:grid-cols-[minmax(0,2fr)_140px_160px_100px]"
           >
             <span className="flex min-w-0 items-center gap-3">
               <ItemThumb item={item} size="sm" />
@@ -370,7 +389,7 @@ function GridView({
                   drag={drag}
                   onSelect={props.onSelect}
                   onOpen={props.onOpen}
-                  className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left hover:bg-white/5 [content-visibility:auto] [contain-intrinsic-size:auto_52px]"
+                  className="flex h-full w-full items-center gap-3 rounded-xl px-3 py-3 text-left hover:bg-white/5"
                 >
                   <FileGlyph kind="folder" name={item.name} size="sm" />
                   <span className="min-w-0 flex-1">
@@ -402,8 +421,8 @@ function GridView({
                   onOpen={props.onOpen}
                   className={
                     preview
-                      ? 'flex w-full flex-col items-stretch rounded-xl p-2 text-left hover:bg-white/5 [content-visibility:auto] [contain-intrinsic-size:auto_168px]'
-                      : 'flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left hover:bg-white/5 [content-visibility:auto] [contain-intrinsic-size:auto_52px]'
+                      ? 'flex h-full w-full flex-col items-stretch rounded-xl p-2 text-left hover:bg-white/5'
+                      : 'flex h-full w-full items-center gap-3 rounded-xl px-3 py-3 text-left hover:bg-white/5'
                   }
                 >
                   {preview ? (
@@ -441,8 +460,9 @@ function GridView({
 }
 
 function ItemThumb({ item, size }: { item: DriveItem; size: 'sm' | 'lg' }) {
-  const video = item.kind === 'video'
-  const image = previewKind(item.name) === 'image'
+  const sealed = item.locked && !item.lockOpen
+  const video = item.kind === 'video' && !sealed
+  const image = previewKind(item.name) === 'image' && !sealed
   if (video) {
     return (
       <VideoThumb
@@ -491,9 +511,10 @@ function Tile({
       type="button"
       data-drive-item
       data-file-id={item.id}
-      draggable={false}
-      onMouseDown={(e) => {
-        e.currentTarget.draggable = drag.canMove && movable(item) && e.button === 0
+      draggable={drag.canMove && movable(item)}
+      onPointerDown={(e) => {
+        if (e.button !== 0) return
+        e.stopPropagation()
       }}
       onClick={(e) => {
         e.stopPropagation()
@@ -502,8 +523,7 @@ function Tile({
       }}
       onDoubleClick={() => onOpen(item)}
       onDragStart={(e) => drag.beginDrag(item, e)}
-      onDragEnd={(e) => {
-        e.currentTarget.draggable = false
+      onDragEnd={() => {
         drag.endDrag()
       }}
       onDragOver={(e) => {
@@ -521,6 +541,7 @@ function Tile({
       }}
       className={cn(
         className,
+        '[&_*]:pointer-events-none',
         selected && 'bg-white/10 hover:bg-white/10',
         over && 'bg-white/15 ring-1 ring-white/40',
         drag.dragIds.includes(item.id) && 'opacity-50',
@@ -549,6 +570,8 @@ function handlers(props: FileViewProps & { onGetInfo: (item: DriveItem) => void 
     onCopy: props.onCopy,
     onAcceptShare: props.onAcceptShare,
     onVirusScan: props.onVirusScan,
+    onLock: props.onLock,
+    onClearLock: props.onClearLock,
     onSelect: props.onSelect,
     section: props.section,
   }
@@ -567,6 +590,7 @@ function Marks({ item, className }: { item: DriveItem; className?: string }) {
   return (
     <span className={cn('flex shrink-0 items-center gap-1', className)}>
       {item.kind !== 'folder' || item.scanStatus ? <SafetyGauge score={item.safetyScore} status={item.scanStatus} signature={item.scanSignature} /> : null}
+      {item.locked ? <Lock className="size-3.5 text-[#8d8d8d]" /> : null}
       {item.shared && item.owned !== false ? <Users className="size-3.5 text-[#8d8d8d]" /> : null}
       {item.starred ? <Star className="size-3.5 fill-[#fdd663] text-[#fdd663]" /> : null}
     </span>
@@ -594,6 +618,8 @@ function ItemMenu({
   onCopy,
   onAcceptShare,
   onVirusScan,
+  onLock,
+  onClearLock,
   onSelect,
   section,
 }: {
@@ -617,6 +643,8 @@ function ItemMenu({
   onCopy: (ids: string[]) => void
   onAcceptShare: (id: string) => void
   onVirusScan: (ids: string[]) => void
+  onLock: (item: DriveItem) => void
+  onClearLock: (item: DriveItem) => void
   onSelect: (id: string, mods: SelectMods) => void
   section: SectionId
 }) {
@@ -639,13 +667,17 @@ function ItemMenu({
   const spam = section === 'spam' || batch.every((entry) => entry.spam)
   const canCopy = batch.every((entry) => entry.owned !== false && !entry.trashed && !entry.spam && !entry.computer)
   const canVirusScan = batch.every((entry) => entry.kind !== 'folder' && !entry.trashed && !entry.spam && !entry.computer)
+  const canLock = n === 1 && !inbound && !item.trashed && !item.spam && !item.computer && item.owned !== false
 
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
         <div
           data-drive-item
-          className="min-w-0"
+          className="h-full min-w-0"
+          onPointerDown={(e) => {
+            if (e.button === 0) e.stopPropagation()
+          }}
           onContextMenu={() => {
             if (!selectedIds.includes(item.id)) onSelect(item.id, { toggle: false, range: false })
           }}
@@ -704,6 +736,19 @@ function ItemMenu({
             <Pencil />
             Rename
           </ContextMenuItem>
+        ) : null}
+        {canLock ? (
+          item.locked ? (
+            <ContextMenuItem onSelect={() => onClearLock(item)}>
+              <Lock />
+              Remove password
+            </ContextMenuItem>
+          ) : (
+            <ContextMenuItem onSelect={() => onLock(item)}>
+              <Lock />
+              Password lock
+            </ContextMenuItem>
+          )
         ) : null}
         {canCopy ? (
           <ContextMenuItem onSelect={() => onCopy(ids)}>
