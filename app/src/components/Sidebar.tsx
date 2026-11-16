@@ -47,7 +47,7 @@ type SidebarProps = {
   section: SectionId
   terminalsOpen: boolean
   terminalsEnabled?: boolean
-  usedBytes: number
+  usedBytes: number | null
   quotaBytes: number
   mobileOpen: boolean
   onCloseMobile: () => void
@@ -74,7 +74,7 @@ export function Sidebar({
   onOpenSettings,
   onOpenTerminals,
 }: SidebarProps) {
-  const usedPct = Math.min(100, Math.round((usedBytes / quotaBytes) * 100))
+  const usedPct = Math.min(100, Math.round(((usedBytes ?? 0) / quotaBytes) * 100))
 
   const body = (
     <div className="flex h-full w-[256px] shrink-0 flex-col bg-[#1a1a1a]">
@@ -178,7 +178,7 @@ export function Sidebar({
         </div>
         <Progress value={usedPct} className="h-1 bg-white/10" />
         <p className="mt-2 text-xs text-[#8d8d8d]">
-          {formatBytes(usedBytes)} of {formatBytes(quotaBytes)} used
+          {usedBytes == null ? 'Calculating storage…' : `${formatBytes(usedBytes)} of ${formatBytes(quotaBytes)} used`}
         </p>
         <Button
           variant="outline"

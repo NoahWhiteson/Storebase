@@ -53,7 +53,7 @@ import { dropPath, loadMeta, rewritePath, setStarred, touchRecent } from './meta
 import { loadPlatform, terminalsAllowed, virusScanEnabled } from './platform.ts'
 import { copyScanPath, copyScanToTree, dropScanPath, loadScanResults, rewriteScanPath, scanFile, scanResultFor, scanResultFrom, setScanResult, type VirusScanResult } from './virus.ts'
 import { requirePool } from './pool.ts'
-import { QuotaError, cachedFolderSize, invalidateSizeCache } from './quota.ts'
+import { QuotaError, cachedFolderSize, folderSizeSnapshot, invalidateSizeCache } from './quota.ts'
 import { clearSession, issueLinkUnlock, issueSession, linkUnlocked, readSessionUserId } from './session.ts'
 import { completeSetup, getSetupState, SetupError } from './setup.ts'
 import { pingDrive, startDriveWatch, subscribeDrive } from './drive-events.ts'
@@ -91,6 +91,7 @@ import {
   removePath,
   renameEntry,
   saveFile,
+  resolveSafe,
   unzipArchive,
   walkLiveFilePaths,
   walkVisible,
@@ -123,7 +124,7 @@ import { mountTerminals } from './terminal-api.ts'
 import { attachTerminalWs } from './terminal-ws.ts'
 import { createTerminalHub } from './terminals.ts'
 import { recordRequest } from './diagnostics.ts'
-import { mapConcurrent } from './concurrency.ts'
+import { mapConcurrent, withLock } from './concurrency.ts'
 import {
   effectiveReserved,
   ensureUserDrive,
@@ -423,7 +424,7 @@ export function createApp(config: ServerConfig) {
     const root = await ensureUserDrive(config, user.id)
     await issueSession(c, config, user.id)
     const manifest = await requirePool(config)
-    const usedBytes = await cachedFolderSize(root)
+    const usedBytes = c.req.query('usage') === 'deferred' ? folderSizeSnapshot(root) : await cachedFolderSize(root)
     const platform = await loadPlatform(config)
     const pool = manifest.reservedBytes + (await remoteCapacity(config))
     return c.json({
@@ -623,7 +624,7 @@ export function createApp(config: ServerConfig) {
     const user = c.get('user')
     const root = c.get('root')
     const manifest = await requirePool(config)
-    const usedBytes = await cachedFolderSize(root)
+    const usedBytes = c.req.query('usage') === 'deferred' ? folderSizeSnapshot(root) : await cachedFolderSize(root)
     const platform = await loadPlatform(config)
     const pool = manifest.reservedBytes + (await remoteCapacity(config))
     return c.json({
@@ -633,7 +634,7 @@ export function createApp(config: ServerConfig) {
       quotaBytes: personalQuota(user),
       nodeReservedBytes: pool,
       usedBytes,
-      usedGb: bytesToGb(usedBytes),
+      usedGb: usedBytes == null ? null : bytesToGb(usedBytes),
       reservedGb: bytesToGb(effectiveReserved(user, pool)),
       nodeName: platform.nodeName,
       defaultView: platform.defaultView,
@@ -1033,16 +1034,33 @@ export function createApp(config: ServerConfig) {
     const root = c.get('root')
     const user = c.get('user')
     const dir = c.req.query('path') ?? ''
-    const form = await c.req.parseBody()
-    const file = form.file
-    if (!(file instanceof File)) return c.json({ error: 'file field required' }, 400)
-    const buf = Buffer.from(await file.arrayBuffer())
+    const raw = c.req.header('content-type')?.split(';')[0] === 'application/octet-stream'
+    let name: string
+    let source: Parameters<typeof saveFile>[3]
+    if (raw) {
+      name = c.req.query('name') ?? ''
+      const length = c.req.header('content-length')
+      const size = Number(length)
+      if (!name || !length || !Number.isSafeInteger(size) || size < 0 || !c.req.raw.body) {
+        return c.json({ error: 'File name, content-length, and body required' }, 400)
+      }
+      source = { stream: c.req.raw.body, size }
+    } else {
+      // Keep multipart compatibility for the Mac client and older web clients.
+      const form = await c.req.parseBody()
+      const file = form.file
+      if (!(file instanceof File)) return c.json({ error: 'file field required' }, 400)
+      name = file.name
+      source = Buffer.from(await file.arrayBuffer())
+    }
     try {
       const quota = await quotaGate(config, user)
-      const rel = [dir.replaceAll('\\', '/').replace(/^\/+|\/+$/g, ''), file.name].filter(Boolean).join('/')
+      const rel = [dir.replaceAll('\\', '/').replace(/^\/+|\/+$/g, ''), basename(name)].filter(Boolean).join('/')
       const platform = await loadPlatform(config)
-      await snapshotExisting(root, rel, quota)
-      const item = await saveFile(root, dir, file.name, buf, quota)
+      const item = await withLock(`upload:${resolveSafe(root, rel)}`, async () => {
+        await snapshotExisting(root, rel, quota)
+        return saveFile(root, dir, name, source, quota)
+      })
       await touchRecent(root, item.path)
       if (isTempPath(item.path)) await trackTemp(root, item.path)
       if (virusScanEnabled(user, platform)) {

@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path'
 import { Readable } from 'node:stream'
 import type { ServerConfig } from './config.ts'
 import { encodePointer, readPointerAt, type FilePointer } from './pointer.ts'
-import { s3Delete, s3Get, s3Probe, s3Put, type S3Target } from './s3.ts'
+import { s3Delete, s3Get, s3Probe, s3Put, type S3Target, type BlobFile } from './s3.ts'
 import { cachedComputation } from './quota.ts'
 import { mapConcurrent } from './concurrency.ts'
 
@@ -171,25 +171,24 @@ export async function inboundStoreUsed(config: ServerConfig): Promise<number> {
 
 export async function sumBackendUsed(driveDir: string, backendId: string): Promise<number> {
   let total = 0
-  async function walk(dir: string) {
-    let entries
-    try {
-      entries = await readdir(dir, { withFileTypes: true })
-    } catch {
-      return
-    }
-    for (const entry of entries) {
-      const full = join(dir, entry.name)
-      if (entry.isDirectory()) {
-        await walk(full)
-        continue
-      }
-      if (!entry.isFile()) continue
-      const pointer = await readPointerAt(full)
-      if (pointer?.backend === backendId) total += pointer.size
-    }
+  let directories = [driveDir]
+  while (directories.length) {
+    const children = await mapConcurrent(directories, 4, async dir => {
+      const entries = await readdir(dir, { withFileTypes: true }).catch(() => [])
+      const next: string[] = []
+      await mapConcurrent(entries, 8, async entry => {
+        const full = join(dir, entry.name)
+        if (entry.isDirectory()) next.push(full)
+        else if (entry.isFile()) {
+          const pointer = await readPointerAt(full)
+          if (pointer?.backend === backendId) total += pointer.size
+        }
+      })
+      return next
+    })
+    directories = children.flat()
+    await new Promise<void>(resolve => setImmediate(resolve))
   }
-  await walk(driveDir)
   return total
 }
 
@@ -271,17 +270,24 @@ export async function probeBackend(backend: StorageBackend): Promise<void> {
   }
 }
 
-export async function putBlob(backend: StorageBackend, key: string, body: Buffer): Promise<void> {
+export async function putBlob(backend: StorageBackend, key: string, body: Buffer | BlobFile): Promise<void> {
   if (backend.type === 's3') {
     await s3Put(s3Of(backend), key, body)
     return
   }
-  const res = await fetch(nodeUrl(backend, key), {
-    method: 'PUT',
-    headers: await nodeHeaders(backend, { 'content-type': 'application/octet-stream' }),
-    body: new Uint8Array(body),
-  })
-  if (!res.ok) throw new NetworkError(await readErr(res, 'Remote node would not store that file'), 400)
+  const source = !Buffer.isBuffer(body) ? createReadStream(body.path) : undefined
+  try {
+    const res = await fetch(nodeUrl(backend, key), {
+      method: 'PUT',
+      headers: await nodeHeaders(backend, {
+        'content-type': 'application/octet-stream',
+        'content-length': String(Buffer.isBuffer(body) ? body.byteLength : body.size),
+      }),
+      body: source as unknown as NonNullable<Parameters<typeof fetch>[1]>['body'] ?? body as Buffer,
+      ...(source ? { duplex: 'half' } : {}),
+    })
+    if (!res.ok) throw new NetworkError(await readErr(res, 'Remote node would not store that file'), 400)
+  } finally { source?.destroy() }
 }
 
 export async function getBlob(

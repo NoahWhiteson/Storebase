@@ -106,7 +106,7 @@ type Account = {
   email: string
   role: 'admin' | 'user'
   reservedBytes: number
-  usedBytes: number
+  usedBytes: number | null
   quotaBytes?: number | null
   host: string
   defaultView?: 'grid' | 'list'
@@ -219,6 +219,9 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
   const refreshing = useRef(false)
   const refreshPending = useRef(false)
   const refreshSequence = useRef(0)
+  const refreshController = useRef<AbortController | null>(null)
+  const listingCache = useRef(new Map<string, DriveItem[]>())
+  const refreshCurrent = useRef<(opts?: { silent?: boolean }) => Promise<void>>(async () => {})
   const currentView = useRef('')
   const viewKey = JSON.stringify([folderPath, profile.name, search, section])
   useLayoutEffect(() => { currentView.current = viewKey }, [viewKey])
@@ -300,6 +303,10 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
     refreshing.current = true
     const request = ++refreshSequence.current
     const requestedView = viewKey
+    refreshController.current?.abort()
+    const controller = new AbortController()
+    refreshController.current = controller
+    const list = (opts: Parameters<typeof listFiles>[0]) => listFiles(opts, controller.signal)
     if (!silent) {
       setLoadError(null)
       setLoading(true)
@@ -308,35 +315,43 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
       const q = search.trim()
       let entries: FileEntry[]
       if (q) {
-        entries = await listFiles({ view: 'search', q })
+        entries = await list({ view: 'search', q })
       } else if (section === 'trash') {
-        entries = await listFiles({ view: 'trash' })
+        entries = await list({ view: 'trash' })
       } else if (section === 'starred') {
-        entries = await listFiles({ view: 'starred' })
+        entries = await list({ view: 'starred' })
       } else if (section === 'recent') {
-        entries = await listFiles({ view: 'recent' })
+        entries = await list({ view: 'recent' })
       } else if (section === 'home') {
-        entries = await listFiles({ path: '' })
+        entries = await list({ path: '' })
       } else if (section === 'shared') {
         const shared = parseSharePath(folderPath)
         if (shared) {
-          entries = await listFiles({ view: 'shared', share: shared.shareId, path: shared.sub })
+          entries = await list({ view: 'shared', share: shared.shareId, path: shared.sub })
           if (entries[0]?.shareName) setShareLabel(entries[0].shareName)
         } else {
-          entries = await listFiles({ view: 'shared' })
+          entries = await list({ view: 'shared' })
         }
       } else if (section === 'temp') {
         const sub = folderPath.replace(/^\.temp\/?/, '')
-        entries = await listFiles({ view: 'temp', path: sub })
-        const settings = await fetchTempSettings()
-        setTtlHours(settings.ttlHours)
+        const [files, settings] = await Promise.all([list({ view: 'temp', path: sub }), fetchTempSettings()])
+        entries = files
+        if (requestedView === currentView.current) setTtlHours(settings.ttlHours)
       } else if (section === 'spam') {
-        entries = await listFiles({ view: 'spam' })
+        entries = await list({ view: 'spam' })
       } else {
-        entries = await listFiles({ path: folderPath })
+        entries = await list({ path: folderPath })
       }
       if (request !== refreshSequence.current || requestedView !== currentView.current) return
       const next = entries.map((entry) => toDriveItem(entry, { name: profile.name }))
+      listingCache.current.delete(requestedView)
+      listingCache.current.set(requestedView, next)
+      let cachedItems = [...listingCache.current.values()].reduce((count, items) => count + items.length, 0)
+      while (listingCache.current.size > 30 || cachedItems > 20_000) {
+        const oldest = listingCache.current.keys().next().value!
+        cachedItems -= listingCache.current.get(oldest)!.length
+        listingCache.current.delete(oldest)
+      }
       setItems((prev) => (itemsMatch(prev, next) ? prev : next))
       setLoading(false)
       if (Date.now() - lastStatus.current > 30000) {
@@ -347,7 +362,7 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
           .catch(() => { lastStatus.current = 0 })
       }
     } catch (err) {
-      if (request === refreshSequence.current && requestedView === currentView.current && !silent) setLoadError(err instanceof Error ? err.message : 'Could not load files')
+      if (!controller.signal.aborted && request === refreshSequence.current && requestedView === currentView.current && !silent) setLoadError(err instanceof Error ? err.message : 'Could not load files')
     } finally {
       if (request === refreshSequence.current) {
         refreshing.current = false
@@ -360,9 +375,20 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
     }
   }, [folderPath, profile.name, search, section, viewKey])
 
+  useLayoutEffect(() => {
+    // Scope the cache to this signed-in app; revalidate every visit.
+    const cached = listingCache.current.get(viewKey)
+    setItems(cached ?? [])
+    setLoading(!cached)
+    setLoadError(null)
+  }, [viewKey])
+
   useEffect(() => {
     const timer = window.setTimeout(() => void refresh(), search.trim() ? 250 : 0)
-    return () => window.clearTimeout(timer)
+    return () => {
+      window.clearTimeout(timer)
+      refreshController.current?.abort()
+    }
   }, [refresh, search])
 
   useEffect(() => {
@@ -370,13 +396,18 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
     const bump = () => {
       window.clearTimeout(timer)
       timer = window.setTimeout(() => {
-        void refresh({ silent: true })
+        listingCache.current.clear()
+        void refreshCurrent.current({ silent: true })
       }, 200)
     }
     const src = new EventSource('/api/drive/events', { withCredentials: true })
     window.addEventListener('storebase:files-changed', bump)
     src.addEventListener('drive', bump)
-    src.addEventListener('hello', bump)
+    let connected = false
+    src.addEventListener('hello', () => {
+      if (connected) bump()
+      connected = true
+    })
     src.addEventListener('message', bump)
     const poll = window.setInterval(() => {
       if (document.hidden) return
@@ -395,9 +426,8 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
       document.removeEventListener('visibilitychange', onVis)
       window.removeEventListener('focus', onVis)
     }
-  }, [refresh])
+  }, [])
 
-  const refreshCurrent = useRef(refresh)
   useLayoutEffect(() => { refreshCurrent.current = refresh }, [refresh])
 
   function notify(message: string) {
@@ -747,21 +777,22 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
         let firstError: unknown
         let uploaded = 0
         const uploadedNames: string[] = []
-        for (const [index, file] of batch.files.entries()) {
-          batch.operation.progress(`Uploading ${index + 1} of ${batch.files.length} · ${file.name}`, index / batch.files.length * 100)
+        let completed = 0
+        await runBatch(batch.files, async file => {
           try {
             await uploadFile(batch.dir, file)
             uploaded += 1
             uploadedNames.push(file.name)
           } catch (error) {
             firstError ??= error
+          } finally {
+            completed += 1
+            batch.operation.progress(`${completed} of ${batch.files.length} completed`, completed / batch.files.length * 100)
           }
-        }
+        }, 3)
         if (firstError) batch.operation.finish(firstError)
         else batch.operation.finish()
         if (uploaded > 0) {
-          setSection(isTempId(batch.dir) ? 'temp' : 'my-drive')
-          setFolderPath(batch.dir)
           notify(uploaded === 1 ? `Uploaded ${uploadedNames[0]}` : `Uploaded ${uploaded} files`)
           await refreshCurrent.current({ silent: true })
         } else notify(firstError instanceof Error ? firstError.message : 'Upload failed')

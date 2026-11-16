@@ -112,6 +112,13 @@ export async function cachedFolderSize(dir: string, opts?: { real?: boolean }): 
   return cachedComputation(`${opts?.real ? 'real:' : ''}${dir}`, () => folderSize(dir, opts))
 }
 
+/** Bootstrap must not wait for a cold full-drive scan; status fills this in later. */
+export function folderSizeSnapshot(dir: string): number | null {
+  const hit = sizeCache.get(dir)
+  if (!hit || Date.now() - hit.at >= SIZE_TTL_MS) void queueRefresh(dir, () => folderSize(dir))
+  return hit?.bytes ?? null
+}
+
 export function invalidateSizeCache(dir: string): void {
   sizeCache.delete(dir)
   sizeCache.delete(`real:${dir}`)

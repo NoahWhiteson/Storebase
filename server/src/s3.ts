@@ -1,4 +1,7 @@
 import { createHash, createHmac } from 'node:crypto'
+import { createReadStream } from 'node:fs'
+
+export type BlobFile = { path: string; size: number; sha256: string }
 
 export type S3Target = {
   endpoint: string
@@ -34,7 +37,7 @@ export async function s3Request(
   target: S3Target,
   method: string,
   key: string,
-  opts: { body?: Buffer; range?: string; query?: string } = {},
+  opts: { body?: Buffer | BlobFile; range?: string; query?: string } = {},
 ): Promise<Response> {
   const base = target.endpoint.replace(/\/+$/, '')
   const object = key.replace(/^\/+/, '')
@@ -45,13 +48,13 @@ export async function s3Request(
   const amzDate = now.toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z')
   const date = amzDate.slice(0, 8)
   const region = target.region.trim() || 'us-east-1'
-  const payloadHash = hashHex(body)
+  const payloadHash = Buffer.isBuffer(body) ? hashHex(body) : body.sha256
   const headers: Record<string, string> = {
     host: url.host,
     'x-amz-date': amzDate,
     'x-amz-content-sha256': payloadHash,
   }
-  if (opts.body) headers['content-length'] = String(opts.body.byteLength)
+  if (opts.body) headers['content-length'] = String(Buffer.isBuffer(body) ? body.byteLength : body.size)
   if (opts.range) headers.range = opts.range
   const signed = Object.keys(headers)
     .map((name) => name.toLowerCase())
@@ -72,14 +75,19 @@ export async function s3Request(
     .update(stringToSign, 'utf8')
     .digest('hex')
   headers.authorization = `AWS4-HMAC-SHA256 Credential=${target.accessKey}/${scope}, SignedHeaders=${signedNames}, Signature=${signature}`
-  return fetch(url, {
-    method,
-    headers,
-    body: opts.body && method !== 'GET' && method !== 'HEAD' ? new Uint8Array(opts.body) : undefined,
-  })
+  const source = !Buffer.isBuffer(body) ? createReadStream(body.path) : undefined
+  try {
+    return await fetch(url, {
+      method,
+      headers,
+      body: opts.body && method !== 'GET' && method !== 'HEAD'
+        ? source as unknown as NonNullable<Parameters<typeof fetch>[1]>['body'] ?? body as Buffer : undefined,
+      ...(source ? { duplex: 'half' } : {}),
+    })
+  } finally { source?.destroy() }
 }
 
-export async function s3Put(target: S3Target, key: string, body: Buffer): Promise<void> {
+export async function s3Put(target: S3Target, key: string, body: Buffer | BlobFile): Promise<void> {
   const res = await s3Request(target, 'PUT', key, { body })
   if (!res.ok) throw new Error(await s3Error(res, 'Could not write to the bucket'))
 }
