@@ -215,6 +215,20 @@ async function openStream(
     : createReadStream(file.full)
 }
 
+const PREVIEW_SPAN = 8 * 1024 * 1024
+
+export function contentDisposition(inline: boolean, name: string): string {
+  const type = inline ? 'inline' : 'attachment'
+  const ascii = name.replace(/[^\x20-\x7E]/g, '_').replace(/["\\]/g, '_') || 'download'
+  const star = encodeURIComponent(name).replace(/['()*]/g, (ch) => `%${ch.charCodeAt(0).toString(16).toUpperCase()}`)
+  return `${type}; filename="${ascii}"; filename*=UTF-8''${star}`
+}
+
+function mediaRange(range: { start: number; end: number }, mime: string, inline: boolean): { start: number; end: number } {
+  if (!inline || (!mime.startsWith('video/') && !mime.startsWith('audio/'))) return range
+  return { start: range.start, end: Math.min(range.end, range.start + PREVIEW_SPAN - 1) }
+}
+
 async function sendFile(
   file: OpenedFile,
   inline: boolean,
@@ -222,9 +236,10 @@ async function sendFile(
   config?: ServerConfig,
 ) {
   const mime = mimeFor(file.name)
-  const disposition = `${inline ? 'inline' : 'attachment'}; filename="${file.name.replaceAll('"', '')}"`
+  const disposition = contentDisposition(inline, file.name)
   if (rangeHeader) {
-    const range = parseRange(rangeHeader, file.size)
+    const parsed = parseRange(rangeHeader, file.size)
+    const range = parsed ? mediaRange(parsed, mime, inline) : null
     if (!range) {
       return new Response(null, {
         status: 416,
