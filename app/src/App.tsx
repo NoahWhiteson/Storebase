@@ -5,6 +5,7 @@ import { FileView, sortItems, type SortKey } from '@/components/FileView'
 import { FilePreview, Settings, Terminals, type SettingsSection } from '@/components/DeferredPanels'
 import { ShareDialog } from '@/components/ShareDialog'
 import { AiPanel } from '@/components/AiPanel'
+import { PlanView } from '@/components/PlanView'
 import { Sidebar } from '@/components/Sidebar'
 import { TopBar } from '@/components/TopBar'
 import { Button } from '@/components/ui/button'
@@ -190,6 +191,7 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
   const [terminalsEnabled, setTerminalsEnabled] = useState(account.terminalsEnabled !== false)
   const [aiEnabled, setAiEnabled] = useState(account.aiEnabled === true)
   const [aiOpen, setAiOpen] = useState(false)
+  const [planPath, setPlanPath] = useState<string | null>(null)
   const [operationNotifications, setOperationNotifications] = useState(account.operationNotifications !== false)
   const [section, setSection] = useState<SectionId>('home')
   const [folderPath, setFolderPath] = useState('')
@@ -540,6 +542,10 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
   }
 
   function openItem(item: DriveItem) {
+    if (item.name.endsWith('.sbplan.json')) {
+      setPlanPath(item.id)
+      return
+    }
     if (item.spam) {
       notify('Accept this share first')
       return
@@ -1311,6 +1317,7 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
               files={items.map((item) => ({ name: item.name, path: item.id }))}
               selected={items.filter((item) => selectedIds.includes(item.id)).map((item) => ({ name: item.name, path: item.id }))}
               onClose={() => setAiOpen(false)}
+              onOpenPlan={setPlanPath}
             />
           </div>
         ) : null}
@@ -1318,6 +1325,8 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
         )}
       </div>
       )}
+
+      {planPath ? <PlanView path={planPath} onClose={() => setPlanPath(null)} /> : null}
 
       <input
         ref={uploadRef}

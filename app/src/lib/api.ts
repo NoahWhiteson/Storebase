@@ -106,7 +106,7 @@ export type Me = {
 
 export type SystemAlert = { id: string; tone: 'warning' | 'danger'; message: string }
 
-function kindFromName(name: string): FileKind {
+export function kindFromName(name: string): FileKind {
   const ext = name.split('.').pop()?.toLowerCase() ?? ''
   if (['exe', 'msi', 'dll', 'lnk', 'scr', 'com', 'app', 'dmg', 'pkg', 'apk', 'aab', 'xapk', 'ipa', 'appimage', 'deb', 'rpm', 'iso', 'jar', 'war', 'bat', 'cmd', 'ps1'].includes(ext)) return 'app'
   if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico', 'heic', 'heif', 'avif'].includes(ext)) return 'image'
@@ -294,14 +294,33 @@ export async function login(email: string, password: string): Promise<Me> {
 
 export type AiProviderId = 'gemini' | 'deepseek' | 'claude' | 'openai'
 export type AiStep = { command: string; output: string }
-
 export type AiRef = { path: string; name: string }
+export type AiPlanCard = { path: string; title: string; summary: string }
+export type PlanStep = { text: string; op: 'mkdir' | 'move' | 'delete'; path?: string; from?: string; to?: string; done?: boolean; error?: string }
+export type StorePlan = { sbplan: 1; title: string; summary: string; status: 'draft' | 'done'; steps: PlanStep[] }
 
-export async function askAi(message: string, refs: AiRef[] = []): Promise<{ answer: string; steps: AiStep[]; provider: AiProviderId }> {
-  return api('/api/ai/ask', {
+export async function askAi(message: string, refs: AiRef[] = []): Promise<{ answer: string; steps: AiStep[]; provider: AiProviderId; plan?: AiPlanCard }> {
+  const body = await api<{ answer: string; steps: AiStep[]; provider: AiProviderId; plan?: AiPlanCard }>('/api/ai/ask', {
     method: 'POST',
     body: JSON.stringify({ message, refs }),
   })
+  if (body.steps?.some((step) => /^<(mkdir|move|delete|plan)/.test(step.command)) || body.plan) {
+    window.dispatchEvent(new Event('storebase:files-changed'))
+  }
+  return body
+}
+
+export async function fetchPlan(path: string): Promise<StorePlan> {
+  return api(`/api/ai/plan?path=${encodeURIComponent(path)}`)
+}
+
+export async function runAiPlan(path: string): Promise<StorePlan> {
+  const plan = await api<StorePlan>('/api/ai/plan/run', {
+    method: 'POST',
+    body: JSON.stringify({ path }),
+  })
+  window.dispatchEvent(new Event('storebase:files-changed'))
+  return plan
 }
 
 export async function logout(): Promise<void> {

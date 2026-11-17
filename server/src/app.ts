@@ -7,7 +7,7 @@ import { pipeline } from 'node:stream/promises'
 import { Hono, type Context } from 'hono'
 import { cors } from 'hono/cors'
 import { stream, streamSSE } from 'hono/streaming'
-import { aiEnabledFor, askAboutFiles, semanticPaths } from './ai.ts'
+import { aiEnabledFor, askAboutFiles, contentHits, readPlan, runPlan } from './ai.ts'
 import { mountAdmin } from './admin.ts'
 import { bytesToGb, type ServerConfig } from './config.ts'
 import {
@@ -756,6 +756,30 @@ export function createApp(config: ServerConfig) {
     })
   })
 
+  app.get('/api/ai/plan', async (c) => {
+    const root = c.get('root')
+    try {
+      return c.json(await readPlan(root, c.req.query('path') ?? ''))
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : 'Plan failed' }, 400)
+    }
+  })
+
+  app.post('/api/ai/plan/run', async (c) => {
+    const user = c.get('user')
+    const root = c.get('root')
+    const body = await c.req.json<{ path?: string }>().catch(() => null)
+    try {
+      const platform = await loadPlatform(config)
+      if (!aiEnabledFor(user, platform)) return c.json({ error: 'AI is off for this account' }, 400)
+      const meta = await loadMeta(root)
+      const open = await readFileUnlocks(c, config, user.id)
+      return c.json(await runPlan(root, body?.path ?? '', (path) => !isBlocked(meta.locks, open, user.id, path)))
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : 'Plan failed' }, 400)
+    }
+  })
+
   app.post('/api/ai/ask', async (c) => {
     const user = c.get('user')
     const root = c.get('root')
@@ -769,7 +793,7 @@ export function createApp(config: ServerConfig) {
     try {
       const meta = await loadMeta(root)
       const open = await readFileUnlocks(c, config, user.id)
-      const reply = await askAboutFiles(config, user, root, message, (path) => !ancestorBlocked(meta.locks, open, user.id, path), refs)
+      const reply = await askAboutFiles(config, user, root, message, (path) => !isBlocked(meta.locks, open, user.id, path), refs)
       return c.json(reply)
     } catch (err) {
       return c.json({ error: err instanceof Error ? err.message : 'AI failed' }, 400)
@@ -1052,16 +1076,10 @@ export function createApp(config: ServerConfig) {
       const needle = (q || path).toLowerCase()
       let items = needle ? all.filter((item) => item.name.toLowerCase().includes(needle)) : all
       if (q.trim().length >= 2) {
-        try {
-          const matched = await semanticPaths(config, user, root, q.trim(), (path) => !ancestorBlocked(locks, open, user.id, path))
-          if (matched) {
-            const rank = new Map(matched.map((item, index) => [item, index]))
-            items = all.filter((item) => rank.has(item.path) || item.name.toLowerCase().includes(needle))
-            items.sort((a, b) => (rank.get(a.path) ?? 1000) - (rank.get(b.path) ?? 1000))
-          }
-        } catch {
-          // Name search still works when JEV is unavailable.
-        }
+        const matched = await contentHits(config, root, all, q.trim())
+        const rank = new Map(matched.map((item, index) => [item, index]))
+        items = all.filter((item) => rank.has(item.path))
+        items.sort((a, b) => (rank.get(a.path) ?? 1000) - (rank.get(b.path) ?? 1000))
       }
       return c.json({ path, items: decorate(items) })
     }

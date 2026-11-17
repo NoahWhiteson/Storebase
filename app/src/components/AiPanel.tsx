@@ -1,4 +1,6 @@
-import { askAi, type AiProviderId, type AiRef, type AiStep } from '@/lib/api'
+import { FileGlyph } from '@/components/FileGlyph'
+import { askAi, kindFromName, listFiles, type AiPlanCard, type AiProviderId, type AiRef, type AiStep } from '@/lib/api'
+import type { FileKind } from '@/types'
 import { Input } from '@/components/ui/input'
 import { cn } from 'cn'
 import { Sparkles } from 'kubai-icons-react'
@@ -75,7 +77,8 @@ function ProviderMark({ provider }: { provider: AiProviderId }) {
   )
 }
 
-type Turn = { role: 'you' | 'ai'; text: string; steps?: AiStep[]; provider?: AiProviderId }
+type Turn = { role: 'you' | 'ai'; text: string; steps?: AiStep[]; provider?: AiProviderId; plan?: AiPlanCard }
+type MentionFile = { name: string; path: string; kind: FileKind }
 export type AiFile = { name: string; path: string }
 
 function tokenFor(name: string): string {
@@ -98,15 +101,25 @@ function StreamText({ text }: { text: string }) {
   )
 }
 
-export function AiPanel({ name, files, selected, onClose }: { name: string; files: AiFile[]; selected: AiFile[]; onClose: () => void }) {
+export function AiPanel({ name, files, selected, onClose, onOpenPlan }: { name: string; files: AiFile[]; selected: AiFile[]; onClose: () => void; onOpenPlan: (path: string) => void }) {
   const first = name.trim().split(/\s+/)[0] || 'there'
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
   const [turns, setTurns] = useState<Turn[]>([])
   const [dropped, setDropped] = useState<string[]>([])
+  const [home, setHome] = useState<MentionFile[]>([])
+  const [inside, setInside] = useState<MentionFile[] | null>(null)
   const attached = selected.filter((file) => !dropped.includes(file.path))
   const mention = text.match(/(?:^|\s)@([^\n@]*)$/)?.[1] ?? null
-  const suggestions = mention === null ? [] : files.filter((file) => file.name.toLowerCase().includes(mention.toLowerCase())).slice(0, 6)
+  const typed = mention ?? ''
+  const slash = typed.indexOf('/')
+  const head = (slash >= 0 ? typed.slice(0, slash) : typed).trim()
+  const tail = slash >= 0 ? typed.slice(slash + 1) : ''
+  const opened = home.find((item) => item.kind === 'folder' && item.name.toLowerCase() === head.toLowerCase() && (slash >= 0 || head.length >= item.name.length))
+  const pool = opened && inside ? inside : home
+  const needle = opened && inside ? tail : typed
+  const suggestions: MentionFile[] = mention === null ? [] : pool.filter((item) => item.name.toLowerCase().includes(needle.toLowerCase())).slice(0, 8)
+  const menuLabel = opened && inside ? opened.name : 'Home'
 
   useEffect(() => {
     setDropped((current) => {
@@ -115,14 +128,46 @@ export function AiPanel({ name, files, selected, onClose }: { name: string; file
     })
   }, [selected])
 
-  function pick(file: AiFile) {
+  useEffect(() => {
+    if (mention === null) return
+    let cancel = false
+    listFiles({ path: '' })
+      .then((items) => {
+        if (cancel) return
+        setHome(items.map((item) => ({ name: item.name, path: item.path, kind: item.type === 'folder' ? 'folder' : kindFromName(item.name) })))
+      })
+      .catch(() => {})
+    return () => { cancel = true }
+  }, [mention === null])
+
+  useEffect(() => {
+    if (!opened) {
+      setInside(null)
+      return
+    }
+    setInside(null)
+    let cancel = false
+    listFiles({ path: opened.path })
+      .then((items) => {
+        if (cancel) return
+        setInside(items.map((item) => ({ name: item.name, path: item.path, kind: item.type === 'folder' ? 'folder' : kindFromName(item.name) })))
+      })
+      .catch(() => {})
+    return () => { cancel = true }
+  }, [opened?.path])
+
+  function pick(file: MentionFile) {
+    if (file.kind === 'folder' && !(opened && inside)) {
+      setText((current) => current.replace(/(^|\s)@[^\n@]*$/, `$1@${file.name}/`))
+      return
+    }
     setText((current) => current.replace(/(^|\s)@[^\n@]*$/, `$1${tokenFor(file.name)} `))
   }
 
   function refsFor(message: string): AiRef[] {
     const found = new Map<string, AiFile>()
     for (const file of attached) found.set(file.path, file)
-    for (const file of files) {
+    for (const file of [...files, ...home, ...(inside ?? [])]) {
       if (message.includes(tokenFor(file.name))) found.set(file.path, file)
     }
     return [...found.values()].map((file) => ({ path: file.path, name: file.name }))
@@ -142,7 +187,7 @@ export function AiPanel({ name, files, selected, onClose }: { name: string; file
     setBusy(true)
     try {
       const reply = await askAi(next, refs)
-      setTurns((current) => [...current, { role: 'ai', text: reply.answer, steps: reply.steps, provider: reply.provider }])
+      setTurns((current) => [...current, { role: 'ai', text: reply.answer, steps: reply.steps, provider: reply.provider, plan: reply.plan }])
     } catch (error) {
       setTurns((current) => [...current, { role: 'ai', text: error instanceof Error ? error.message : 'AI failed' }])
     } finally {
@@ -198,6 +243,13 @@ export function AiPanel({ name, files, selected, onClose }: { name: string; file
                     {turn.role === 'ai' && index === turns.length - 1 ? <StreamText text={turn.text} /> : turn.text}
                   </p>
                 ) : null}
+                {turn.plan ? (
+                  <button type="button" className="rounded-2xl bg-[#1e1e1e] px-3 py-3 text-left" onClick={() => onOpenPlan(turn.plan?.path ?? '')}>
+                    <span className="text-[11px] text-[#8d8d8d]">Plan</span>
+                    <span className="mt-1 block text-sm font-medium text-white">{turn.plan.title}</span>
+                    {turn.plan.summary ? <span className="mt-1 block text-xs leading-5 text-[#9a9a9a]">{turn.plan.summary}</span> : null}
+                  </button>
+                ) : null}
                 {turn.role === 'ai' && turn.provider ? (
                   <div className="flex items-center gap-1.5 text-[11px] text-[#8d8d8d]">
                     <ProviderMark provider={turn.provider} />
@@ -231,21 +283,23 @@ export function AiPanel({ name, files, selected, onClose }: { name: string; file
             ))}
           </div>
         ) : null}
-        {suggestions.length ? (
-          <div className="absolute right-3 bottom-full left-3 mb-1 overflow-hidden rounded-2xl bg-[#242424] shadow-xl">
-            {suggestions.map((file) => (
+        {mention !== null ? (
+          <div className="absolute right-3 bottom-full left-3 mb-1 overflow-hidden rounded-2xl bg-[#242424] py-1 shadow-xl">
+            <p className="px-3 pt-1.5 pb-1 text-[11px] font-medium text-[#8d8d8d]">{menuLabel}</p>
+            {suggestions.length ? suggestions.map((file) => (
               <button
                 key={file.path}
                 type="button"
-                className="block w-full truncate px-3 py-2 text-left text-sm text-white hover:bg-white/10"
+                className="flex w-full items-center gap-2 px-2 py-1.5 text-left hover:bg-white/10"
                 onMouseDown={(event) => {
                   event.preventDefault()
                   pick(file)
                 }}
               >
-                {file.name}
+                <FileGlyph kind={file.kind} name={file.name} size="sm" />
+                <span className="min-w-0 truncate text-sm text-white">{file.name}</span>
               </button>
-            ))}
+            )) : <p className="px-3 py-2 text-sm text-[#8d8d8d]">Nothing here</p>}
           </div>
         ) : null}
         <div className="flex items-center gap-2 rounded-full bg-[#242424] px-2">
