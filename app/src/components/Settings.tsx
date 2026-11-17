@@ -33,6 +33,7 @@ import {
   removeAvatar,
   saveAccount,
   saveDomain,
+  saveAi,
   saveSettings,
   scanUserStorage,
   setNetworkInbound,
@@ -71,6 +72,7 @@ import {
   RefreshCw,
   Search,
   Server,
+  Sparkles,
   Shield,
   ShieldCheck,
   SlidersHorizontal,
@@ -98,6 +100,7 @@ export type SettingsSection =
   | 'terminals'
   | 'domain'
   | 'diagnostics'
+  | 'ai'
 
 type Account = { id: string; name: string; email: string; role: 'admin' | 'user'; virusScanEnabled?: boolean; operationNotifications?: boolean; theme?: ThemePreference; avatarUrl?: string | null }
 type AccountUpdate = { name: string; email: string; virusScanEnabled?: boolean; operationNotifications?: boolean; theme?: ThemePreference; avatarUrl?: string | null }
@@ -136,6 +139,7 @@ const settingsGroups: { id: string; label: string; items: SettingsNavItem[] }[] 
     label: 'Protection',
     items: [
       { id: 'virus', label: 'Virus Scanning', icon: ShieldCheck, keywords: 'clamav malware upload scan antivirus' },
+      { id: 'ai', label: 'AI', icon: Sparkles, keywords: 'jev gemini claude chatgpt openai deepseek byok search' },
       { id: 'security', label: 'Security', icon: Shield, admin: true, keywords: 'secret session encryption' },
       { id: 'terminals', label: 'Terminals', icon: SquareTerminal, admin: true, keywords: 'shell command console' },
     ],
@@ -162,11 +166,11 @@ export function Settings({
   initialSection?: SettingsSection
   onClose: () => void
   onAccount: (next: AccountUpdate) => void
-  onPlatform?: (next: { defaultView?: 'grid' | 'list'; terminalsEnabled?: boolean }) => void
+  onPlatform?: (next: { defaultView?: 'grid' | 'list'; terminalsEnabled?: boolean; aiEnabled?: boolean }) => void
   onToast: (message: string) => void
 }) {
   const [section, setSection] = useState<SettingsSection>(
-    account.role === 'admin' || ['account', 'devices', 'general', 'my-storage', 'virus'].includes(initialSection)
+    account.role === 'admin' || ['account', 'devices', 'general', 'my-storage', 'virus', 'ai'].includes(initialSection)
       ? initialSection
       : 'account',
   )
@@ -276,6 +280,9 @@ export function Settings({
         ) : null}
         {!loading && data && section === 'virus' ? (
           <VirusPanel data={data} admin={admin} onSaved={reload} onAccount={onAccount} onToast={onToast} />
+        ) : null}
+        {!loading && data && section === 'ai' ? (
+          <AiPanel data={data} admin={admin} onPlatform={onPlatform} onSaved={reload} onToast={onToast} />
         ) : null}
         {!loading && data && admin && section === 'server' ? (
           <ServerPanel data={data} onSaved={reload} onToast={onToast} />
@@ -412,6 +419,142 @@ function SettingsNavigation({
         {groups.length === 0 ? <p className="px-3 py-4 text-sm text-[#777]">No settings found.</p> : null}
       </div>
     </nav>
+  )
+}
+
+const AI_PROVIDERS = [
+  ['gemini', 'Gemini'],
+  ['deepseek', 'DeepSeek'],
+  ['claude', 'Claude'],
+  ['openai', 'ChatGPT'],
+] as const
+
+function hashLabel(hash: string | null): string {
+  return hash ? `Saved · ${hash.slice(0, 12)}` : 'Not set'
+}
+
+function AiPanel({
+  data,
+  admin,
+  onPlatform,
+  onSaved,
+  onToast,
+}: {
+  data: SettingsPayload
+  admin: boolean
+  onPlatform?: (next: { aiEnabled?: boolean }) => void
+  onSaved: () => Promise<void>
+  onToast: (message: string) => void
+}) {
+  const ai = data.ai
+  const [mode, setMode] = useState(ai?.mode ?? 'off')
+  const [byok, setByok] = useState(ai?.byok ?? false)
+  const [provider, setProvider] = useState(admin ? ai?.provider ?? 'gemini' : ai?.mine.provider ?? 'gemini')
+  const [ownProvider, setOwnProvider] = useState(ai?.mine.provider ?? 'gemini')
+  const [ids, setIds] = useState<string[]>(ai?.userIds ?? [])
+  const [jevKey, setJevKey] = useState('')
+  const [modelKey, setModelKey] = useState('')
+  const [ownJev, setOwnJev] = useState('')
+  const [ownModel, setOwnModel] = useState('')
+  const [busy, setBusy] = useState(false)
+  if (!ai) return null
+
+  async function saveNode() {
+    setBusy(true)
+    try {
+      const next = await saveAi({ mode, userIds: ids, byok, provider, jevKey, modelKey })
+      setJevKey('')
+      setModelKey('')
+      onPlatform?.({ aiEnabled: next.enabled })
+      await onSaved()
+      onToast('AI settings saved')
+    } catch (error) {
+      onToast(error instanceof Error ? error.message : 'Could not save AI settings')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function saveOwn() {
+    setBusy(true)
+    try {
+      const next = await saveAi({ own: true, provider: ownProvider, jevKey: ownJev, modelKey: ownModel })
+      setOwnJev('')
+      setOwnModel('')
+      onPlatform?.({ aiEnabled: next.enabled })
+      await onSaved()
+      onToast('Your AI keys saved')
+    } catch (error) {
+      onToast(error instanceof Error ? error.message : 'Could not save your keys')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="max-w-2xl space-y-4">
+      <Heading title="AI" hint="JEV searches your files. Gemini, DeepSeek, Claude, or ChatGPT can answer questions about them." />
+      {admin ? (
+        <SettingsCard title="Who can use it" hint="Off, every account, or only the accounts you pick. Paste the keys here. The page only shows their hash after you save.">
+          <div className="flex flex-wrap gap-2">
+            {([['off', 'Off'], ['global', 'Everyone'], ['selected', 'Selected Accounts']] as const).map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                className={`h-9 rounded-full px-4 text-sm ${mode === value ? 'bg-white text-[#1a1a1a]' : 'bg-[#242424] text-white'}`}
+                onClick={() => setMode(value)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          {mode === 'selected' ? (
+            <div className="mt-4 space-y-2">
+              {(data.users ?? []).map((person) => (
+                <label key={person.id} className="flex items-center gap-3 text-sm text-white">
+                  <input
+                    type="checkbox"
+                    checked={ids.includes(person.id)}
+                    onChange={(event) => setIds((current) => event.target.checked ? [...current, person.id] : current.filter((id) => id !== person.id))}
+                  />
+                  {person.name}
+                </label>
+              ))}
+            </div>
+          ) : null}
+          <label className="mt-4 block text-sm text-[#8d8d8d]">Model</label>
+          <select className={`${fieldClass} mt-1.5 w-full px-3`} value={provider} onChange={(event) => setProvider(event.target.value as typeof provider)}>
+            {AI_PROVIDERS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+          </select>
+          <label className="mt-4 block text-sm text-[#8d8d8d]">JEV Typesafe key · {hashLabel(ai.jevKeyHash)}</label>
+          <Input className={`${fieldClass} mt-1.5`} type="password" value={jevKey} onChange={(event) => setJevKey(event.target.value)} placeholder="Leave blank to keep the saved key" autoComplete="off" />
+          <label className="mt-4 block text-sm text-[#8d8d8d]">Model key · {hashLabel(ai.modelKeyHash)}</label>
+          <Input className={`${fieldClass} mt-1.5`} type="password" value={modelKey} onChange={(event) => setModelKey(event.target.value)} placeholder="Leave blank to keep the saved key" autoComplete="off" />
+          <div className="mt-4">
+            <Toggle on={byok} onChange={setByok} label="Bring Your Own Key" />
+          </div>
+          <Button className="mt-4 h-10 rounded-full bg-white px-4 text-[#1a1a1a] hover:bg-[#f2f2f2]" disabled={busy} onClick={() => void saveNode()}>
+            {busy ? 'Saving…' : 'Save'}
+          </Button>
+        </SettingsCard>
+      ) : null}
+      {byok || !admin ? (
+        <SettingsCard title="Your keys" hint={byok ? 'This account uses its own JEV key and model key.' : 'Bring Your Own Key is off, so the node keys are used.'}>
+          {ai.enabled ? null : <p className="mb-3 text-sm text-[#8d8d8d]">AI is off for this account.</p>}
+          <label className="block text-sm text-[#8d8d8d]">Model</label>
+          <select className={`${fieldClass} mt-1.5 w-full px-3`} value={ownProvider} onChange={(event) => setOwnProvider(event.target.value as typeof ownProvider)} disabled={!byok}>
+            {AI_PROVIDERS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+          </select>
+          <label className="mt-4 block text-sm text-[#8d8d8d]">JEV Typesafe key · {hashLabel(ai.mine.jevKeyHash)}</label>
+          <Input className={`${fieldClass} mt-1.5`} type="password" value={ownJev} onChange={(event) => setOwnJev(event.target.value)} placeholder="Leave blank to keep the saved key" autoComplete="off" disabled={!byok} />
+          <label className="mt-4 block text-sm text-[#8d8d8d]">Model key · {hashLabel(ai.mine.modelKeyHash)}</label>
+          <Input className={`${fieldClass} mt-1.5`} type="password" value={ownModel} onChange={(event) => setOwnModel(event.target.value)} placeholder="Leave blank to keep the saved key" autoComplete="off" disabled={!byok} />
+          <Button className="mt-4 h-10 rounded-full bg-white px-4 text-[#1a1a1a] hover:bg-[#f2f2f2]" disabled={busy || !byok} onClick={() => void saveOwn()}>
+            {busy ? 'Saving…' : 'Save Your Keys'}
+          </Button>
+        </SettingsCard>
+      ) : null}
+    </div>
   )
 }
 

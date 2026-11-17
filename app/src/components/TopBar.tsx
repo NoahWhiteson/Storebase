@@ -17,7 +17,9 @@ import {
 } from '@/components/ui/tooltip'
 import { cn } from 'cn'
 import type { SettingsSection } from '@/components/Settings'
+import { askAi } from '@/lib/api'
 import { Grid2x2, List, Menu, Search, Settings, SquareTerminal } from 'lucide-react'
+import { useState } from 'react'
 
 type TopBarProps = {
   search: string
@@ -28,6 +30,7 @@ type TopBarProps = {
   settingsOpen: boolean
   terminalsOpen: boolean
   terminalsEnabled?: boolean
+  aiEnabled?: boolean
   onSearch: (value: string) => void
   onView: (view: 'grid' | 'list') => void
   onOpenSidebar: () => void
@@ -45,6 +48,7 @@ export function TopBar({
   settingsOpen,
   terminalsOpen,
   terminalsEnabled = true,
+  aiEnabled = false,
   onSearch,
   onView,
   onOpenSidebar,
@@ -52,6 +56,25 @@ export function TopBar({
   onOpenTerminals,
   onSignOut,
 }: TopBarProps) {
+  const [aiOpen, setAiOpen] = useState(false)
+  const [aiText, setAiText] = useState('')
+  const [aiAnswer, setAiAnswer] = useState('')
+  const [aiBusy, setAiBusy] = useState(false)
+
+  async function ask() {
+    const message = aiText.trim()
+    if (!message || aiBusy) return
+    setAiBusy(true)
+    setAiAnswer('')
+    try {
+      setAiAnswer(await askAi(message))
+    } catch (error) {
+      setAiAnswer(error instanceof Error ? error.message : 'AI failed')
+    } finally {
+      setAiBusy(false)
+    }
+  }
+
   return (
     <header className="flex h-16 shrink-0 items-center bg-[#1a1a1a]">
       <div className="flex h-full w-auto shrink-0 items-center gap-2 px-3 md:w-[256px] md:gap-2.5 md:px-4">
@@ -74,14 +97,44 @@ export function TopBar({
         ) : terminalsOpen ? (
           <div className="min-w-0 flex-1 text-[15px] font-medium text-white">Terminal</div>
         ) : (
-          <div className="relative flex h-12 min-w-0 flex-1 items-center">
-            <Search className="pointer-events-none absolute left-4 size-[18px] text-[#9a9a9a]" />
-            <Input
-              value={search}
-              onChange={(e) => onSearch(e.target.value)}
-              placeholder="Search in Storebase"
-              className="h-12 rounded-full border-0 bg-[#242424] pl-12 text-[15px] shadow-none placeholder:text-[#8d8d8d] outline-none focus-visible:bg-[#2a2a2a] focus-visible:ring-0"
-            />
+          <div className="relative flex h-12 min-w-0 flex-1 items-center gap-2">
+            <div className="relative min-w-0 flex-1">
+              <Search className="pointer-events-none absolute left-4 top-1/2 size-[18px] -translate-y-1/2 text-[#9a9a9a]" />
+              <Input
+                value={search}
+                onChange={(e) => onSearch(e.target.value)}
+                placeholder="Search in Storebase"
+                className="h-12 rounded-full border-0 bg-[#242424] pl-12 text-[15px] shadow-none placeholder:text-[#8d8d8d] outline-none focus-visible:bg-[#2a2a2a] focus-visible:ring-0"
+              />
+            </div>
+            {aiEnabled ? (
+              <button
+                type="button"
+                className={cn('h-12 shrink-0 rounded-full px-4 text-[15px] font-medium', aiOpen ? 'bg-white text-[#1a1a1a]' : 'bg-[#242424] text-white')}
+                onClick={() => setAiOpen((open) => !open)}
+              >
+                AI
+              </button>
+            ) : null}
+            {aiEnabled && aiOpen ? (
+              <form
+                className="absolute top-14 right-0 z-30 w-[min(420px,calc(100vw-2rem))] rounded-2xl bg-[#242424] p-3 shadow-xl"
+                onSubmit={(event) => {
+                  event.preventDefault()
+                  void ask()
+                }}
+              >
+                <Input
+                  value={aiText}
+                  onChange={(event) => setAiText(event.target.value)}
+                  placeholder="Ask about your files"
+                  className="h-11 rounded-full border-0 bg-[#1a1a1a] px-4 text-[15px] shadow-none placeholder:text-[#8d8d8d] outline-none focus-visible:ring-0"
+                />
+                <p className="mt-3 max-h-72 overflow-auto whitespace-pre-wrap text-sm leading-6 text-[#e8e8e8]">
+                  {aiBusy ? 'Looking through your files…' : aiAnswer || 'Ask something about the files in this drive.'}
+                </p>
+              </form>
+            ) : null}
           </div>
         )}
 

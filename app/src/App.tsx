@@ -117,6 +117,7 @@ type Account = {
   defaultView?: 'grid' | 'list'
   terminalsEnabled?: boolean
   virusScanEnabled?: boolean
+  aiEnabled?: boolean
   operationNotifications?: boolean
   theme?: ThemePreference
   avatarUrl?: string | null
@@ -186,6 +187,7 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('account')
   const [terminalsOpen, setTerminalsOpen] = useState(false)
   const [terminalsEnabled, setTerminalsEnabled] = useState(account.terminalsEnabled !== false)
+  const [aiEnabled, setAiEnabled] = useState(account.aiEnabled === true)
   const [operationNotifications, setOperationNotifications] = useState(account.operationNotifications !== false)
   const [section, setSection] = useState<SectionId>('home')
   const [folderPath, setFolderPath] = useState('')
@@ -1085,6 +1087,7 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
         settingsOpen={settingsOpen}
         terminalsOpen={terminalsOpen}
         terminalsEnabled={terminalsEnabled}
+        aiEnabled={aiEnabled}
         onSearch={setSearch}
         onView={setView}
         onOpenSidebar={() => setSidebarOpen(true)}
@@ -1120,6 +1123,7 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
             onPlatform={(next) => {
               if (next.defaultView) setView(next.defaultView)
               if (next.terminalsEnabled !== undefined) setTerminalsEnabled(next.terminalsEnabled)
+              if (next.aiEnabled !== undefined) setAiEnabled(next.aiEnabled)
             }}
             onToast={notify}
           />

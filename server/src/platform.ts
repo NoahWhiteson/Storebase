@@ -5,6 +5,8 @@ import type { ServerConfig } from './config.ts'
 
 export type DefaultView = 'grid' | 'list'
 export type VirusScanPolicy = 'user' | 'on' | 'off'
+export type AiMode = 'off' | 'global' | 'selected'
+export type AiProvider = 'gemini' | 'deepseek' | 'claude' | 'openai'
 
 export type PlatformSettings = {
   nodeName: string
@@ -18,6 +20,10 @@ export type PlatformSettings = {
   terminalIdleMinutes: number
   terminalUsers: boolean
   virusScanPolicy: VirusScanPolicy
+  aiMode: AiMode
+  aiUserIds: string[]
+  aiByok: boolean
+  aiProvider: AiProvider
 }
 
 const platformCache = new Map<string, { at: number; value: PlatformSettings }>()
@@ -36,7 +42,15 @@ export function defaultPlatform(config: ServerConfig): PlatformSettings {
     terminalIdleMinutes: 30,
     terminalUsers: true,
     virusScanPolicy: 'user',
+    aiMode: 'off',
+    aiUserIds: [],
+    aiByok: false,
+    aiProvider: 'gemini',
   }
+}
+
+export function aiProvider(value: unknown): AiProvider {
+  return value === 'deepseek' || value === 'claude' || value === 'openai' || value === 'gemini' ? value : 'gemini'
 }
 
 function clampInt(value: unknown, fallback: number, min: number, max: number): number {
@@ -66,6 +80,10 @@ export async function loadPlatform(config: ServerConfig): Promise<PlatformSettin
       terminalIdleMinutes: clampInt(parsed.terminalIdleMinutes, fallback.terminalIdleMinutes, 0, 10080),
       terminalUsers: typeof parsed.terminalUsers === 'boolean' ? parsed.terminalUsers : fallback.terminalUsers,
       virusScanPolicy: parsed.virusScanPolicy === 'on' || parsed.virusScanPolicy === 'off' ? parsed.virusScanPolicy : 'user',
+      aiMode: parsed.aiMode === 'global' || parsed.aiMode === 'selected' ? parsed.aiMode : 'off',
+      aiUserIds: Array.isArray(parsed.aiUserIds) ? parsed.aiUserIds.filter((id): id is string => typeof id === 'string' && id.length > 0) : [],
+      aiByok: parsed.aiByok === true,
+      aiProvider: aiProvider(parsed.aiProvider),
     }
     platformCache.set(config.settingsPath, { at: Date.now(), value: { ...value } })
     return value

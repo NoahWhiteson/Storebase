@@ -1,3 +1,4 @@
+import { aiPublicView, saveNodeAi, saveOwnAi } from './ai.ts'
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { hostname } from 'node:os'
 import { join } from 'node:path'
@@ -105,11 +106,13 @@ export function mountAdmin(app: Hono<{ Variables: Vars }>, config: ServerConfig,
     const userStorage = section === 'my-storage'
       ? await cachedStorageBreakdown(root, usedBytes)
       : undefined
+    const ai = await aiPublicView(config, user, platform)
     if (user.role !== 'admin') {
       return c.json({
         admin: false,
         account,
         platform: { nodeName: platform.nodeName, defaultView: platform.defaultView, virusScanPolicy: platform.virusScanPolicy },
+        ai,
         ...(userStorage ? { userStorage } : {}),
       })
     }
@@ -117,6 +120,7 @@ export function mountAdmin(app: Hono<{ Variables: Vars }>, config: ServerConfig,
       admin: true,
       account,
       platform,
+      ai,
     }
     let peoplePromise: Promise<Array<ReturnType<typeof toPublic> & { usedBytes: number; quotaBytes: number | null }>> | null = null
     const loadPeople = () => {
@@ -171,7 +175,7 @@ export function mountAdmin(app: Hono<{ Variables: Vars }>, config: ServerConfig,
       }
       response.users = people
     }
-    if (wants('users')) {
+    if (wants('users') || wants('ai')) {
       response.users = await loadPeople()
     }
     if (wants('updates')) response.update = { ...updateStatus(), autoUpdate: platform.autoUpdate }
@@ -187,6 +191,28 @@ export function mountAdmin(app: Hono<{ Variables: Vars }>, config: ServerConfig,
     })
     c.header('Server-Timing', `base;dur=${baseMs.toFixed(1)}, detail;dur=${detailMs.toFixed(1)}`)
     return c.json(response)
+  })
+
+  app.post('/api/settings/ai', async (c) => {
+    const user = c.get('user')
+    const body = await c.req.json<{
+      mode?: 'off' | 'global' | 'selected'
+      userIds?: string[]
+      byok?: boolean
+      provider?: string
+      jevKey?: string
+      modelKey?: string
+      own?: boolean
+    }>()
+    const platform = await loadPlatform(config)
+    if (body.own || user.role !== 'admin') {
+      await saveOwnAi(config, user.id, platform, body)
+    } else {
+      const denied = adminOnly(user)
+      if (denied) return c.json({ error: denied }, 403)
+      await savePlatform(config, await saveNodeAi(config, platform, body))
+    }
+    return c.json({ ai: await aiPublicView(config, user, await loadPlatform(config)) })
   })
 
   app.post('/api/settings/storage-scan', async (c) => {

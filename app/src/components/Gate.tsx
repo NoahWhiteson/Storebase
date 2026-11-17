@@ -214,6 +214,7 @@ function AppGate() {
           host: me.host,
           defaultView: me.defaultView,
           terminalsEnabled: me.terminalsEnabled !== false,
+          aiEnabled: me.aiEnabled === true,
           virusScanEnabled: me.virusScanEnabled,
           operationNotifications: me.user.operationNotifications !== false,
           theme: me.user.theme ?? 'system',

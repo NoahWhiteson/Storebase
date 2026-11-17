@@ -99,6 +99,16 @@ export type SettingsPayload = {
     terminalUsers?: boolean
     virusScanPolicy?: 'user' | 'on' | 'off'
   }
+  ai?: {
+    mode: 'off' | 'global' | 'selected'
+    userIds: string[]
+    byok: boolean
+    provider: 'gemini' | 'deepseek' | 'claude' | 'openai'
+    enabled: boolean
+    jevKeyHash: string | null
+    modelKeyHash: string | null
+    mine: { provider: 'gemini' | 'deepseek' | 'claude' | 'openai'; jevKeyHash: string | null; modelKeyHash: string | null }
+  }
   server?: {
     liveHost: string
     livePort: number
@@ -174,6 +184,22 @@ export async function cleanupUserStorage(target: 'temporary' | 'trash' | 'histor
     body: JSON.stringify({ target }),
   })
   return res.userStorage
+}
+
+export async function saveAi(body: {
+  mode?: 'off' | 'global' | 'selected'
+  userIds?: string[]
+  byok?: boolean
+  provider?: string
+  jevKey?: string
+  modelKey?: string
+  own?: boolean
+}): Promise<NonNullable<SettingsPayload['ai']>> {
+  const res = await api<{ ai: NonNullable<SettingsPayload['ai']> }>('/api/settings/ai', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+  return res.ai
 }
 
 export async function saveSettings(body: {

@@ -101,6 +101,7 @@ export type Me = {
   terminalsEnabled?: boolean
   virusScanPolicy?: 'user' | 'on' | 'off'
   virusScanEnabled?: boolean
+  aiEnabled?: boolean
 }
 
 export type SystemAlert = { id: string; tone: 'warning' | 'danger'; message: string }
@@ -270,6 +271,7 @@ export async function login(email: string, password: string): Promise<Me> {
     terminalsEnabled?: boolean
     virusScanPolicy?: 'user' | 'on' | 'off'
     virusScanEnabled?: boolean
+    aiEnabled?: boolean
   }>('/api/login?usage=deferred', {
     method: 'POST',
     body: JSON.stringify({ email, password }),
@@ -286,7 +288,16 @@ export async function login(email: string, password: string): Promise<Me> {
     terminalsEnabled: body.terminalsEnabled,
     virusScanPolicy: body.virusScanPolicy,
     virusScanEnabled: body.virusScanEnabled,
+    aiEnabled: body.aiEnabled,
   }
+}
+
+export async function askAi(message: string): Promise<string> {
+  const body = await api<{ answer: string }>('/api/ai/ask', {
+    method: 'POST',
+    body: JSON.stringify({ message }),
+  })
+  return body.answer
 }
 
 export async function logout(): Promise<void> {

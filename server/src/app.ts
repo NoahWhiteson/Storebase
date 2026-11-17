@@ -7,6 +7,7 @@ import { pipeline } from 'node:stream/promises'
 import { Hono, type Context } from 'hono'
 import { cors } from 'hono/cors'
 import { stream, streamSSE } from 'hono/streaming'
+import { aiEnabledFor, askAboutFiles, semanticPaths } from './ai.ts'
 import { mountAdmin } from './admin.ts'
 import { bytesToGb, type ServerConfig } from './config.ts'
 import {
@@ -513,6 +514,7 @@ export function createApp(config: ServerConfig) {
       terminalsEnabled: terminalsAllowed(user, platform),
       virusScanPolicy: platform.virusScanPolicy,
       virusScanEnabled: virusScanEnabled(user, platform),
+      aiEnabled: aiEnabledFor(user, platform),
     })
   })
 
@@ -750,7 +752,24 @@ export function createApp(config: ServerConfig) {
       terminalsEnabled: terminalsAllowed(user, platform),
       virusScanPolicy: platform.virusScanPolicy,
       virusScanEnabled: virusScanEnabled(user, platform),
+      aiEnabled: aiEnabledFor(user, platform),
     })
+  })
+
+  app.post('/api/ai/ask', async (c) => {
+    const user = c.get('user')
+    const root = c.get('root')
+    const body = await c.req.json<{ message?: string }>().catch(() => null)
+    const message = body?.message?.trim() ?? ''
+    if (!message) return c.json({ error: 'Type a question' }, 400)
+    try {
+      const meta = await loadMeta(root)
+      const open = await readFileUnlocks(c, config, user.id)
+      const visible = (await walkVisible(root)).filter((item) => !ancestorBlocked(meta.locks, open, user.id, item.path))
+      return c.json({ answer: await askAboutFiles(config, user, root, visible, message) })
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : 'AI failed' }, 400)
+    }
   })
 
   app.get('/api/devices', async (c) => {
@@ -1025,8 +1044,21 @@ export function createApp(config: ServerConfig) {
       return c.json({ path: '', items })
     }
     if (view === 'search' || q) {
-      const all = await walkVisible(root)
-      const items = all.filter((item) => item.name.toLowerCase().includes(q || path.toLowerCase()) && !ancestorBlocked(locks, open, user.id, item.path))
+      const all = (await walkVisible(root)).filter((item) => !ancestorBlocked(locks, open, user.id, item.path))
+      const needle = (q || path).toLowerCase()
+      let items = needle ? all.filter((item) => item.name.toLowerCase().includes(needle)) : all
+      if (q.trim().length >= 2) {
+        try {
+          const matched = await semanticPaths(config, user, root, q.trim(), all)
+          if (matched) {
+            const rank = new Map(matched.map((item, index) => [item, index]))
+            items = all.filter((item) => rank.has(item.path) || item.name.toLowerCase().includes(needle))
+            items.sort((a, b) => (rank.get(a.path) ?? 1000) - (rank.get(b.path) ?? 1000))
+          }
+        } catch {
+          // Name search still works when JEV is unavailable.
+        }
+      }
       return c.json({ path, items: decorate(items) })
     }
     const denied = await denyIfLocked(c, config, user.id, user.id, root, path)
