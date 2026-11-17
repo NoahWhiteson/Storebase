@@ -98,7 +98,7 @@ export function TopBar({
                 className={cn('flex size-12 shrink-0 items-center justify-center rounded-full', aiOpen ? 'bg-white' : 'bg-[#242424]')}
                 onClick={onToggleAi}
               >
-                <AiStar className="size-6" />
+                <AiStar />
               </button>
             ) : null}
           </div>

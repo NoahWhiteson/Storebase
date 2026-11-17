@@ -292,12 +292,14 @@ export async function login(email: string, password: string): Promise<Me> {
   }
 }
 
-export async function askAi(message: string): Promise<string> {
-  const body = await api<{ answer: string }>('/api/ai/ask', {
+export type AiProviderId = 'gemini' | 'deepseek' | 'claude' | 'openai'
+export type AiStep = { command: string; output: string }
+
+export async function askAi(message: string): Promise<{ answer: string; steps: AiStep[]; provider: AiProviderId }> {
+  return api('/api/ai/ask', {
     method: 'POST',
     body: JSON.stringify({ message }),
   })
-  return body.answer
 }
 
 export async function logout(): Promise<void> {

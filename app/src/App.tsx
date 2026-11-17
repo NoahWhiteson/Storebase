@@ -1304,7 +1304,11 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
             )}
           </div>
         </main>
-        {aiEnabled && aiOpen ? <AiPanel name={profile.name} onClose={() => setAiOpen(false)} /> : null}
+        {aiEnabled && aiOpen ? (
+          <div className="flex w-[min(100%,424px)] shrink-0 self-stretch p-3 max-md:fixed max-md:inset-0 max-md:z-40 max-md:w-auto max-md:bg-[#1a1a1a]/80">
+            <AiPanel name={profile.name} onClose={() => setAiOpen(false)} />
+          </div>
+        ) : null}
         </>
         )}
       </div>

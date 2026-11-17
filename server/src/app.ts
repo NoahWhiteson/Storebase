@@ -765,8 +765,8 @@ export function createApp(config: ServerConfig) {
     try {
       const meta = await loadMeta(root)
       const open = await readFileUnlocks(c, config, user.id)
-      const visible = (await walkVisible(root)).filter((item) => !ancestorBlocked(meta.locks, open, user.id, item.path))
-      return c.json({ answer: await askAboutFiles(config, user, root, visible, message) })
+      const reply = await askAboutFiles(config, user, root, message, (path) => !ancestorBlocked(meta.locks, open, user.id, path))
+      return c.json(reply)
     } catch (err) {
       return c.json({ error: err instanceof Error ? err.message : 'AI failed' }, 400)
     }
@@ -1049,7 +1049,7 @@ export function createApp(config: ServerConfig) {
       let items = needle ? all.filter((item) => item.name.toLowerCase().includes(needle)) : all
       if (q.trim().length >= 2) {
         try {
-          const matched = await semanticPaths(config, user, root, q.trim(), all)
+          const matched = await semanticPaths(config, user, root, q.trim(), (path) => !ancestorBlocked(locks, open, user.id, path))
           if (matched) {
             const rank = new Map(matched.map((item, index) => [item, index]))
             items = all.filter((item) => rank.has(item.path) || item.name.toLowerCase().includes(needle))
