@@ -774,7 +774,7 @@ export function createApp(config: ServerConfig) {
       if (!aiEnabledFor(user, platform)) return c.json({ error: 'AI is off for this account' }, 400)
       const meta = await loadMeta(root)
       const open = await readFileUnlocks(c, config, user.id)
-      return c.json(await runPlan(root, body?.path ?? '', (path) => !isBlocked(meta.locks, open, user.id, path)))
+      return c.json(await runPlan(config, user, root, body?.path ?? '', (path) => !isBlocked(meta.locks, open, user.id, path)))
     } catch (err) {
       return c.json({ error: err instanceof Error ? err.message : 'Plan failed' }, 400)
     }

@@ -1,11 +1,13 @@
 import { createHash } from 'node:crypto'
-import { readFile, writeFile } from 'node:fs/promises'
-import { extname, join } from 'node:path'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { dirname, extname, join } from 'node:path'
 import type { ServerConfig } from './config.ts'
 import { findBackend, getBlob } from './network.ts'
+import { setStarred } from './meta.ts'
 import { aiProvider, loadPlatform, type AiProvider, type PlatformSettings } from './platform.ts'
-import { entryAt, listPath, makeFolder, moveEntries, moveToTrash, openDownload, resolveSafe, walkVisible, type DriveEntry, type OpenedFile } from './storage.ts'
-import type { UserRecord } from './users.ts'
+import { requirePool } from './pool.ts'
+import { copyEntries, entryAt, listPath, makeFolder, moveEntries, moveToTrash, openDownload, renameEntry, resolveSafe, restoreFromTrash, walkVisible, type DriveEntry, type OpenedFile } from './storage.ts'
+import { personalQuota, type UserRecord } from './users.ts'
 
 const TEXT = new Set(['.txt', '.md', '.markdown', '.csv', '.json', '.ts', '.tsx', '.js', '.jsx', '.py', '.css', '.html', '.yml', '.yaml'])
 const IMAGE = new Set(['.jpg', '.jpeg', '.png'])
@@ -239,22 +241,27 @@ async function completeChat(provider: AiProvider, key: string, system: string, m
 export type AiStep = { command: string; output: string }
 export type AiReply = { answer: string; steps: AiStep[]; provider: AiProvider }
 
-const AGENT = `You help with one person's Storebase drive. You only see a folder after you open it.
-Look with one command on its own line:
+const AGENT = `You help with one person's Storebase drive. Look before you change anything.
 <ls path>
 <search query>
 <read path>
-<ls> lists a folder. An empty path is the drive root. <search> matches file names and text inside files. <read> reads the start of a text file.
-A single obvious change, one or two items, can run now:
+An empty <ls> is the drive root. <search> matches names and text inside files.
+You can change the drive directly when the request is small:
 <mkdir path>
 <move source | destination folder>
+<copy source | destination folder>
+<rename path | new name>
 <delete path>
-Delete moves the item to Trash.
-Organizing, sorting, optimizing, or changing more than two items must not run those commands. Look first, then write one plan and stop:
+<restore .trash/name | original/path>
+<star path>
+<unstar path>
+<write path>text</write>
+Delete moves an item to Trash. Write only creates or replaces a text file.
+If the request organizes, sorts, optimizes, or changes more than a handful of items, do not run those commands. Look first, then write one plan and stop. Never mention the plan's filename.
 <plan>
-{"title":"Sort the drive","summary":"One sentence.","steps":[{"text":"Create Documents","op":"mkdir","path":"Documents"},{"text":"Move report.pdf into Documents","op":"move","from":"report.pdf","to":"Documents"},{"text":"Trash old.zip","op":"delete","path":"old.zip"}]}
+{"title":"Sort the drive","summary":"Group loose files.","steps":[{"text":"Media","op":"note"},{"text":"Create Videos","op":"mkdir","path":"Videos"},{"text":"Move the dashcam clip into Videos","op":"move","from":"clip.mp4","to":"Videos"},{"text":"Copy report.pdf into Documents","op":"copy","from":"report.pdf","to":"Documents"},{"text":"Rename notes.txt","op":"rename","path":"notes.txt","name":"Notes.txt"},{"text":"Star Notes.txt","op":"star","path":"Notes.txt"},{"text":"Write a short index","op":"write","path":"Videos/Index.txt","body":"Dashcam clips live here."},{"text":"Trash old.zip","op":"delete","path":"old.zip"}]}
 </plan>
-Use real paths from the listings. Do not invent files. If the user referenced files, those are the files they mean.`
+Use real paths from the listings. Do not invent files. Referenced files are the ones the user means.`
 
 function clip(text: string, max = 900): string {
   const clean = text.trim()
@@ -274,12 +281,95 @@ function cleanRel(input: string): string | null {
   return rel
 }
 
+function cleanAny(input: string): string | null {
+  const trimmed = input.trim().replace(/^['"]|['"]$/g, '')
+  if (!trimmed || trimmed === '/' || trimmed === '.') return ''
+  const rel = trimmed.replace(/^\/+/, '').replace(/\\/g, '/')
+  const parts = rel.split('/')
+  if (parts.some((part) => !part || part === '.' || part === '..')) return null
+  if (parts.some((part, index) => part.startsWith('.') && !(index === 0 && part === '.trash'))) return null
+  return rel
+}
+
+type StepInput = { op: string; path?: string; from?: string; to?: string; name?: string; body?: string }
+
+async function applyStep(config: ServerConfig, user: UserRecord, root: string, step: StepInput, canSee: (path: string) => boolean): Promise<string> {
+  const see = (rel: string) => !rel || canSee(rel)
+  if (step.op === 'note') return ''
+  if (step.op === 'mkdir') {
+    const rel = cleanRel(step.path ?? '')
+    if (!rel || !see(rel)) throw new Error('Missing or locked path')
+    await makeFolder(root, rel)
+    return `Created ${rel}`
+  }
+  if (step.op === 'move' || step.op === 'copy') {
+    const from = cleanRel(step.from ?? '')
+    const to = cleanRel(step.to ?? '')
+    if (!from || to === null || !see(from) || !see(to)) throw new Error('Missing or locked path')
+    if (step.op === 'move') {
+      await moveEntries(root, [from], to)
+      return `Moved ${from} into ${to || 'Home'}`
+    }
+    const manifest = await requirePool(config)
+    await copyEntries(root, [from], to, { poolRoot: config.driveDir, nodeReserved: manifest.reservedBytes, userQuota: personalQuota(user), userId: user.id })
+    return `Copied ${from} into ${to || 'Home'}`
+  }
+  if (step.op === 'rename') {
+    const rel = cleanRel(step.path ?? step.from ?? '')
+    const name = (step.name ?? step.to ?? '').trim()
+    if (!rel || !name || !see(rel)) throw new Error('Missing or locked path')
+    await renameEntry(root, rel, name)
+    return `Renamed ${rel} to ${name}`
+  }
+  if (step.op === 'delete') {
+    const rel = cleanRel(step.path ?? '')
+    if (!rel || !see(rel)) throw new Error('Missing or locked path')
+    await moveToTrash(root, rel)
+    return `Moved ${rel} to Trash`
+  }
+  if (step.op === 'restore') {
+    const rel = cleanAny(step.path ?? step.from ?? '')
+    const dest = cleanRel(step.to ?? '')
+    if (!rel?.startsWith('.trash/')) throw new Error('That item is not in Trash')
+    if (dest === null) throw new Error('Bad restore path')
+    await restoreFromTrash(root, rel, dest || undefined)
+    return `Restored ${rel}`
+  }
+  if (step.op === 'star' || step.op === 'unstar') {
+    const rel = cleanRel(step.path ?? '')
+    if (!rel || !see(rel)) throw new Error('Missing or locked path')
+    await setStarred(root, rel, step.op === 'star')
+    return step.op === 'star' ? `Starred ${rel}` : `Removed the star from ${rel}`
+  }
+  if (step.op === 'write') {
+    const rel = cleanRel(step.path ?? '')
+    const body = step.body ?? ''
+    if (!rel || !see(rel)) throw new Error('Missing or locked path')
+    if (body.length > 20_000) throw new Error('That file is too long')
+    const ext = extname(rel).toLowerCase()
+    if (ext && !TEXT.has(ext)) throw new Error('Only text files can be written')
+    const full = resolveSafe(root, rel)
+    await mkdir(dirname(full), { recursive: true })
+    await writeFile(full, body)
+    return `Wrote ${rel}`
+  }
+  throw new Error('Unknown action')
+}
+
+function splitPair(arg: string): { from: string; to: string } | null {
+  if (!arg.includes('|')) return null
+  const [from, ...rest] = arg.split('|')
+  return { from: (from ?? '').trim(), to: rest.join('|').trim() }
+}
+
 async function runCommand(
   config: ServerConfig,
+  user: UserRecord,
   root: string,
   kind: string,
   arg: string,
   canSee: (path: string) => boolean,
+  body = '',
 ): Promise<string> {
   if (kind === 'search') {
     const query = arg.trim()
@@ -288,30 +378,15 @@ async function runCommand(
     const paths = await contentHits(config, root, all, query)
     return paths.slice(0, 20).join('\n') || 'Nothing matched that name or text.'
   }
-  if (kind === 'mkdir') {
-    const rel = cleanRel(arg)
-    if (!rel) return 'Name the folder.'
-    if (!canSee(rel)) return 'That folder is locked.'
-    await makeFolder(root, rel)
-    return `Created ${rel}`
+  if (kind === 'mkdir' || kind === 'delete' || kind === 'star' || kind === 'unstar') {
+    return applyStep(config, user, root, { op: kind, path: arg.trim() }, canSee)
   }
-  if (kind === 'move') {
-    if (!arg.includes('|')) return 'Use <move source | destination folder>.'
-    const [fromRaw, toRaw] = arg.split('|')
-    const from = cleanRel(fromRaw ?? '')
-    const to = cleanRel((toRaw ?? '').trim())
-    if (!from || to === null) return 'Use <move source | destination folder>.'
-    if (!canSee(from) || (to && !canSee(to))) return 'That item is locked.'
-    await moveEntries(root, [from], to)
-    return `Moved ${from} into ${to || 'Home'}`
+  if (kind === 'move' || kind === 'copy' || kind === 'rename' || kind === 'restore') {
+    const pair = splitPair(arg)
+    if (!pair) return `Use <${kind} source | destination>.`
+    return applyStep(config, user, root, { op: kind, from: pair.from, path: pair.from, to: pair.to, name: pair.to }, canSee)
   }
-  if (kind === 'delete') {
-    const rel = cleanRel(arg)
-    if (!rel) return 'Name the item.'
-    if (!canSee(rel)) return 'That item is locked.'
-    await moveToTrash(root, rel)
-    return `Moved ${rel} to Trash`
-  }
+  if (kind === 'write') return applyStep(config, user, root, { op: 'write', path: arg.trim(), body }, canSee)
   const rel = cleanRel(arg)
   if (rel === null) return 'That path is not in this drive.'
   if (kind === 'ls') return describe((await listPath(root, rel)).filter((item) => canSee(item.path)))
@@ -330,9 +405,10 @@ async function runCommand(
 }
 
 export type AiRef = { path: string; name: string }
-export type PlanStep = { text: string; op: 'mkdir' | 'move' | 'delete'; path?: string; from?: string; to?: string; done?: boolean; error?: string }
+const PLAN_OPS = new Set(['note', 'mkdir', 'move', 'copy', 'rename', 'delete', 'restore', 'star', 'unstar', 'write'])
+export type PlanStep = { text: string; op: string; path?: string; from?: string; to?: string; name?: string; body?: string; done?: boolean; error?: string }
 export type StorePlan = { sbplan: 1; title: string; summary: string; status: 'draft' | 'done'; steps: PlanStep[] }
-export type AiPlanCard = { path: string; title: string; summary: string }
+export type AiPlanCard = { path: string; title: string; summary: string; steps: number }
 
 function parsePlan(raw: string): StorePlan | null {
   const start = raw.indexOf('{')
@@ -346,17 +422,20 @@ function parsePlan(raw: string): StorePlan | null {
   }
   if (typeof body.title !== 'string' || !Array.isArray(body.steps)) return null
   const steps: PlanStep[] = []
-  for (const step of body.steps.slice(0, 40)) {
+  for (const step of body.steps.slice(0, 80)) {
     if (!step || typeof step !== 'object') continue
-    const row = step as { text?: unknown; op?: unknown; path?: unknown; from?: unknown; to?: unknown }
-    if (row.op !== 'mkdir' && row.op !== 'move' && row.op !== 'delete') continue
+    const row = step as { text?: unknown; op?: unknown; path?: unknown; from?: unknown; to?: unknown; name?: unknown; body?: unknown }
+    if (typeof row.op !== 'string' || !PLAN_OPS.has(row.op)) continue
     if (typeof row.text !== 'string' || !row.text.trim()) continue
+    const text = (value: unknown) => typeof value === 'string' ? value : undefined
     steps.push({
       text: row.text.trim(),
       op: row.op,
-      path: typeof row.path === 'string' ? row.path : undefined,
-      from: typeof row.from === 'string' ? row.from : undefined,
-      to: typeof row.to === 'string' ? row.to : undefined,
+      path: text(row.path),
+      from: text(row.from),
+      to: text(row.to),
+      name: text(row.name),
+      body: text(row.body)?.slice(0, 20_000),
       done: false,
     })
   }
@@ -381,27 +460,15 @@ export async function readPlan(root: string, rel: string): Promise<StorePlan> {
   return body
 }
 
-export async function runPlan(root: string, rel: string, canSee: (path: string) => boolean): Promise<StorePlan> {
+export async function runPlan(config: ServerConfig, user: UserRecord, root: string, rel: string, canSee: (path: string) => boolean): Promise<StorePlan> {
   const safe = cleanRel(rel)
   if (!safe) throw new Error('That is not a plan')
   const plan = await readPlan(root, safe)
   for (const step of plan.steps) {
     if (step.done) continue
     try {
-      if (step.op === 'mkdir') {
-        const path = cleanRel(step.path ?? '')
-        if (!path || !canSee(path)) throw new Error('Missing or locked path')
-        await makeFolder(root, path)
-      } else if (step.op === 'move') {
-        const from = cleanRel(step.from ?? '')
-        const to = cleanRel(step.to ?? '')
-        if (!from || to === null || !canSee(from) || (to && !canSee(to))) throw new Error('Missing or locked path')
-        await moveEntries(root, [from], to)
-      } else {
-        const path = cleanRel(step.path ?? '')
-        if (!path || path === safe || !canSee(path)) throw new Error('Missing or locked path')
-        await moveToTrash(root, path)
-      }
+      if (step.op === 'delete' && cleanRel(step.path ?? '') === safe) throw new Error('Refusing to trash the plan')
+      await applyStep(config, user, root, step, canSee)
       step.done = true
       delete step.error
     } catch (error) {
@@ -451,25 +518,30 @@ export async function askAboutFiles(config: ServerConfig, user: UserRecord, root
     const planned = planBlock ? parsePlan(planBlock[1] ?? '') : null
     if (planned) {
       const path = await writePlan(root, planned)
-      planCard = { path, title: planned.title, summary: planned.summary }
-      answer = planned.summary || `Drafted “${planned.title}”. Open it and approve it before anything changes.`
-      steps.push({ command: '<plan>', output: path })
+      planCard = { path, title: planned.title, summary: planned.summary, steps: planned.steps.length }
+      answer = planned.summary || `Drafted “${planned.title}”. Open the plan and approve it before anything changes.`
       break
     }
-    const commands = [...reply.matchAll(/<(ls|search|read|mkdir|move|delete)(\s+[^<>]*)?>/gi)]
-    const prose = reply.replace(/<(plan|ls|search|read|mkdir|move|delete)\b[^<>]*>/gi, '').replace(/<\/plan>/gi, '').trim()
-    if (commands.length === 0) {
+    const writes = [...reply.matchAll(/<write\s+([^>\n]+)>([\s\S]*?)<\/write>/gi)]
+    const stripped = reply.replace(/<write\s+[^>\n]+>[\s\S]*?<\/write>/gi, '')
+    const commands = [...stripped.matchAll(/<(ls|search|read|mkdir|move|copy|rename|delete|restore|star|unstar)(\s+[^<>]*)?>/gi)]
+    const prose = stripped.replace(/<(plan|ls|search|read|mkdir|move|copy|rename|delete|restore|star|unstar|write)\b[^<>]*>/gi, '').replace(/<\/plan>/gi, '').replace(/Plans\/\S+\.sbplan\.json/g, '').trim()
+    if (commands.length === 0 && writes.length === 0) {
       answer = prose || 'No answer came back.'
       break
     }
     const notes: string[] = []
-    for (const match of commands.slice(0, 2)) {
-      const command = match[0]
-      const kind = (match[1] ?? '').toLowerCase()
-      const arg = (match[2] ?? '').trim()
+    const jobs = [
+      ...writes.slice(0, 3).map((match) => ({ command: `<write ${match[1]?.trim() ?? ''}>`, kind: 'write', arg: match[1]?.trim() ?? '', body: (match[2] ?? '').trim() })),
+      ...commands.slice(0, 6).map((match) => ({ command: match[0], kind: (match[1] ?? '').toLowerCase(), arg: (match[2] ?? '').trim(), body: '' })),
+    ]
+    for (const job of jobs) {
+      const command = job.command
+      const kind = job.kind
+      const arg = job.arg
       let output = ''
       try {
-        output = await runCommand(config, root, kind, arg, canSee)
+        output = await runCommand(config, user, root, kind, arg, canSee, job.body)
       } catch (error) {
         output = error instanceof Error ? error.message : 'That command failed.'
       }

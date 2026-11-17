@@ -4,7 +4,7 @@ import type { FileKind } from '@/types'
 import { Input } from '@/components/ui/input'
 import { cn } from 'cn'
 import { Sparkles } from 'kubai-icons-react'
-import { ArrowUp, X } from 'lucide-react'
+import { ArrowUp, ListChecks, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
 const prompts = [
@@ -80,6 +80,34 @@ function ProviderMark({ provider }: { provider: AiProviderId }) {
 type Turn = { role: 'you' | 'ai'; text: string; steps?: AiStep[]; provider?: AiProviderId; plan?: AiPlanCard }
 type MentionFile = { name: string; path: string; kind: FileKind }
 export type AiFile = { name: string; path: string }
+
+const commandNames: Record<string, string> = {
+  ls: 'Looked in',
+  search: 'Searched',
+  read: 'Read',
+  mkdir: 'Create folder',
+  move: 'Move',
+  copy: 'Copy',
+  rename: 'Rename',
+  delete: 'Move to Trash',
+  restore: 'Restore',
+  star: 'Star',
+  unstar: 'Unstar',
+  write: 'Write',
+}
+
+function commandLabel(command: string): { title: string; detail: string } | null {
+  if (/^<plan\b/i.test(command)) return null
+  const match = command.match(/^<(\w+)(?:\s+([^>]*))?>$/i)
+  if (!match) return null
+  const title = commandNames[match[1]?.toLowerCase() ?? '']
+  if (!title) return null
+  return { title, detail: (match[2] ?? '').trim().replace(/\s*\|\s*/g, ' → ') }
+}
+
+function shownAnswer(text: string): string {
+  return text.replace(/<\/?plan>/gi, '').replace(/Plans\/\S+\.sbplan\.json/g, '').trim()
+}
 
 function tokenFor(name: string): string {
   return name.includes(' ') ? `@"${name}"` : `@${name}`
@@ -187,7 +215,7 @@ export function AiPanel({ name, files, selected, onClose, onOpenPlan }: { name: 
     setBusy(true)
     try {
       const reply = await askAi(next, refs)
-      setTurns((current) => [...current, { role: 'ai', text: reply.answer, steps: reply.steps, provider: reply.provider, plan: reply.plan }])
+      setTurns((current) => [...current, { role: 'ai', text: shownAnswer(reply.answer), steps: reply.steps, provider: reply.provider, plan: reply.plan }])
     } catch (error) {
       setTurns((current) => [...current, { role: 'ai', text: error instanceof Error ? error.message : 'AI failed' }])
     } finally {
@@ -230,12 +258,16 @@ export function AiPanel({ name, files, selected, onClose, onOpenPlan }: { name: 
               <div key={`${turn.role}-${index}`} className="flex flex-col gap-2">
                 {turn.role === 'ai' && turn.steps?.length ? (
                   <div className="flex flex-col gap-2">
-                    {turn.steps.map((step, stepIndex) => (
-                      <div key={`${step.command}-${stepIndex}`} className="rounded-xl bg-[#1e1e1e] px-3 py-2">
-                        <p className="font-mono text-[13px] text-[#22C55E]">{step.command}</p>
-                        {step.output ? <p className="mt-1 whitespace-pre-wrap text-xs leading-5 text-[#9a9a9a]">{step.output}</p> : null}
-                      </div>
-                    ))}
+                    {turn.steps.map((step, stepIndex) => {
+                      const label = commandLabel(step.command)
+                      if (!label || step.output.endsWith('.sbplan.json')) return null
+                      return (
+                        <div key={`${step.command}-${stepIndex}`} className="rounded-xl bg-[#1e1e1e] px-3 py-2">
+                          <p className="text-[13px] text-white">{label.title}{label.detail ? <span className="text-[#9a9a9a]"> · {label.detail}</span> : null}</p>
+                          {step.output ? <p className="mt-1 whitespace-pre-wrap text-xs leading-5 text-[#9a9a9a]">{step.output}</p> : null}
+                        </div>
+                      )
+                    })}
                   </div>
                 ) : null}
                 {turn.text ? (
@@ -244,10 +276,15 @@ export function AiPanel({ name, files, selected, onClose, onOpenPlan }: { name: 
                   </p>
                 ) : null}
                 {turn.plan ? (
-                  <button type="button" className="rounded-2xl bg-[#1e1e1e] px-3 py-3 text-left" onClick={() => onOpenPlan(turn.plan?.path ?? '')}>
-                    <span className="text-[11px] text-[#8d8d8d]">Plan</span>
-                    <span className="mt-1 block text-sm font-medium text-white">{turn.plan.title}</span>
-                    {turn.plan.summary ? <span className="mt-1 block text-xs leading-5 text-[#9a9a9a]">{turn.plan.summary}</span> : null}
+                  <button type="button" className="flex w-full items-start gap-3 rounded-2xl bg-[#1e1e1e] px-3 py-3 text-left" onClick={() => onOpenPlan(turn.plan?.path ?? '')}>
+                    <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-white/10 text-white">
+                      <ListChecks className="size-4" />
+                    </span>
+                    <span className="min-w-0">
+                      <span className="text-[11px] text-[#8d8d8d]">Plan · {turn.plan.steps} steps</span>
+                      <span className="mt-0.5 block text-sm font-medium text-white">{turn.plan.title}</span>
+                      {turn.plan.summary ? <span className="mt-1 block text-xs leading-5 text-[#9a9a9a]">{turn.plan.summary}</span> : null}
+                    </span>
                   </button>
                 ) : null}
                 {turn.role === 'ai' && turn.provider ? (

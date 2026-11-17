@@ -295,8 +295,8 @@ export async function login(email: string, password: string): Promise<Me> {
 export type AiProviderId = 'gemini' | 'deepseek' | 'claude' | 'openai'
 export type AiStep = { command: string; output: string }
 export type AiRef = { path: string; name: string }
-export type AiPlanCard = { path: string; title: string; summary: string }
-export type PlanStep = { text: string; op: 'mkdir' | 'move' | 'delete'; path?: string; from?: string; to?: string; done?: boolean; error?: string }
+export type AiPlanCard = { path: string; title: string; summary: string; steps: number }
+export type PlanStep = { text: string; op: string; path?: string; from?: string; to?: string; name?: string; body?: string; done?: boolean; error?: string }
 export type StorePlan = { sbplan: 1; title: string; summary: string; status: 'draft' | 'done'; steps: PlanStep[] }
 
 export async function askAi(message: string, refs: AiRef[] = []): Promise<{ answer: string; steps: AiStep[]; provider: AiProviderId; plan?: AiPlanCard }> {
@@ -304,7 +304,7 @@ export async function askAi(message: string, refs: AiRef[] = []): Promise<{ answ
     method: 'POST',
     body: JSON.stringify({ message, refs }),
   })
-  if (body.steps?.some((step) => /^<(mkdir|move|delete|plan)/.test(step.command)) || body.plan) {
+  if (body.plan || body.steps?.some((step) => /^<(mkdir|move|copy|rename|delete|restore|star|unstar|write)/.test(step.command))) {
     window.dispatchEvent(new Event('storebase:files-changed'))
   }
   return body
