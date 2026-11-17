@@ -4,6 +4,7 @@ import { AlertBanner } from '@/components/AlertBanner'
 import { FileView, sortItems, type SortKey } from '@/components/FileView'
 import { FilePreview, Settings, Terminals, type SettingsSection } from '@/components/DeferredPanels'
 import { ShareDialog } from '@/components/ShareDialog'
+import { AiPanel } from '@/components/AiPanel'
 import { Sidebar } from '@/components/Sidebar'
 import { TopBar } from '@/components/TopBar'
 import { Button } from '@/components/ui/button'
@@ -188,6 +189,7 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
   const [terminalsOpen, setTerminalsOpen] = useState(false)
   const [terminalsEnabled, setTerminalsEnabled] = useState(account.terminalsEnabled !== false)
   const [aiEnabled, setAiEnabled] = useState(account.aiEnabled === true)
+  const [aiOpen, setAiOpen] = useState(false)
   const [operationNotifications, setOperationNotifications] = useState(account.operationNotifications !== false)
   const [section, setSection] = useState<SectionId>('home')
   const [folderPath, setFolderPath] = useState('')
@@ -1088,6 +1090,8 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
         terminalsOpen={terminalsOpen}
         terminalsEnabled={terminalsEnabled}
         aiEnabled={aiEnabled}
+        aiOpen={aiOpen}
+        onToggleAi={() => setAiOpen((open) => !open)}
         onSearch={setSearch}
         onView={setView}
         onOpenSidebar={() => setSidebarOpen(true)}
@@ -1151,6 +1155,7 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
         {terminalsOpen ? (
           <Terminals onToast={notify} onDisabled={() => setTerminalsEnabled(false)} />
         ) : (
+        <>
         <main className="flex min-w-0 flex-1 flex-col overflow-hidden bg-[#1a1a1a]">
           <div
             className="flex flex-col gap-6 overflow-y-auto px-4 py-4 md:px-6 md:py-5"
@@ -1299,6 +1304,8 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
             )}
           </div>
         </main>
+        {aiEnabled && aiOpen ? <AiPanel name={profile.name} onClose={() => setAiOpen(false)} /> : null}
+        </>
         )}
       </div>
       )}

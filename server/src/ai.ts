@@ -9,6 +9,8 @@ import type { UserRecord } from './users.ts'
 
 const TEXT = new Set(['.txt', '.md', '.markdown', '.csv', '.json', '.ts', '.tsx', '.js', '.jsx', '.py', '.css', '.html', '.yml', '.yaml'])
 const IMAGE = new Set(['.jpg', '.jpeg', '.png'])
+const VIDEO = new Set(['.mp4', '.mov', '.webm', '.mkv', '.avi', '.m4v'])
+const AUDIO = new Set(['.mp3', '.wav', '.m4a', '.flac', '.ogg'])
 
 type UserKeys = { provider: AiProvider; jevKey: string; modelKey: string }
 type KeyFile = { users?: Record<string, UserKeys> }
@@ -204,7 +206,7 @@ async function jevCall(key: string, query: string, files: Sample[]): Promise<Map
   for (const file of files) {
     questions[file.id] = {
       type: 'noul',
-      instructions: `Query: "${query}". Does file ${file.id} match that query? Count the file name, its text, and what its image shows. A photo of a duck matches duck. Judge only this file.`,
+      instructions: `Search: "${query}". File ${file.id} is about that, including close meaning. A dashcam, road, highway, traffic, or car video matches driving. A photo of a duck matches duck even when the filename is generic. Use the name, kind, text, and image.`,
     }
   }
   const res = await fetch('https://api.typesafe.ai/v1/systemone', {
@@ -220,7 +222,7 @@ async function jevCall(key: string, query: string, files: Sample[]): Promise<Map
       questions,
       ...(Object.keys(assets).length ? { assets } : {}),
     }),
-    signal: AbortSignal.timeout(25_000),
+    signal: AbortSignal.timeout(18_000),
   })
   const body = await res.json().catch(() => ({})) as { answers?: Record<string, { noul?: number }>; detail?: string; error?: string }
   if (!res.ok) throw new Error(body.detail || body.error || `JEV rejected the search (${res.status})`)
@@ -231,28 +233,72 @@ async function jevCall(key: string, query: string, files: Sample[]): Promise<Map
   return scores
 }
 
+function fileKind(name: string, type: string): string {
+  if (type === 'folder') return 'folder'
+  const ext = extname(name).toLowerCase()
+  if (VIDEO.has(ext)) return 'video'
+  if (IMAGE.has(ext)) return 'image'
+  if (AUDIO.has(ext)) return 'audio'
+  if (TEXT.has(ext)) return 'text'
+  return 'file'
+}
+
+function rankForQuery(items: DriveEntry[], query: string): DriveEntry[] {
+  const q = query.toLowerCase()
+  const tokens = q.split(/[^a-z0-9]+/).filter((word) => word.length > 2)
+  const score = (item: DriveEntry) => {
+    const name = item.name.toLowerCase()
+    let value = item.type === 'file' ? 1 : 0
+    if (name.includes(q)) value += 50
+    for (const token of tokens) {
+      if (name.includes(token)) value += 12
+      else if (token.length > 4 && name.includes(token.slice(0, 4))) value += 4
+    }
+    const kind = fileKind(item.name, item.type)
+    if (kind === 'video') value += 8
+    else if (kind === 'image') value += 4
+    else if (kind === 'text') value += 3
+    return value
+  }
+  return [...items].sort((a, b) => score(b) - score(a) || a.name.localeCompare(b.name)).slice(0, 64)
+}
+
 export async function semanticPaths(config: ServerConfig, user: UserRecord, root: string, query: string, items: DriveEntry[]): Promise<string[] | null> {
   const platform = await loadPlatform(config)
   if (!aiEnabledFor(user, platform)) return null
   const creds = await credentials(config, user, platform)
-  const ranked = [...items].sort((a, b) => Number(b.type === 'file') - Number(a.type === 'file') || a.name.localeCompare(b.name))
-  const chosen = ranked.slice(0, 72)
-  const samples: Sample[] = []
+  const chosen = rankForQuery(items, query)
+  const samples: Sample[] = chosen.map((item, index) => ({
+    id: `f${index}`,
+    path: item.path,
+    name: item.name,
+    kind: fileKind(item.name, item.type),
+    excerpt: '',
+  }))
+  const enrich: Promise<void>[] = []
   let images = 0
+  let texts = 0
   for (let i = 0; i < chosen.length; i += 1) {
-    const withImage = images < 8 && IMAGE.has(extname(chosen[i].name).toLowerCase())
-    const sample = await sampleFile(config, root, chosen[i], `f${i}`, withImage)
-    if (sample.image) images += 1
-    samples.push(sample)
+    const item = chosen[i]
+    const sample = samples[i]
+    if (!item || !sample || item.type !== 'file') continue
+    const ext = extname(item.name).toLowerCase()
+    if (texts < 6 && TEXT.has(ext) && item.size > 0 && item.size <= 128_000) {
+      texts += 1
+      enrich.push(sampleFile(config, root, item, sample.id, false).then((next) => { sample.excerpt = next.excerpt }))
+    } else if (images < 4 && IMAGE.has(ext) && item.size > 0 && item.size <= 180_000) {
+      images += 1
+      enrich.push(sampleFile(config, root, item, sample.id, true).then((next) => { sample.image = next.image }))
+    }
   }
+  await Promise.all(enrich)
+  const batches: Sample[][] = []
+  for (let i = 0; i < samples.length; i += 32) batches.push(samples.slice(i, i + 32))
+  const parts = await Promise.all(batches.map((batch) => jevCall(creds.jevKey, query, batch)))
   const scores = new Map<string, number>()
-  for (let i = 0; i < samples.length; i += 16) {
-    const batch = samples.slice(i, i + 16)
-    const hit = await jevCall(creds.jevKey, query, batch)
-    for (const [id, score] of hit) scores.set(id, score)
-  }
+  for (const hit of parts) for (const [id, score] of hit) scores.set(id, score)
   return samples
-    .filter((file) => (scores.get(file.id) ?? 0) >= 0.55)
+    .filter((file) => (scores.get(file.id) ?? 0) >= 0.35)
     .sort((a, b) => (scores.get(b.id) ?? 0) - (scores.get(a.id) ?? 0))
     .map((file) => file.path)
 }
