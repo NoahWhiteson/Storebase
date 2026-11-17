@@ -345,7 +345,7 @@ async function applyStep(config: ServerConfig, user: UserRecord, root: string, s
     const rel = cleanRel(step.path ?? '')
     const body = step.body ?? ''
     if (!rel || !see(rel)) throw new Error('Missing or locked path')
-    if (body.length > 20_000) throw new Error('That file is too long')
+    if (body.length > 200_000) throw new Error('That file is too long')
     const ext = extname(rel).toLowerCase()
     if (ext && !TEXT.has(ext)) throw new Error('Only text files can be written')
     const full = resolveSafe(root, rel)
@@ -354,6 +354,17 @@ async function applyStep(config: ServerConfig, user: UserRecord, root: string, s
     return `Wrote ${rel}`
   }
   throw new Error('Unknown action')
+}
+
+export function runDriveOp(config: ServerConfig, user: UserRecord, root: string, step: StepInput, canSee: (path: string) => boolean): Promise<string> {
+  return applyStep(config, user, root, step, canSee)
+}
+
+export async function readDriveText(config: ServerConfig, root: string, rel: string, limit = 100_000): Promise<string> {
+  const opened = await openDownload(root, rel)
+  const bytes = await readOpened(config, opened, limit)
+  if (!bytes) throw new Error('Could not read that file')
+  return bytes.toString('utf8')
 }
 
 function splitPair(arg: string): { from: string; to: string } | null {

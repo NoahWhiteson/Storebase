@@ -8,6 +8,8 @@ import { Hono, type Context } from 'hono'
 import { cors } from 'hono/cors'
 import { stream, streamSSE } from 'hono/streaming'
 import { aiEnabledFor, askAboutFiles, contentHits, readPlan, runPlan } from './ai.ts'
+import { handleMcp } from './mcp.ts'
+import { createMcpToken, listMcpTokens, revokeMcpToken, userIdForMcpToken } from './mcp-tokens.ts'
 import { mountAdmin } from './admin.ts'
 import { bytesToGb, type ServerConfig } from './config.ts'
 import {
@@ -337,6 +339,29 @@ export function createApp(config: ServerConfig) {
   attachNetwork(config)
   const uploads = createUploadSessions(config)
   const app = new Hono<{ Variables: Vars }>()
+
+  app.all('/mcp', async (c) => {
+    c.header('Access-Control-Allow-Origin', c.req.header('origin') || '*')
+    c.header('Access-Control-Allow-Headers', 'Authorization, Content-Type, Accept, Mcp-Session-Id, Mcp-Protocol-Version')
+    c.header('Access-Control-Allow-Methods', 'POST, GET, OPTIONS')
+    if (c.req.method === 'OPTIONS') return c.body(null, 204)
+    if (c.req.method === 'GET') return c.json({ name: 'storebase', mcp: true })
+    if (c.req.method !== 'POST') return c.json({ jsonrpc: '2.0', id: null, error: { code: -32600, message: 'POST JSON-RPC to this URL' } }, 405)
+    if (!(await isConfigured(config))) return c.json({ jsonrpc: '2.0', id: null, error: { code: -32603, message: 'Setup required' } }, 503)
+    const userId = await userIdForMcpToken(config, c.req.header('authorization'))
+    if (!userId) return c.json({ jsonrpc: '2.0', id: null, error: { code: -32001, message: 'Bearer token required' } }, 401)
+    const user = findById(await loadUsers(config), userId)
+    if (!user) return c.json({ jsonrpc: '2.0', id: null, error: { code: -32001, message: 'Bearer token required' } }, 401)
+    let parsed: unknown
+    try {
+      parsed = await c.req.json()
+    } catch {
+      return c.json({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error' } }, 400)
+    }
+    const result = await handleMcp(config, user, parsed)
+    if (!result.body) return c.body(null, 202)
+    return c.json(result.body, result.status as 200)
+  })
 
   async function settleUpload(user: UserRecord, root: string, item: DriveEntry) {
     await touchRecent(root, item.path)
@@ -823,6 +848,25 @@ export function createApp(config: ServerConfig) {
     const user = c.get('user')
     const ok = await revokeDevice(config, user.id, c.req.param('id'))
     if (!ok) return c.json({ error: 'Device not found' }, 404)
+    return c.json({ ok: true })
+  })
+
+  app.get('/api/mcp/tokens', async (c) => {
+    return c.json({ tokens: await listMcpTokens(config, c.get('user').id) })
+  })
+
+  app.post('/api/mcp/tokens', async (c) => {
+    const body = await c.req.json().catch(() => ({})) as { name?: string }
+    try {
+      return c.json(await createMcpToken(config, c.get('user').id, body.name ?? ''))
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : 'Could not create a token' }, 400)
+    }
+  })
+
+  app.delete('/api/mcp/tokens/:id', async (c) => {
+    const ok = await revokeMcpToken(config, c.get('user').id, c.req.param('id'))
+    if (!ok) return c.json({ error: 'Token not found' }, 404)
     return c.json({ ok: true })
   })
 

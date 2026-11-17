@@ -319,6 +319,27 @@ export async function revokeDevice(id: string): Promise<void> {
   await api(`/api/devices/${id}`, { method: 'DELETE' })
 }
 
+export type McpTokenInfo = {
+  id: string
+  name: string
+  prefix: string
+  createdAt: string
+  lastUsedAt: string
+}
+
+export async function fetchMcpTokens(): Promise<McpTokenInfo[]> {
+  const res = await api<{ tokens: McpTokenInfo[] }>('/api/mcp/tokens')
+  return res.tokens
+}
+
+export async function createMcpToken(name: string): Promise<{ token: string; record: McpTokenInfo }> {
+  return api('/api/mcp/tokens', { method: 'POST', body: JSON.stringify({ name }) })
+}
+
+export async function revokeMcpToken(id: string): Promise<void> {
+  await api(`/api/mcp/tokens/${id}`, { method: 'DELETE' })
+}
+
 export async function saveDomain(hostname: string): Promise<DomainInfo> {
   return api('/api/settings/domain', { method: 'PUT', body: JSON.stringify({ hostname }) })
 }

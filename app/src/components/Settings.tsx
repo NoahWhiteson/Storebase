@@ -16,10 +16,12 @@ import {
   applyUpdate,
   checkUpdate,
   cleanupUserStorage,
+  createMcpToken,
   createUser,
   deleteStorageBackend,
   deleteUser,
   fetchPairing,
+  fetchMcpTokens,
   fetchSettings,
   fetchVirusInstall,
   installVirusEngine,
@@ -27,6 +29,7 @@ import {
   refreshDomain,
   reconnectStorageBackend,
   revokeDevice,
+  revokeMcpToken,
   rotateNetworkToken,
   rotatePairCode,
   rotateSecret,
@@ -43,6 +46,7 @@ import {
   clearDomain,
   type DiagnosticsPayload,
   type DomainInfo,
+  type McpTokenInfo,
   type PairingInfo,
   type SettingsPayload,
   type SettingsUser,
@@ -66,6 +70,7 @@ import {
   History,
   Images,
   KeyRound,
+  Plug,
   Code2,
   FileText,
   Package,
@@ -101,6 +106,7 @@ export type SettingsSection =
   | 'domain'
   | 'diagnostics'
   | 'ai'
+  | 'mcp'
 
 type Account = { id: string; name: string; email: string; role: 'admin' | 'user'; virusScanEnabled?: boolean; operationNotifications?: boolean; theme?: ThemePreference; avatarUrl?: string | null }
 type AccountUpdate = { name: string; email: string; virusScanEnabled?: boolean; operationNotifications?: boolean; theme?: ThemePreference; avatarUrl?: string | null }
@@ -122,6 +128,7 @@ const settingsGroups: { id: string; label: string; items: SettingsNavItem[] }[] 
       { id: 'account', label: 'Account', icon: UserRound, keywords: 'profile name email password quota' },
       { id: 'my-storage', label: 'Your Storage', icon: ChartPie, keywords: 'storage usage space media zip archive temporary cleanup scan' },
       { id: 'devices', label: 'App', icon: AppWindow, keywords: 'device pairing capture desktop macos' },
+      { id: 'mcp', label: 'MCP', icon: Plug, keywords: 'mcp claude cursor chatgpt connector token ai' },
     ],
   },
   {
@@ -170,7 +177,7 @@ export function Settings({
   onToast: (message: string) => void
 }) {
   const [section, setSection] = useState<SettingsSection>(
-    account.role === 'admin' || ['account', 'devices', 'general', 'my-storage', 'virus', 'ai'].includes(initialSection)
+    account.role === 'admin' || ['account', 'devices', 'general', 'my-storage', 'virus', 'ai', 'mcp'].includes(initialSection)
       ? initialSection
       : 'account',
   )
@@ -209,7 +216,7 @@ export function Settings({
   }
 
   useEffect(() => {
-    if (section === 'devices') {
+    if (section === 'devices' || section === 'mcp') {
       loadSequence.current += 1
       setLoading(false)
       setError(null)
@@ -221,7 +228,7 @@ export function Settings({
   const admin = Boolean(data?.admin ?? account.role === 'admin')
 
   useEffect(() => {
-    setSection(admin || ['account', 'devices', 'general', 'my-storage', 'virus'].includes(initialSection) ? initialSection : 'account')
+    setSection(admin || ['account', 'devices', 'general', 'my-storage', 'virus', 'ai', 'mcp'].includes(initialSection) ? initialSection : 'account')
   }, [admin, initialSection])
 
   return (
@@ -272,6 +279,7 @@ export function Settings({
           <AccountPanel data={data} onSaved={onAccount} onToast={onToast} />
         ) : null}
         {section === 'devices' ? <DevicesPanel onToast={onToast} /> : null}
+        {section === 'mcp' ? <McpPanel onToast={onToast} /> : null}
         {!loading && data && section === 'general' ? (
           <GeneralPanel data={data} admin={admin} onSaved={reload} onAccount={onAccount} onPlatform={onPlatform} onToast={onToast} />
         ) : null}
@@ -840,6 +848,127 @@ function Toggle({
         />
       </span>
     </button>
+  )
+}
+
+function mcpConfig(url: string, token: string): string {
+  return JSON.stringify({
+    mcpServers: {
+      storebase: {
+        url,
+        headers: { Authorization: `Bearer ${token}` },
+      },
+    },
+  }, null, 2)
+}
+
+function McpPanel({ onToast }: { onToast: (message: string) => void }) {
+  const [tokens, setTokens] = useState<McpTokenInfo[]>([])
+  const [name, setName] = useState('')
+  const [fresh, setFresh] = useState<{ id: string; name: string; token: string } | null>(null)
+  const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
+  const endpoint = `${window.location.origin}/mcp`
+
+  async function reload() {
+    try {
+      setTokens(await fetchMcpTokens())
+      setError('')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not load MCP tokens')
+    }
+  }
+
+  useEffect(() => {
+    void reload()
+  }, [])
+
+  async function copy(label: string, value: string) {
+    const ok = await copyText(value)
+    onToast(ok ? `Copied ${label}` : 'Could not copy')
+  }
+
+  async function create() {
+    setBusy(true)
+    try {
+      const created = await createMcpToken(name.trim() || 'AI')
+      setFresh({ id: created.record.id, name: created.record.name, token: created.token })
+      setName('')
+      await reload()
+    } catch (err) {
+      onToast(err instanceof Error ? err.message : 'Could not create a token')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function drop(id: string) {
+    setBusy(true)
+    try {
+      await revokeMcpToken(id)
+      setFresh((current) => current?.id === id ? null : current)
+      onToast('Token revoked')
+      await reload()
+    } catch (err) {
+      onToast(err instanceof Error ? err.message : 'Could not revoke')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="max-w-2xl">
+      <Heading
+        title="MCP"
+        hint="Connect Claude, Cursor, ChatGPT, or any other MCP client to this account. It can list, search, read, and change your files."
+      />
+      {error ? <p className="mb-4 text-sm text-[#f28b82]">{error}</p> : null}
+      <SettingsCard title="Endpoint" hint="The client sends the token as a bearer header. The token only reaches this account.">
+        <div className="flex gap-2">
+          <Input readOnly value={endpoint} className={fieldClass} />
+          <Button type="button" className="h-11 shrink-0 rounded-xl bg-[#242424] px-4 text-white hover:bg-[#2c2c2c]" onClick={() => void copy('endpoint', endpoint)}>Copy</Button>
+        </div>
+      </SettingsCard>
+      <div className="mt-4">
+        <SettingsCard title="New token" hint="Shown once. Paste it into the client, then Storebase will not show it again.">
+          <div className="flex gap-2">
+            <Input
+              value={name}
+              placeholder="Claude"
+              className={fieldClass}
+              onChange={(event) => setName(event.target.value)}
+              onKeyDown={(event) => { if (event.key === 'Enter') void create() }}
+            />
+            <Button type="button" className="h-11 shrink-0 rounded-xl bg-white px-4 text-[#1a1a1a] hover:bg-[#f2f2f2]" disabled={busy} onClick={() => void create()}>Create</Button>
+          </div>
+          {fresh ? (
+            <div className="mt-4">
+              <p className="mb-2 text-xs text-[#8d8d8d]">{fresh.name}</p>
+              <pre className="overflow-x-auto rounded-xl bg-[#242424] px-4 py-3 text-xs leading-5 text-[#e8e8e8]">{mcpConfig(endpoint, fresh.token)}</pre>
+              <Button type="button" className="mt-3 h-10 rounded-xl bg-[#242424] px-4 text-white hover:bg-[#2c2c2c]" onClick={() => void copy('config', mcpConfig(endpoint, fresh.token))}>Copy config</Button>
+            </div>
+          ) : null}
+        </SettingsCard>
+      </div>
+      <div className="mt-4">
+        <SettingsTable headings={['Name', 'Token', 'Last used', '']}>
+          {tokens.length ? tokens.map((token) => (
+            <tr key={token.id} className="border-b border-white/[0.06] last:border-0">
+              <td className="px-4 py-3 text-white">{token.name}</td>
+              <td className="px-4 py-3 text-[#8d8d8d]">{token.prefix}…</td>
+              <td className="px-4 py-3 text-[#8d8d8d]">{formatDate(token.lastUsedAt)}</td>
+              <td className="px-4 py-3 text-right">
+                <button type="button" className="text-sm text-[#f28b82] disabled:opacity-40" disabled={busy} onClick={() => void drop(token.id)}>Revoke</button>
+              </td>
+            </tr>
+          )) : (
+            <tr>
+              <td className="px-4 py-6 text-sm text-[#8d8d8d]" colSpan={4}>No tokens yet.</td>
+            </tr>
+          )}
+        </SettingsTable>
+      </div>
+    </div>
   )
 }
 
