@@ -155,8 +155,6 @@ async function credentials(config: ServerConfig, user: UserRecord, platform: Pla
   return { provider: platform.aiProvider, jevKey: node.jevKey, modelKey: node.modelKey }
 }
 
-type Sample = { id: string; path: string; name: string; kind: string; excerpt: string; image?: { format: 'jpg' | 'png'; data: string } }
-
 async function readOpened(config: ServerConfig, opened: OpenedFile, limit: number): Promise<Buffer | null> {
   if (opened.full) return (await readFile(opened.full)).subarray(0, limit)
   if (!opened.pointer || !config) return null
@@ -164,73 +162,6 @@ async function readOpened(config: ServerConfig, opened: OpenedFile, limit: numbe
   if (!backend) return null
   const blob = await getBlob(backend, opened.pointer.key)
   return Buffer.from(await new Response(blob.body).arrayBuffer()).subarray(0, limit)
-}
-
-async function sampleFile(config: ServerConfig, root: string, item: DriveEntry, id: string, withImage: boolean): Promise<Sample> {
-  const ext = extname(item.name).toLowerCase()
-  const sample: Sample = { id, path: item.path, name: item.name, kind: item.type, excerpt: '' }
-  if (item.type !== 'file') return sample
-  try {
-    const opened = await openDownload(root, item.path)
-    if (TEXT.has(ext) && item.size > 0 && item.size <= 256_000) {
-      const bytes = await readOpened(config, opened, 1500)
-      sample.excerpt = bytes?.toString('utf8').replace(/\s+/g, ' ').slice(0, 700) ?? ''
-    } else if (withImage && IMAGE.has(ext) && item.size > 0 && item.size <= 250_000) {
-      const bytes = await readOpened(config, opened, item.size)
-      if (bytes) sample.image = { format: ext === '.png' ? 'png' : 'jpg', data: bytes.toString('base64') }
-    }
-  } catch {
-    // A file that cannot be read still matches on its name.
-  }
-  return sample
-}
-
-async function jevCall(key: string, query: string, files: Sample[]): Promise<Map<string, number>> {
-  const assets: Record<string, { type: 'image'; format: 'jpg' | 'png'; data_base64: string }> = {}
-  const stateFiles = files.map((file) => {
-    const row: { id: string; name: string; path: string; kind: string; text: string; image?: string } = {
-      id: file.id,
-      name: file.name,
-      path: file.path,
-      kind: file.kind,
-      text: file.excerpt,
-    }
-    if (file.image) {
-      const ref = `img-${file.id}`
-      assets[ref] = { type: 'image', format: file.image.format, data_base64: file.image.data }
-      row.image = ref
-    }
-    return row
-  })
-  const questions: Record<string, { type: 'noul'; instructions: string }> = {}
-  for (const file of files) {
-    questions[file.id] = {
-      type: 'noul',
-      instructions: `The picture for ${file.id} shows "${query}". A photo of a duck matches duck. Judge only this picture.`,
-    }
-  }
-  const res = await fetch('https://api.typesafe.ai/v1/systemone', {
-    method: 'POST',
-    headers: {
-      authorization: `Bearer ${key}`,
-      'content-type': 'application/json',
-      ...(Object.keys(assets).length ? { 'TypeSafe-Danger-Zone-Images': 'true' } : {}),
-    },
-    body: JSON.stringify({
-      model: 'jev-latest',
-      state: { query, files: stateFiles },
-      questions,
-      ...(Object.keys(assets).length ? { assets } : {}),
-    }),
-    signal: AbortSignal.timeout(18_000),
-  })
-  const body = await res.json().catch(() => ({})) as { answers?: Record<string, { noul?: number }>; detail?: string; error?: string }
-  if (!res.ok) throw new Error(body.detail || body.error || `JEV rejected the search (${res.status})`)
-  const scores = new Map<string, number>()
-  for (const [id, answer] of Object.entries(body.answers ?? {})) {
-    if (typeof answer?.noul === 'number') scores.set(id, answer.noul)
-  }
-  return scores
 }
 
 function localScore(item: DriveEntry, query: string): number {
@@ -248,13 +179,13 @@ function localScore(item: DriveEntry, query: string): number {
 
 function shortlist(items: DriveEntry[], query: string): DriveEntry[] {
   const byScore = (a: DriveEntry, b: DriveEntry) => localScore(b, query) - localScore(a, query) || a.name.localeCompare(b.name)
-  const folders = items.filter((item) => item.type === 'folder').sort(byScore).slice(0, 12)
+  const folders = items.filter((item) => item.type === 'folder').sort(byScore).slice(0, 6)
   const files = items.filter((item) => item.type === 'file').sort(byScore)
   const named = files.filter((item) => localScore(item, query) >= 10).slice(0, 8)
-  const videos = files.filter((item) => fileKind(item.name, item.type) === 'video').slice(0, 6)
+  const videos = files.filter((item) => fileKind(item.name, item.type) === 'video').slice(0, 12)
   const seen = new Set<string>()
   const out: DriveEntry[] = []
-  for (const item of [...folders, ...named, ...videos]) {
+  for (const item of [...videos, ...named, ...folders]) {
     if (seen.has(item.path)) continue
     seen.add(item.path)
     out.push(item)
@@ -279,7 +210,7 @@ async function jevOne(key: string, query: string, item: DriveEntry): Promise<Dri
         },
       },
     }),
-    signal: AbortSignal.timeout(12_000),
+    signal: AbortSignal.timeout(8_000),
   })
   const body = await res.json().catch(() => ({})) as { answers?: { match?: { noul?: number } }; detail?: string; error?: string }
   if (!res.ok) throw new Error(body.detail || body.error || `JEV rejected the search (${res.status})`)
@@ -294,7 +225,7 @@ async function jevChoose(key: string, query: string, entries: DriveEntry[]): Pro
   entries.forEach((item, index) => {
     const id = `e${index}`
     byId.set(id, item)
-    criteria[id] = `${item.type === 'folder' ? 'folder' : fileKind(item.name, item.type)} "${item.name}"`
+    criteria[id] = `${item.type === 'folder' ? 'folder' : fileKind(item.name, item.type)} "${item.path}"`
   })
   const res = await fetch('https://api.typesafe.ai/v1/systemone', {
     method: 'POST',
@@ -310,7 +241,7 @@ async function jevChoose(key: string, query: string, entries: DriveEntry[]): Pro
         },
       },
     }),
-    signal: AbortSignal.timeout(12_000),
+    signal: AbortSignal.timeout(8_000),
   })
   const body = await res.json().catch(() => ({})) as {
     answers?: { pick?: { choice?: string; probabilities?: Record<string, number>; confidence?: number } }
@@ -336,60 +267,35 @@ async function jevChoose(key: string, query: string, entries: DriveEntry[]): Pro
     .filter((item): item is DriveEntry => Boolean(item))
 }
 
-async function searchDown(
-  config: ServerConfig,
-  key: string,
-  root: string,
-  query: string,
-  rel: string,
-  depth: number,
-  canSee: (path: string) => boolean,
-  budget: { left: number },
-): Promise<string[]> {
-  const listed = (await listPath(root, rel)).filter((item) => canSee(item.path))
+async function visibleHere(root: string, rel: string, canSee: (path: string) => boolean): Promise<DriveEntry[]> {
+  try {
+    return (await listPath(root, rel)).filter((item) => canSee(item.path))
+  } catch {
+    return []
+  }
+}
+
+async function searchDown(key: string, root: string, query: string, canSee: (path: string) => boolean): Promise<string[]> {
+  const top = await visibleHere(root, '', canSee)
+  const folders = top.filter((item) => item.type === 'folder').slice(0, 24)
+  const nested = await Promise.all(folders.map((folder) => visibleHere(root, folder.path, canSee)))
+  const all = [...top, ...nested.flat()]
   const q = query.toLowerCase()
-  const named = listed.filter((item) => item.type === 'file' && q.length > 1 && item.name.toLowerCase().includes(q)).map((item) => item.path)
-  let picked: DriveEntry[] = []
-  if (budget.left > 0) {
-    budget.left -= 1
-    try {
-      picked = await jevChoose(key, query, shortlist(listed, query))
-    } catch (error) {
-      if (depth === 0 && named.length === 0) throw error
-    }
-  }
+  const named = all.filter((item) => item.type === 'file' && q.length > 1 && item.name.toLowerCase().includes(q)).map((item) => item.path)
+  if (named.length) return named.slice(0, 20)
+  const pool = shortlist(all, query)
+  if (!pool.length) return []
+  const picked = await jevChoose(key, query, pool)
   const files = picked.filter((item) => item.type === 'file').map((item) => item.path)
-  let folders = picked.filter((item) => item.type === 'folder').slice(0, 3)
-  if (folders.length === 0 && depth < 2) {
-    const guess = listed
-      .filter((item) => item.type === 'folder' && localScore(item, query) >= 10)
-      .sort((a, b) => localScore(b, query) - localScore(a, query))[0]
-    if (guess) folders = [guess]
-  }
-  const imageItems = listed.filter((item) => item.type === 'file' && IMAGE.has(extname(item.name).toLowerCase()) && item.size > 0 && item.size <= 180_000)
-  const filesHere = listed.filter((item) => item.type === 'file')
-  const mostlyImages = imageItems.length >= 2 && imageItems.length * 2 >= filesHere.length
-  let images: string[] = []
-  if (depth > 0 && mostlyImages && imageItems.every((item) => !item.name.toLowerCase().includes(q)) && budget.left > 0) {
-    budget.left -= 1
-    const samples: Sample[] = []
-    for (const [index, item] of imageItems.slice(0, 4).entries()) {
-      const sample = await sampleFile(config, root, item, `img${index}`, true)
-      if (sample.image) samples.push(sample)
-    }
-    if (samples.length) {
-      try {
-        const scores = await jevCall(key, query, samples)
-        images = samples.filter((sample) => (scores.get(sample.id) ?? 0) >= 0.6).map((sample) => sample.path)
-      } catch { /* the names still count */ }
-    }
-  }
-  let nested: string[] = []
-  if (depth < 2 && folders.length) {
-    const found = await Promise.all(folders.map((folder) => searchDown(config, key, root, query, folder.path, depth + 1, canSee, budget)))
-    nested = found.flat()
-  }
-  return [...new Set([...named, ...files, ...images, ...nested])]
+  if (files.length) return [...new Set(files)]
+  const folder = picked.find((item) => item.type === 'folder')
+  if (!folder) return []
+  const inside = (await visibleHere(root, folder.path, canSee)).filter((item) => item.type === 'file')
+  const already = new Set(pool.map((item) => item.path))
+  const fresh = inside.filter((item) => !already.has(item.path)).slice(0, 16)
+  if (!fresh.length) return []
+  const again = await jevChoose(key, query, fresh)
+  return again.filter((item) => item.type === 'file').map((item) => item.path)
 }
 
 function fileKind(name: string, type: string): string {
@@ -406,7 +312,7 @@ export async function semanticPaths(config: ServerConfig, user: UserRecord, root
   const platform = await loadPlatform(config)
   if (!aiEnabledFor(user, platform)) return null
   const creds = await credentials(config, user, platform)
-  return searchDown(config, creds.jevKey, root, query, '', 0, canSee, { left: 6 })
+  return searchDown(creds.jevKey, root, query, canSee)
 }
 
 async function completeChat(provider: AiProvider, key: string, system: string, message: string): Promise<string> {
@@ -453,8 +359,9 @@ Look with commands on their own lines, written exactly like this:
 <ls path>
 <search query>
 <read path>
-<ls> lists the drive root. <search> takes a short query, opens the folders that fit, and does not scan every file. <read> reads the start of a text file.
-Do not invent files. Run a command before you name a file. When you can answer, write plain text and no commands, and mention the path.`
+<ls> lists the drive root. <search> takes a short query and checks folder names plus the files one level down. <read> reads the start of a text file.
+Do not invent files. Run at most one command, then answer. When you can answer, write plain text and no commands, and mention the path.
+If the user referenced files, those are the files they mean. Do not search unless they ask to find something else.`
 
 function clip(text: string, max = 900): string {
   const clean = text.trim()
@@ -481,12 +388,11 @@ async function runCommand(
   kind: string,
   arg: string,
   canSee: (path: string) => boolean,
-  budget: { left: number },
 ): Promise<string> {
   if (kind === 'search') {
     const query = arg.trim()
     if (query.length < 2) return 'Give search a word.'
-    const paths = await searchDown(config, key, root, query, '', 0, canSee, budget)
+    const paths = await searchDown(key, root, query, canSee)
     return paths.slice(0, 20).join('\n') || 'Nothing matched in the folders that fit.'
   }
   const rel = cleanRel(arg)
@@ -506,15 +412,40 @@ async function runCommand(
   }
 }
 
-export async function askAboutFiles(config: ServerConfig, user: UserRecord, root: string, message: string, canSee: (path: string) => boolean): Promise<AiReply> {
+export type AiRef = { path: string; name: string }
+
+async function referencedText(config: ServerConfig, root: string, refs: AiRef[], canSee: (path: string) => boolean): Promise<string> {
+  const lines: string[] = []
+  for (const ref of refs.slice(0, 8)) {
+    const rel = cleanRel(ref.path)
+    if (rel === null || (rel && !canSee(rel))) continue
+    const item = rel ? await entryAt(root, rel) : null
+    if (!item) continue
+    let extra = ''
+    const ext = extname(item.name).toLowerCase()
+    if (item.type === 'file' && TEXT.has(ext) && item.size <= 128_000) {
+      try {
+        const opened = await openDownload(root, item.path)
+        const bytes = await readOpened(config, opened, 900)
+        if (bytes) extra = ` — ${bytes.toString('utf8').replace(/\s+/g, ' ').slice(0, 420)}`
+      } catch { /* the name is still useful */ }
+    }
+    lines.push(`- ${item.path} (${item.type === 'folder' ? 'folder' : fileKind(item.name, item.type)})${extra}`)
+  }
+  return lines.join('\n')
+}
+
+export async function askAboutFiles(config: ServerConfig, user: UserRecord, root: string, message: string, canSee: (path: string) => boolean, refs: AiRef[] = []): Promise<AiReply> {
   const platform = await loadPlatform(config)
   const creds = await credentials(config, user, platform)
-  const rootItems = (await listPath(root, '')).filter((item) => canSee(item.path))
-  let transcript = `Root:\n${describe(rootItems)}\n\nQuestion: ${message}`
+  const attached = await referencedText(config, root, refs, canSee)
+  const rootItems = attached ? [] : (await listPath(root, '')).filter((item) => canSee(item.path))
+  let transcript = attached
+    ? `Referenced files:\n${attached}\n\nQuestion: ${message}`
+    : `Root:\n${describe(rootItems)}\n\nQuestion: ${message}`
   const steps: AiStep[] = []
-  const budget = { left: 8 }
   let answer = ''
-  for (let turn = 0; turn < 4; turn += 1) {
+  for (let turn = 0; turn < 2; turn += 1) {
     const reply = await completeChat(creds.provider, creds.modelKey, AGENT, transcript)
     const commands = [...reply.matchAll(/<(ls|search|read)(\s+[^<>]*)?>/gi)]
     const prose = reply.replace(/<(ls|search|read)(\s+[^<>]*)?>/gi, '').trim()
@@ -523,13 +454,13 @@ export async function askAboutFiles(config: ServerConfig, user: UserRecord, root
       break
     }
     const notes: string[] = []
-    for (const match of commands.slice(0, 3)) {
+    for (const match of commands.slice(0, 1)) {
       const command = match[0]
       const kind = (match[1] ?? '').toLowerCase()
       const arg = (match[2] ?? '').trim()
       let output = ''
       try {
-        output = await runCommand(config, creds.jevKey, root, kind, arg, canSee, budget)
+        output = await runCommand(config, creds.jevKey, root, kind, arg, canSee)
       } catch (error) {
         output = error instanceof Error ? error.message : 'That command failed.'
       }
@@ -538,7 +469,8 @@ export async function askAboutFiles(config: ServerConfig, user: UserRecord, root
       notes.push(`${command}\n${output}`)
     }
     answer = prose
-    transcript += `\n\nResults:\n${notes.join('\n\n')}\n\nIf this answers it, reply in plain text with no commands.`
+    if (turn === 1) break
+    transcript += `\n\nResults:\n${notes.join('\n\n')}\n\nReply in plain text with no commands.`
   }
   return { answer: answer || 'I looked through those folders but did not get a final answer.', steps, provider: creds.provider }
 }

@@ -759,13 +759,17 @@ export function createApp(config: ServerConfig) {
   app.post('/api/ai/ask', async (c) => {
     const user = c.get('user')
     const root = c.get('root')
-    const body = await c.req.json<{ message?: string }>().catch(() => null)
+    const body = await c.req.json<{ message?: string; refs?: { path?: string; name?: string }[] }>().catch(() => null)
     const message = body?.message?.trim() ?? ''
     if (!message) return c.json({ error: 'Type a question' }, 400)
+    const refs = (body?.refs ?? [])
+      .filter((ref) => ref.path && ref.name)
+      .slice(0, 8)
+      .map((ref) => ({ path: ref.path ?? '', name: ref.name ?? '' }))
     try {
       const meta = await loadMeta(root)
       const open = await readFileUnlocks(c, config, user.id)
-      const reply = await askAboutFiles(config, user, root, message, (path) => !ancestorBlocked(meta.locks, open, user.id, path))
+      const reply = await askAboutFiles(config, user, root, message, (path) => !ancestorBlocked(meta.locks, open, user.id, path), refs)
       return c.json(reply)
     } catch (err) {
       return c.json({ error: err instanceof Error ? err.message : 'AI failed' }, 400)

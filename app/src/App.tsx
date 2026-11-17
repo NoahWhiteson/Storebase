@@ -1305,8 +1305,13 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
           </div>
         </main>
         {aiEnabled && aiOpen ? (
-          <div className="flex w-[min(100%,424px)] shrink-0 self-stretch p-3 max-md:fixed max-md:inset-0 max-md:z-40 max-md:w-auto max-md:bg-[#1a1a1a]/80">
-            <AiPanel name={profile.name} onClose={() => setAiOpen(false)} />
+          <div className="animate-in fade-in slide-in-from-right-8 flex w-[min(100%,424px)] shrink-0 self-stretch p-3 duration-300 ease-out max-md:fixed max-md:inset-0 max-md:z-40 max-md:w-auto max-md:bg-[#1a1a1a]/80">
+            <AiPanel
+              name={profile.name}
+              files={items.map((item) => ({ name: item.name, path: item.id }))}
+              selected={items.filter((item) => selectedIds.includes(item.id)).map((item) => ({ name: item.name, path: item.id }))}
+              onClose={() => setAiOpen(false)}
+            />
           </div>
         ) : null}
         </>

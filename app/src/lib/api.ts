@@ -295,10 +295,12 @@ export async function login(email: string, password: string): Promise<Me> {
 export type AiProviderId = 'gemini' | 'deepseek' | 'claude' | 'openai'
 export type AiStep = { command: string; output: string }
 
-export async function askAi(message: string): Promise<{ answer: string; steps: AiStep[]; provider: AiProviderId }> {
+export type AiRef = { path: string; name: string }
+
+export async function askAi(message: string, refs: AiRef[] = []): Promise<{ answer: string; steps: AiStep[]; provider: AiProviderId }> {
   return api('/api/ai/ask', {
     method: 'POST',
-    body: JSON.stringify({ message }),
+    body: JSON.stringify({ message, refs }),
   })
 }
 

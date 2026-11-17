@@ -1,4 +1,4 @@
-import { askAi, type AiProviderId, type AiStep } from '@/lib/api'
+import { askAi, type AiProviderId, type AiRef, type AiStep } from '@/lib/api'
 import { Input } from '@/components/ui/input'
 import { cn } from 'cn'
 import { Sparkles } from 'kubai-icons-react'
@@ -35,11 +35,28 @@ const logos: Record<AiProviderId, { title: string; hex: string; path: string }> 
 }
 
 function useSparkleLoop(): boolean {
-  const [play, setPlay] = useState(true)
+  const [play, setPlay] = useState(false)
   useEffect(() => {
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
-    const id = window.setInterval(() => setPlay((on) => !on), 480)
-    return () => window.clearInterval(id)
+    let cancel = false
+    const timers: number[] = []
+    const later = (fn: () => void, ms: number) => {
+      timers.push(window.setTimeout(fn, ms))
+    }
+    const cycle = () => {
+      if (cancel) return
+      setPlay(true)
+      later(() => {
+        if (cancel) return
+        setPlay(false)
+        later(cycle, 4000)
+      }, 520)
+    }
+    later(cycle, 700)
+    return () => {
+      cancel = true
+      for (const id of timers) window.clearTimeout(id)
+    }
   }, [])
   return play
 }
@@ -59,21 +76,72 @@ function ProviderMark({ provider }: { provider: AiProviderId }) {
 }
 
 type Turn = { role: 'you' | 'ai'; text: string; steps?: AiStep[]; provider?: AiProviderId }
+export type AiFile = { name: string; path: string }
 
-export function AiPanel({ name, onClose }: { name: string; onClose: () => void }) {
+function tokenFor(name: string): string {
+  return name.includes(' ') ? `@"${name}"` : `@${name}`
+}
+
+function StreamText({ text }: { text: string }) {
+  const [count, setCount] = useState(0)
+  useEffect(() => {
+    if (count >= text.length) return
+    const step = text.length > 500 ? 8 : 2
+    const id = window.setTimeout(() => setCount((current) => Math.min(text.length, current + step)), 16)
+    return () => window.clearTimeout(id)
+  }, [count, text])
+  return (
+    <>
+      {text.slice(0, count)}
+      {count < text.length ? <span className="ml-0.5 inline-block h-[1em] w-[2px] translate-y-px animate-pulse bg-[#22C55E]" /> : null}
+    </>
+  )
+}
+
+export function AiPanel({ name, files, selected, onClose }: { name: string; files: AiFile[]; selected: AiFile[]; onClose: () => void }) {
   const first = name.trim().split(/\s+/)[0] || 'there'
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
   const [turns, setTurns] = useState<Turn[]>([])
+  const [dropped, setDropped] = useState<string[]>([])
+  const attached = selected.filter((file) => !dropped.includes(file.path))
+  const mention = text.match(/(?:^|\s)@([^\n@]*)$/)?.[1] ?? null
+  const suggestions = mention === null ? [] : files.filter((file) => file.name.toLowerCase().includes(mention.toLowerCase())).slice(0, 6)
+
+  useEffect(() => {
+    setDropped((current) => {
+      const next = current.filter((path) => selected.some((file) => file.path === path))
+      return next.length === current.length ? current : next
+    })
+  }, [selected])
+
+  function pick(file: AiFile) {
+    setText((current) => current.replace(/(^|\s)@[^\n@]*$/, `$1${tokenFor(file.name)} `))
+  }
+
+  function refsFor(message: string): AiRef[] {
+    const found = new Map<string, AiFile>()
+    for (const file of attached) found.set(file.path, file)
+    for (const file of files) {
+      if (message.includes(tokenFor(file.name))) found.set(file.path, file)
+    }
+    return [...found.values()].map((file) => ({ path: file.path, name: file.name }))
+  }
 
   async function ask(message: string) {
     const next = message.trim()
     if (!next || busy) return
+    if (suggestions.length && next === text.trim()) {
+      const first = suggestions[0]
+      if (first) pick(first)
+      return
+    }
+    const refs = refsFor(next)
     setText('')
     setTurns((current) => [...current, { role: 'you', text: next }])
     setBusy(true)
     try {
-      const reply = await askAi(next)
+      const reply = await askAi(next, refs)
       setTurns((current) => [...current, { role: 'ai', text: reply.answer, steps: reply.steps, provider: reply.provider }])
     } catch (error) {
       setTurns((current) => [...current, { role: 'ai', text: error instanceof Error ? error.message : 'AI failed' }])
@@ -83,7 +151,7 @@ export function AiPanel({ name, onClose }: { name: string; onClose: () => void }
   }
 
   return (
-    <aside className="flex min-h-0 w-full flex-1 flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#161616]">
+    <aside className="flex min-h-0 w-full flex-1 flex-col overflow-hidden rounded-2xl bg-[#161616]">
       <div className="flex h-14 shrink-0 items-center justify-between px-4">
         <div className="flex items-center gap-2 text-[15px] font-medium text-white">
           <AiStar />
@@ -127,7 +195,7 @@ export function AiPanel({ name, onClose }: { name: string; onClose: () => void }
                 ) : null}
                 {turn.text ? (
                   <p className={cn('whitespace-pre-wrap text-sm leading-6', turn.role === 'you' ? 'ml-8 rounded-2xl bg-[#242424] px-3 py-2 text-white' : 'text-[#e8e8e8]')}>
-                    {turn.text}
+                    {turn.role === 'ai' && index === turns.length - 1 ? <StreamText text={turn.text} /> : turn.text}
                   </p>
                 ) : null}
                 {turn.role === 'ai' && turn.provider ? (
@@ -143,17 +211,48 @@ export function AiPanel({ name, onClose }: { name: string; onClose: () => void }
         )}
       </div>
       <form
-        className="shrink-0 p-3"
+        className="relative shrink-0 p-3"
         onSubmit={(event) => {
           event.preventDefault()
           void ask(text)
         }}
       >
+        {attached.length ? (
+          <div className="mb-2 flex flex-wrap gap-1.5">
+            {attached.map((file) => (
+              <button
+                key={file.path}
+                type="button"
+                className="rounded-full bg-[#242424] px-2.5 py-1 text-xs text-white"
+                onClick={() => setDropped((current) => [...current, file.path])}
+              >
+                {file.name} ×
+              </button>
+            ))}
+          </div>
+        ) : null}
+        {suggestions.length ? (
+          <div className="absolute right-3 bottom-full left-3 mb-1 overflow-hidden rounded-2xl bg-[#242424] shadow-xl">
+            {suggestions.map((file) => (
+              <button
+                key={file.path}
+                type="button"
+                className="block w-full truncate px-3 py-2 text-left text-sm text-white hover:bg-white/10"
+                onMouseDown={(event) => {
+                  event.preventDefault()
+                  pick(file)
+                }}
+              >
+                {file.name}
+              </button>
+            ))}
+          </div>
+        ) : null}
         <div className="flex items-center gap-2 rounded-full bg-[#242424] px-2">
           <Input
             value={text}
             onChange={(event) => setText(event.target.value)}
-            placeholder="Ask about your files"
+            placeholder="Ask, or @ a file"
             className="h-12 flex-1 border-0 bg-transparent px-3 text-[15px] shadow-none placeholder:text-[#8d8d8d] outline-none focus-visible:ring-0"
           />
           <button
