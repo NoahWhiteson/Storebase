@@ -85,6 +85,9 @@ async function start(): Promise<void> {
     startStorageScanSchedule(config)
     startUpdateLoop(config, async () => (await loadPlatform(config)).autoUpdate)
   })
+  const nodeServer = server as import('node:http').Server
+  nodeServer.requestTimeout = 0
+  nodeServer.timeout = 0
   app.attach(server)
   startDomainGateway(config, app)
 }

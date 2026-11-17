@@ -249,7 +249,7 @@ export function ShareDialog({
                 setPassword('')
               }}
             >
-              {clearPassword ? 'Password will be removed' : 'Remove password'}
+              {clearPassword ? 'Password will be removed' : 'Remove Password'}
             </button>
           ) : null}
           {linkDirty ? (

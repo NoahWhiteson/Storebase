@@ -128,7 +128,7 @@ export function Terminals({
       ) : (
         <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-6 text-center">
           <SquareTerminal className="mb-4 size-10 text-[#8d8d8d]" />
-          <p className="text-lg font-medium text-white">No terminals</p>
+          <p className="text-lg font-medium text-white">No Terminals</p>
           <p className="mt-2 max-w-sm text-sm text-[#8d8d8d]">
             New opens a real shell on this node. Type in it. It runs here, not in the browser.
           </p>

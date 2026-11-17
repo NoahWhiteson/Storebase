@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Readable } from 'node:stream'
 import { attachNetwork, saveFile, type UploadSource } from '../src/storage.ts'
+import { createUploadSessions } from '../src/uploads-session.ts'
 import { loadConfig } from '../src/config.ts'
 import { folderSizeSnapshot, cachedFolderSize } from '../src/quota.ts'
 import { readPointerAt } from '../src/pointer.ts'
@@ -104,4 +105,92 @@ test('S3 uploads stream once with content length and without a local staging cop
   assert.equal((await readPointerAt(join(root, 'remote.bin')))?.size, bytes.length)
   assert.ok((await readFile(join(root, 'remote.bin'))).length < 2048)
   assert.deepEqual((await readdir(config.dataDir)).filter(name => name.startsWith('.storebase-upload-')), [])
+})
+
+test('chunked uploads assemble out of order and can retry a part', async (t) => {
+  const { root, config, quota } = await fixture(t)
+  const sessions = createUploadSessions(config)
+  t.after(() => sessions.stop())
+  const bytes = Buffer.from('abcdefghijklmnopqrst')
+  const started = await sessions.start({ userId: 'user', root, dir: '', name: 'chunk.bin', size: bytes.length, quota, partSize: 8 })
+  assert.equal(started.parts, 3)
+  await sessions.write('user', started.id, 2, bytes.subarray(16))
+  await sessions.write('user', started.id, 0, bytes.subarray(0, 8))
+  await sessions.write('user', started.id, 0, bytes.subarray(0, 8))
+  await assert.rejects(sessions.finish('user', started.id), /missing/)
+  await sessions.write('user', started.id, 1, bytes.subarray(8, 16))
+  const item = await sessions.finish('user', started.id)
+  assert.equal(item.size, 20)
+  assert.equal(await readFile(join(root, 'chunk.bin'), 'utf8'), 'abcdefghijklmnopqrst')
+  assert.equal((await readdir(root)).some((name) => name.startsWith('.storebase-part-')), false)
+})
+
+test('aborting a chunked upload removes the partial file', async (t) => {
+  const { root, config, quota } = await fixture(t)
+  const sessions = createUploadSessions(config)
+  t.after(() => sessions.stop())
+  const started = await sessions.start({ userId: 'user', root, dir: '', name: 'gone.bin', size: 8, quota, partSize: 8 })
+  await sessions.write('user', started.id, 0, Buffer.from('12345678'))
+  await sessions.abort('user', started.id)
+  await assert.rejects(sessions.finish('user', started.id), /gone/)
+  assert.deepEqual(await readdir(root), [])
+})
+
+test('chunked S3 uploads send every part before publishing the pointer', async (t) => {
+  const { parent, config, root, quota } = await fixture(t)
+  const partSize = 5 * 1024 * 1024
+  const head = Buffer.alloc(partSize, 7)
+  const tail = Buffer.alloc(10, 9)
+  const parts = new Map<number, Buffer>()
+  let xml = ''
+  const server = createServer(async (req, res) => {
+    const url = new URL(req.url ?? '/', 'http://127.0.0.1')
+    if (req.method === 'POST' && url.searchParams.has('uploads')) {
+      res.setHeader('content-type', 'application/xml')
+      res.end('<InitiateMultipartUploadResult><UploadId>up-1</UploadId></InitiateMultipartUploadResult>')
+      return
+    }
+    if (req.method === 'PUT' && url.searchParams.has('partNumber')) {
+      const chunks: Buffer[] = []
+      for await (const chunk of req) chunks.push(chunk as Buffer)
+      parts.set(Number(url.searchParams.get('partNumber')), Buffer.concat(chunks))
+      res.setHeader('etag', `"part-${url.searchParams.get('partNumber')}"`)
+      res.end()
+      return
+    }
+    if (req.method === 'POST' && url.searchParams.get('uploadId') === 'up-1') {
+      const chunks: Buffer[] = []
+      for await (const chunk of req) chunks.push(chunk as Buffer)
+      xml = Buffer.concat(chunks).toString('utf8')
+      res.end('<CompleteMultipartUploadResult></CompleteMultipartUploadResult>')
+      return
+    }
+    res.statusCode = 404
+    res.end()
+  })
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+  t.after(() => new Promise<void>((resolve) => { server.closeAllConnections(); server.close(() => resolve()) }))
+  const address = server.address() as { port: number }
+  await writeFile(join(parent, 'network.json'), JSON.stringify({
+    backends: [{
+      id: 'remote', type: 's3', name: 'Test', capacityBytes: 100_000_000,
+      endpoint: `http://127.0.0.1:${address.port}`, bucket: 'bucket', accessKey: 'test', secretKey: 'test',
+    }],
+    order: ['remote', 'local'],
+  }))
+  const sessions = createUploadSessions(config)
+  t.after(() => sessions.stop())
+  const started = await sessions.start({
+    userId: 'user', root, dir: '', name: 'remote.bin', size: head.length + tail.length, quota, partSize,
+  })
+  await sessions.write('user', started.id, 1, tail)
+  await sessions.write('user', started.id, 0, head)
+  const item = await sessions.finish('user', started.id)
+  assert.equal(item.size, head.length + tail.length)
+  assert.equal(parts.size, 2)
+  assert.equal(parts.get(1)?.length, partSize)
+  assert.equal(parts.get(2)?.length, 10)
+  assert.ok(xml.indexOf('<PartNumber>1</PartNumber>') < xml.indexOf('<PartNumber>2</PartNumber>'))
+  assert.equal((await readPointerAt(join(root, 'remote.bin')))?.backend, 'remote')
+  assert.equal((await readdir(root)).some((name) => name.startsWith('.storebase-part-')), false)
 })

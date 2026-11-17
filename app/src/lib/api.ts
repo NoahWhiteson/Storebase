@@ -318,12 +318,127 @@ export async function mkdir(path: string): Promise<FileEntry> {
   return body.item
 }
 
-export async function uploadFile(dir: string, file: File): Promise<FileEntry> {
-  const qs = new URLSearchParams({ path: dir, name: file.name })
-  const body = await api<{ item: FileEntry }>(`/api/files/upload?${qs}`, {
-    method: 'POST', body: file, headers: { 'content-type': 'application/octet-stream' },
+const CHUNK_BYTES = 16 * 1024 * 1024
+const CHUNK_LANES = 4
+
+function putChunk(url: string, body: Blob, onProgress: (loaded: number) => void): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    xhr.open('PUT', url)
+    xhr.withCredentials = true
+    xhr.setRequestHeader('content-type', 'application/octet-stream')
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable) onProgress(event.loaded)
+    }
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve()
+        return
+      }
+      let message = `Upload failed (${xhr.status})`
+      try {
+        const parsed = JSON.parse(xhr.responseText) as { error?: string }
+        if (parsed.error) message = parsed.error
+      } catch { /* non-json error page */ }
+      reject(new ApiError(message, xhr.status))
+    }
+    xhr.onerror = () => reject(new Error('Upload connection failed'))
+    xhr.onabort = () => reject(new Error('Upload cancelled'))
+    xhr.send(body)
   })
-  return body.item
+}
+
+export async function uploadFile(dir: string, file: File): Promise<FileEntry> {
+  if (file.size < CHUNK_BYTES) {
+    const qs = new URLSearchParams({ path: dir, name: file.name })
+    const body = await api<{ item: FileEntry }>(`/api/files/upload?${qs}`, {
+      method: 'POST', body: file, headers: { 'content-type': 'application/octet-stream' },
+    })
+    return body.item
+  }
+  const operation = beginOperation('Uploading file', file.name)
+  let sessionId = ''
+  try {
+    const started = await fetch('/api/files/upload/session', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ path: dir, name: file.name, size: file.size }),
+    })
+    const session = await parse<{ id: string; partSize: number; parts: number }>(started)
+    sessionId = session.id
+    let done = 0
+    const inflight = new Map<number, number>()
+    let cursor = 0
+    let failure: Error | null = null
+    const report = () => {
+      let partial = 0
+      for (const loaded of inflight.values()) partial += loaded
+      operation.progress(file.name, Math.min(99, ((done + partial) / file.size) * 100))
+    }
+    const send = async (index: number) => {
+      const start = index * session.partSize
+      const blob = file.slice(start, Math.min(file.size, start + session.partSize))
+      let attempt = 0
+      while (attempt < 5) {
+        try {
+          await putChunk(`/api/files/upload/session/${session.id}/${index}`, blob, (loaded) => {
+            inflight.set(index, loaded)
+            report()
+          })
+          inflight.delete(index)
+          done += blob.size
+          report()
+          return
+        } catch (err) {
+          inflight.delete(index)
+          const status = err instanceof ApiError ? err.status : 0
+          if (status >= 400 && status < 500 && status !== 408 && status !== 429) throw err
+          attempt += 1
+          if (attempt >= 5) throw err
+          await new Promise((resolve) => setTimeout(resolve, 400 * attempt))
+        }
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(CHUNK_LANES, session.parts) }, async () => {
+      while (!failure) {
+        const index = cursor
+        cursor += 1
+        if (index >= session.parts) return
+        try {
+          await send(index)
+        } catch (err) {
+          failure = err instanceof Error ? err : new Error('Upload failed')
+          return
+        }
+      }
+    }))
+    if (failure) throw failure
+    operation.progress(`Saving ${file.name}`)
+    let finished: Response | null = null
+    let completeError: Error | null = null
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        finished = await fetch(`/api/files/upload/session/${session.id}/complete`, { method: 'POST', credentials: 'include' })
+        if (finished.ok) break
+        await parse(finished)
+      } catch (err) {
+        completeError = err instanceof Error ? err : new Error('Upload failed')
+        if (err instanceof ApiError && err.status >= 400 && err.status < 500) throw err
+        await new Promise((resolve) => setTimeout(resolve, 400 * (attempt + 1)))
+      }
+    }
+    if (!finished?.ok) throw completeError ?? new Error('Upload failed')
+    const body = await parse<{ item: FileEntry }>(finished)
+    sessionId = ''
+    operation.finish()
+    window.dispatchEvent(new Event('storebase:files-changed'))
+    return body.item
+  } catch (error) {
+    if (sessionId) await fetch(`/api/files/upload/session/${sessionId}`, { method: 'DELETE', credentials: 'include' }).catch(() => {})
+    operation.finish(error)
+    throw error
+  }
 }
 
 export async function renameFile(path: string, name: string): Promise<FileEntry> {

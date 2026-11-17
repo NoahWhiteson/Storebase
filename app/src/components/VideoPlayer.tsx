@@ -216,7 +216,7 @@ export function VideoPlayer({ src, title, onLoadError }: { src: string; title: s
             <span className="flex-1" />
             <button
               type="button"
-              aria-label={fs ? 'Exit full screen' : 'Full screen'}
+              aria-label={fs ? 'Exit Full Screen' : 'Full Screen'}
               className="flex size-9 items-center justify-center"
               onClick={() => void toggleFs()}
             >

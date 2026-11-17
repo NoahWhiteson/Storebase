@@ -293,7 +293,7 @@ export function FilePreview({
         ) : null}
         {kind === 'none' ? (
           <div className="flex h-full flex-col items-center justify-center text-center">
-            <p className="text-lg font-medium">No in-browser preview</p>
+            <p className="text-lg font-medium">No In-Browser Preview</p>
             <p className="mt-2 max-w-sm text-sm text-[#8d8d8d]">Download it and open it locally.</p>
             <Button
               className="mt-6 h-11 rounded-full bg-white text-[#1a1a1a] hover:bg-[#f2f2f2]"

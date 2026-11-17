@@ -92,13 +92,13 @@ export function TopBar({
                 variant="ghost"
                 size="icon"
                 className="size-10"
-                aria-label={view === 'grid' ? 'List view' : 'Grid view'}
+                aria-label={view === 'grid' ? 'List View' : 'Grid View'}
                 onClick={() => onView(view === 'grid' ? 'list' : 'grid')}
               >
                 {view === 'grid' ? <List /> : <Grid2x2 />}
               </Button>
             </TooltipTrigger>
-            <TooltipContent>{view === 'grid' ? 'List view' : 'Grid view'}</TooltipContent>
+            <TooltipContent>{view === 'grid' ? 'List View' : 'Grid View'}</TooltipContent>
           </Tooltip>
           {terminalsEnabled ? (
             <Tooltip>
@@ -144,7 +144,7 @@ export function TopBar({
               <DropdownMenuItem onSelect={() => onOpenSettings('account')}>Account</DropdownMenuItem>
               <DropdownMenuItem onSelect={() => onOpenSettings('storage')}>Storage</DropdownMenuItem>
               <DropdownMenuSeparator />
-              <DropdownMenuItem onSelect={onSignOut}>Sign out</DropdownMenuItem>
+              <DropdownMenuItem onSelect={onSignOut}>Sign Out</DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>

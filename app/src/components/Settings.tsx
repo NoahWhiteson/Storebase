@@ -117,7 +117,7 @@ const settingsGroups: { id: string; label: string; items: SettingsNavItem[] }[] 
     items: [
       { id: 'general', label: 'General', icon: SlidersHorizontal, keywords: 'preferences operations notifications view' },
       { id: 'account', label: 'Account', icon: UserRound, keywords: 'profile name email password quota' },
-      { id: 'my-storage', label: 'Your storage', icon: ChartPie, keywords: 'storage usage space media zip archive temporary cleanup scan' },
+      { id: 'my-storage', label: 'Your Storage', icon: ChartPie, keywords: 'storage usage space media zip archive temporary cleanup scan' },
       { id: 'devices', label: 'App', icon: AppWindow, keywords: 'device pairing capture desktop macos' },
     ],
   },
@@ -135,7 +135,7 @@ const settingsGroups: { id: string; label: string; items: SettingsNavItem[] }[] 
     id: 'protection',
     label: 'Protection',
     items: [
-      { id: 'virus', label: 'Virus scanning', icon: ShieldCheck, keywords: 'clamav malware upload scan antivirus' },
+      { id: 'virus', label: 'Virus Scanning', icon: ShieldCheck, keywords: 'clamav malware upload scan antivirus' },
       { id: 'security', label: 'Security', icon: Shield, admin: true, keywords: 'secret session encryption' },
       { id: 'terminals', label: 'Terminals', icon: SquareTerminal, admin: true, keywords: 'shell command console' },
     ],
@@ -468,13 +468,13 @@ function MetricCard({ label, value, detail }: { label: string; value: string; de
 const storageCategoryView: Record<StorageCategoryId, { label: string; color: string; icon: typeof HardDrive; tip: string }> = {
   media: { label: 'Media', color: '#78d9ec', icon: Images, tip: 'Photos, video, and audio' },
   executables: { label: 'Executables', color: '#c4b5fd', icon: AppWindow, tip: 'Apps, installers, and packages' },
-  archives: { label: 'ZIPs & archives', color: '#fdd663', icon: Archive, tip: 'Compressed files and disk images' },
+  archives: { label: 'ZIPs & Archives', color: '#fdd663', icon: Archive, tip: 'Compressed files and disk images' },
   documents: { label: 'Documents', color: '#8ab4f8', icon: FileText, tip: 'Documents, PDFs, and spreadsheets' },
   code: { label: 'Code', color: '#81c995', icon: Code2, tip: 'Projects and source files' },
   temporary: { label: 'Temporary', color: '#ff9f6e', icon: Package, tip: 'Files in your temporary area' },
   trash: { label: 'Trash', color: '#f28b82', icon: Trash2, tip: 'Deleted files that can be emptied' },
   storebase: { label: 'Storebase', color: '#34a853', icon: HardDrive, tip: 'Account indexes and Storebase metadata' },
-  history: { label: 'File history', color: '#a78bfa', icon: History, tip: 'Older versions kept for recovery' },
+  history: { label: 'File History', color: '#a78bfa', icon: History, tip: 'Older versions kept for recovery' },
   other: { label: 'Other', color: '#9aa0a6', icon: Boxes, tip: 'Everything outside these groups' },
 }
 
@@ -526,7 +526,7 @@ function UserStoragePanel({ data, onToast }: { data: SettingsPayload; onToast: (
     <div className="max-w-4xl">
       <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-medium tracking-tight text-white">Your storage</h1>
+          <h1 className="text-2xl font-medium tracking-tight text-white">Your Storage</h1>
           <p className="mt-1 text-sm text-[#8d8d8d]">See what uses your space. The detailed scan reads only files in your account.</p>
         </div>
         <Button
@@ -536,7 +536,7 @@ function UserStoragePanel({ data, onToast }: { data: SettingsPayload; onToast: (
           onClick={() => void scan()}
         >
           <RefreshCw className={cn('size-4', scanning && 'animate-spin')} />
-          {scanning ? 'Scanning your files…' : breakdown?.detailed ? 'Scan again' : 'Scan my files'}
+          {scanning ? 'Scanning your files…' : breakdown?.detailed ? 'Scan Again' : 'Scan My Files'}
         </Button>
       </div>
 
@@ -590,13 +590,13 @@ function UserStoragePanel({ data, onToast }: { data: SettingsPayload; onToast: (
         ) : breakdown?.detailed ? (
           <div className="rounded-xl border border-dashed border-white/[0.12] px-4 py-7 text-center">
             <HardDrive className="mx-auto mb-2 size-6 text-[#8d8d8d]" />
-            <p className="text-sm font-medium text-white">Your storage is empty</p>
+            <p className="text-sm font-medium text-white">Your Storage Is Empty</p>
             <p className="mt-1 text-xs text-[#8d8d8d]">This account has no files taking up measurable space.</p>
           </div>
         ) : (
           <div className="rounded-xl border border-dashed border-white/[0.12] px-4 py-7 text-center">
             <ChartPie className="mx-auto mb-2 size-6 text-[#8d8d8d]" />
-            <p className="text-sm font-medium text-white">Your total is ready</p>
+            <p className="text-sm font-medium text-white">Your Total Is Ready</p>
             <p className="mt-1 text-xs text-[#8d8d8d]">The category breakdown is kept out of the normal settings load so this page stays quick.</p>
           </div>
         )}
@@ -606,9 +606,9 @@ function UserStoragePanel({ data, onToast }: { data: SettingsPayload; onToast: (
         <SettingsCard title="Free up space" hint="Choose what Storebase can safely clear. Your regular files are never included in these actions.">
           <div className="divide-y divide-white/[0.07]">
             {([
-              { id: 'temporary' as const, title: 'Temporary files', detail: 'Clear everything in your Temp area.' },
+              { id: 'temporary' as const, title: 'Temporary Files', detail: 'Clear everything in your Temp area.' },
               { id: 'trash' as const, title: 'Trash', detail: 'Permanently remove files already in Trash.' },
-              { id: 'history' as const, title: 'File history', detail: 'Remove older versions while keeping current files.' },
+              { id: 'history' as const, title: 'File History', detail: 'Remove older versions while keeping current files.' },
             ]).map((option) => {
               const bytes = breakdown?.categories.find((category) => category.id === option.id)?.bytes ?? 0
               return (
@@ -658,7 +658,7 @@ function UserStoragePanel({ data, onToast }: { data: SettingsPayload; onToast: (
           <DialogFooter>
             <Button type="button" variant="ghost" disabled={cleaning} onClick={() => setCleanupTarget(null)}>Cancel</Button>
             <Button type="button" className="bg-[#c5221f] text-white hover:bg-[#a50e0e]" disabled={cleaning} onClick={() => void clean()}>
-              {cleaning ? 'Clearing…' : 'Clear permanently'}
+              {cleaning ? 'Clearing…' : 'Clear Permanently'}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -918,7 +918,7 @@ function AccountPanel({
           {avatarUrl ? <img src={avatarUrl} alt="" className="size-full object-cover" /> : name.trim().slice(0, 2).toUpperCase()}
         </div>
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-medium text-white">Profile picture</p>
+          <p className="text-sm font-medium text-white">Profile Picture</p>
           <p className="mt-0.5 text-xs text-[#8d8d8d]">JPG, PNG, WebP, or GIF · up to 5 MB</p>
           <div className="mt-3 flex flex-wrap gap-2">
             <Button variant="outline" className="h-8 rounded-full border-white/20 bg-transparent text-white hover:bg-white/10 hover:text-white" disabled={avatarBusy} onClick={() => avatarInput.current?.click()}>
@@ -937,7 +937,7 @@ function AccountPanel({
         Email
         <Input className={`${fieldClass} mt-1.5`} type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
       </label>
-      <p className="mb-2 text-sm text-[#8d8d8d]">Change password</p>
+      <p className="mb-2 text-sm text-[#8d8d8d]">Change Password</p>
       <Input
         className={`${fieldClass} mb-2`}
         type="password"
@@ -1032,7 +1032,7 @@ function GeneralPanel({
             </label>
             <label className="block text-sm text-[#8d8d8d]">
               Sign-in note
-              <Input className={`${fieldClass} mt-1.5`} value={signInMessage} onChange={(event) => setSignInMessage(event.target.value)} placeholder="Optional line under Sign in" />
+              <Input className={`${fieldClass} mt-1.5`} value={signInMessage} onChange={(event) => setSignInMessage(event.target.value)} placeholder="Optional line under Sign In" />
             </label>
           </SettingsCard>
         ) : null}
@@ -1124,7 +1124,7 @@ function VirusPanel({
 
   return (
     <div className="max-w-2xl">
-      <Heading title="Virus scanning" hint="Check uploads and existing files with ClamAV." />
+      <Heading title="Virus Scanning" hint="Check uploads and existing files with ClamAV." />
       <div className="space-y-4">
         <SettingsCard title="Your uploads" hint="This preference applies when the administrator lets each user choose.">
           <Toggle on={effectiveScan} onChange={setVirusScan} label="Scan uploaded files for viruses" disabled={virusScanPolicy !== 'user'} />
@@ -2549,7 +2549,7 @@ function SecurityPanel({ onToast }: { onToast: (message: string) => void }) {
         onClick={() => void rotate()}
       >
         <KeyRound className="size-4" />
-        {busy ? 'Rotating…' : 'Rotate session secret'}
+        {busy ? 'Rotating…' : 'Rotate Session Secret'}
       </Button>
     </div>
   )
@@ -2603,7 +2603,7 @@ function DiagnosticsPanel({
       <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
         <Heading title="Diagnostics" hint="Server-side request timings reveal which phase is slow without adding work to the browser." />
         <div className="flex gap-2">
-          <Button variant="ghost" className="h-9 rounded-full" onClick={() => void copy()}>Copy report</Button>
+          <Button variant="ghost" className="h-9 rounded-full" onClick={() => void copy()}>Copy Report</Button>
           <Button className="h-9 rounded-full bg-white text-[#1a1a1a] hover:bg-[#f2f2f2]" disabled={busy} onClick={() => void refresh()}>
             {busy ? 'Refreshing…' : 'Refresh'}
           </Button>

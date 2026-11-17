@@ -34,8 +34,8 @@ import {
 
 const nav: { id: SectionId; label: string; icon: typeof Home }[] = [
   { id: 'home', label: 'Home', icon: Home },
-  { id: 'my-drive', label: 'My files', icon: HardDrive },
-  { id: 'shared', label: 'Shared with me', icon: Users },
+  { id: 'my-drive', label: 'My Files', icon: HardDrive },
+  { id: 'shared', label: 'Shared With Me', icon: Users },
   { id: 'recent', label: 'Recent', icon: Clock },
   { id: 'starred', label: 'Starred', icon: Star },
   { id: 'temp', label: 'Temp', icon: Timer },
@@ -99,7 +99,7 @@ export function Sidebar({
           <DropdownMenuContent align="start" className="w-56">
             <DropdownMenuItem onSelect={onNewFolder}>
               <FolderPlus />
-              New folder
+              New Folder
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem onSelect={onUpload}>

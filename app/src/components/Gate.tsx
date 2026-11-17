@@ -153,7 +153,7 @@ function AppGate() {
   if (phase === 'offline') {
     return (
       <Shell>
-        <h1 className="text-2xl font-medium">Node is offline</h1>
+        <h1 className="text-2xl font-medium">Node Is Offline</h1>
         <p className="mt-2 max-w-sm text-sm text-[#8d8d8d]">
           Start the Storebase server, then retry. Dev proxies /api to 127.0.0.1:4780.
         </p>

@@ -41,6 +41,7 @@ import {
   deleteInbound,
   findBackend,
   getBlob,
+  NetworkError,
   inboundOk,
   inboundStoreUsed,
   loadNetwork,
@@ -90,6 +91,7 @@ import {
   attachNetwork,
   openDownload,
   removePath,
+  type DriveEntry,
   renameEntry,
   saveFile,
   resolveSafe,
@@ -150,6 +152,7 @@ import {
   snapshotExisting,
 } from './versions.ts'
 import { scanUserStorage, waitForStorageScan } from './storage-analysis.ts'
+import { createUploadSessions, UploadError, UPLOAD_PART_SIZE } from './uploads-session.ts'
 
 import type { ServerType } from '@hono/node-server'
 
@@ -305,9 +308,40 @@ async function touchTempMove(root: string, from: string, to: string): Promise<vo
   else if (isTempPath(from)) await dropTempPath(root, from)
 }
 
+function uploadFailure(c: Context, err: unknown): Response {
+  if (err instanceof LockError) return c.json({ error: err.message, code: err.code }, 401)
+  if (err instanceof QuotaError) return c.json({ error: err.message, code: err.code }, 507)
+  if (err instanceof UploadError || err instanceof NetworkError) {
+    return c.json({ error: err.message }, err.status as 400)
+  }
+  throw err
+}
+
 export function createApp(config: ServerConfig) {
   attachNetwork(config)
+  const uploads = createUploadSessions(config)
   const app = new Hono<{ Variables: Vars }>()
+
+  async function settleUpload(user: UserRecord, root: string, item: DriveEntry) {
+    await touchRecent(root, item.path)
+    if (isTempPath(item.path)) await trackTemp(root, item.path)
+    const platform = await loadPlatform(config)
+    if (virusScanEnabled(user, platform)) {
+      const opened = await openDownload(root, item.path)
+      const scan = async () => {
+        try {
+          const result = await scanOpenedFile(config, opened)
+          await setScanResult(root, item.path, result)
+          pingDrive(user.id)
+        } catch {
+          // The upload is already durable. A later manual scan can retry.
+        }
+      }
+      if (opened.pointer) remoteScanChain = remoteScanChain.then(scan, scan)
+      else void scan()
+    }
+    return { ...item, starred: false, trashed: false, virusScan: null }
+  }
   const terminals = createTerminalHub(config)
   let backblazeHealth: { at: number; unavailable: boolean } | null = null
   let backblazeHealthCheck: Promise<boolean> | null = null
@@ -1132,32 +1166,68 @@ export function createApp(config: ServerConfig) {
     try {
       const quota = await quotaGate(config, user)
       const rel = [dir.replaceAll('\\', '/').replace(/^\/+|\/+$/g, ''), basename(name)].filter(Boolean).join('/')
-      const platform = await loadPlatform(config)
       const item = await withLock(`upload:${resolveSafe(root, rel)}`, async () => {
         await snapshotExisting(root, rel, quota)
         return saveFile(root, dir, name, source, quota)
       })
-      await touchRecent(root, item.path)
-      if (isTempPath(item.path)) await trackTemp(root, item.path)
-      if (virusScanEnabled(user, platform)) {
-        const opened = await openDownload(root, item.path)
-        const scan = async () => {
-          try {
-            const result = await scanOpenedFile(config, opened)
-            await setScanResult(root, item.path, result)
-            pingDrive(user.id)
-          } catch {
-            // The upload is already durable. A later manual scan can retry.
-          }
-        }
-        if (opened.pointer) remoteScanChain = remoteScanChain.then(scan, scan)
-        else void scan()
-      }
-      return c.json({ item: { ...item, starred: false, trashed: false, virusScan: null } }, 201)
+      return c.json({ item: await settleUpload(user, root, item) }, 201)
     } catch (err) {
-      if (err instanceof QuotaError) return c.json({ error: err.message, code: err.code }, 507)
-      throw err
+      return uploadFailure(c, err)
     }
+  })
+
+  app.post('/api/files/upload/session', async (c) => {
+    const root = c.get('root')
+    const user = c.get('user')
+    const body = await c.req.json<{ path?: string; name?: string; size?: number }>().catch(() => null)
+    if (!body || typeof body.name !== 'string' || typeof body.size !== 'number') {
+      return c.json({ error: 'path, name, and size required' }, 400)
+    }
+    const dir = typeof body.path === 'string' ? body.path : ''
+    const denied = await denyIfLocked(c, config, user.id, user.id, root, dir)
+    if (denied) return denied
+    try {
+      const session = await uploads.start({
+        userId: user.id,
+        root,
+        dir,
+        name: body.name,
+        size: body.size,
+        quota: await quotaGate(config, user),
+      })
+      return c.json(session, 201)
+    } catch (err) {
+      return uploadFailure(c, err)
+    }
+  })
+
+  app.put('/api/files/upload/session/:id/:index', async (c) => {
+    const length = Number(c.req.header('content-length'))
+    if (!Number.isSafeInteger(length) || length < 0 || length > UPLOAD_PART_SIZE) {
+      return c.json({ error: 'Part is the wrong size' }, 400)
+    }
+    try {
+      const bytes = Buffer.from(await c.req.arrayBuffer())
+      await uploads.write(c.get('user').id, c.req.param('id'), Number(c.req.param('index')), bytes)
+      return c.json({ ok: true })
+    } catch (err) {
+      return uploadFailure(c, err)
+    }
+  })
+
+  app.post('/api/files/upload/session/:id/complete', async (c) => {
+    const user = c.get('user')
+    try {
+      const item = await uploads.finish(user.id, c.req.param('id'))
+      return c.json({ item: await settleUpload(user, c.get('root'), item) }, 201)
+    } catch (err) {
+      return uploadFailure(c, err)
+    }
+  })
+
+  app.delete('/api/files/upload/session/:id', async (c) => {
+    await uploads.abort(c.get('user').id, c.req.param('id'))
+    return c.json({ ok: true })
   })
 
   app.put('/api/files/content', async (c) => {

@@ -154,7 +154,7 @@ export function PublicViewer({ token }: { token: string }) {
     <Dialog open={unsafeDownload !== null} onOpenChange={(open) => !open && setUnsafeDownload(null)}>
       <DialogContent showCloseButton={false}>
         <DialogHeader>
-          <DialogTitle>Potentially unsafe file</DialogTitle>
+          <DialogTitle>Potentially Unsafe File</DialogTitle>
           <DialogDescription className="text-[#8d8d8d]">This file is potentially a virus. Download it only if you trust where it came from.</DialogDescription>
         </DialogHeader>
         <DialogFooter>
@@ -167,7 +167,7 @@ export function PublicViewer({ token }: { token: string }) {
               setUnsafeDownload(null)
               if (target) void saveOriginalFromUrl(target.url, target.name)
             }}
-          >Download anyway</Button>
+          >Download Anyway</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -176,7 +176,7 @@ export function PublicViewer({ token }: { token: string }) {
   if (locked) {
     return (
       <Shell>
-        <h1 className="text-2xl font-medium">Password required</h1>
+        <h1 className="text-2xl font-medium">Password Required</h1>
         <p className="mt-2 max-w-sm text-sm text-[#8d8d8d]">
           {lockKind === 'file' ? 'This item is password locked. Enter the password to open it.' : 'This link is locked. Enter the password the owner set.'}
         </p>
@@ -211,7 +211,7 @@ export function PublicViewer({ token }: { token: string }) {
   if (error && !meta) {
     return (
       <Shell>
-        <h1 className="text-2xl font-medium">This link doesn’t work</h1>
+        <h1 className="text-2xl font-medium">This Link Doesn’t Work</h1>
         <p className="mt-2 max-w-sm text-sm text-[#8d8d8d]">{error}</p>
       </Shell>
     )

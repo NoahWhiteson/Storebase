@@ -33,6 +33,17 @@ function encodePath(path: string): string {
     .join('/')
 }
 
+function canonicalQuery(search: string): string {
+  const raw = search.replace(/^\?/, '')
+  if (!raw) return ''
+  return raw
+    .split('&')
+    .filter(Boolean)
+    .map((pair) => (pair.includes('=') ? pair : `${pair}=`))
+    .sort()
+    .join('&')
+}
+
 function signingKey(secret: string, date: string, region: string): Buffer {
   const kDate = hmac(`AWS4${secret}`, date)
   const kRegion = hmac(kDate, region)
@@ -71,7 +82,7 @@ export async function s3Request(
   const canonical = [
     method,
     url.pathname,
-    url.search.replace(/^\?/, ''),
+    canonicalQuery(url.search),
     canonicalHeaders,
     signedNames,
     payloadHash,
@@ -115,6 +126,49 @@ export async function s3Get(
 export async function s3Delete(target: S3Target, key: string): Promise<void> {
   const res = await s3Request(target, 'DELETE', key)
   if (!res.ok && res.status !== 404) throw new Error(await s3Error(res, 'Could not delete from the bucket'))
+}
+
+export async function s3CreateMultipart(target: S3Target, key: string): Promise<string> {
+  const res = await s3Request(target, 'POST', key, { query: '?uploads', body: Buffer.alloc(0) })
+  const xml = await res.text()
+  if (!res.ok) throw new Error(xml.match(/<Message>([^<]+)<\/Message>/)?.[1] ?? `Could not start the upload (${res.status})`)
+  const id = xml.match(/<UploadId>([^<]+)<\/UploadId>/)?.[1]
+  if (!id) throw new Error('The bucket did not return an upload id')
+  return id
+}
+
+export async function s3UploadPart(target: S3Target, key: string, uploadId: string, partNumber: number, body: Buffer): Promise<string> {
+  const query = `?${new URLSearchParams({ partNumber: String(partNumber), uploadId }).toString()}`
+  const res = await s3Request(target, 'PUT', key, { query, body })
+  if (!res.ok) throw new Error(await s3Error(res, 'Could not write an upload part'))
+  const etag = res.headers.get('etag')
+  if (!etag) throw new Error('The bucket did not return a part tag')
+  return etag
+}
+
+export async function s3CompleteMultipart(
+  target: S3Target,
+  key: string,
+  uploadId: string,
+  parts: { partNumber: number; etag: string }[],
+): Promise<void> {
+  const xml = `<CompleteMultipartUpload>${parts
+    .slice()
+    .sort((a, b) => a.partNumber - b.partNumber)
+    .map((part) => `<Part><PartNumber>${part.partNumber}</PartNumber><ETag>${part.etag.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</ETag></Part>`)
+    .join('')}</CompleteMultipartUpload>`
+  const res = await s3Request(target, 'POST', key, {
+    query: `?${new URLSearchParams({ uploadId }).toString()}`,
+    body: Buffer.from(xml),
+  })
+  if (!res.ok) throw new Error(await s3Error(res, 'Could not finish the upload'))
+  await res.arrayBuffer().catch(() => {})
+}
+
+export async function s3AbortMultipart(target: S3Target, key: string, uploadId: string): Promise<void> {
+  const res = await s3Request(target, 'DELETE', key, { query: `?${new URLSearchParams({ uploadId }).toString()}` })
+  if (!res.ok && res.status !== 404) throw new Error(await s3Error(res, 'Could not cancel the upload'))
+  await res.arrayBuffer().catch(() => {})
 }
 
 export async function s3Probe(target: S3Target): Promise<void> {

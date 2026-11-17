@@ -62,8 +62,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, useLayoutEffect, typ
 
 const titles: Record<SectionId, string> = {
   home: 'Home',
-  'my-drive': 'My files',
-  shared: 'Shared with me',
+  'my-drive': 'My Files',
+  shared: 'Shared With Me',
   recent: 'Recent',
   starred: 'Starred',
   temp: 'Temp',
@@ -683,7 +683,7 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
     if (!parsed) return
     try {
       await deleteShare(parsed.shareId)
-      notify(section === 'spam' ? 'Removed from Spam' : 'Removed from Shared with me')
+      notify(section === 'spam' ? 'Removed from Spam' : 'Removed from Shared With Me')
       setFolderPath('')
       await refreshCurrent.current({ silent: true })
     } catch (err) {
@@ -711,7 +711,7 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
     if (!parsed) return
     try {
       await acceptShare(parsed.shareId)
-      notify('Accepted. It’s in Shared with me.')
+      notify('Accepted. It’s in Shared With Me.')
       setSelectedIds([])
       await refreshCurrent.current({ silent: true })
     } catch (err) {
@@ -790,10 +790,10 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
 
   async function createUntitled(kind: FileKind) {
     const names: Record<FileKind, string> = {
-      folder: 'Untitled folder',
-      doc: 'Untitled document.txt',
-      sheet: 'Untitled spreadsheet.csv',
-      slide: 'Untitled presentation.txt',
+      folder: 'Untitled Folder',
+      doc: 'Untitled Document.txt',
+      sheet: 'Untitled Spreadsheet.csv',
+      slide: 'Untitled Presentation.txt',
       pdf: 'Untitled.pdf',
       image: 'Untitled.txt',
       video: 'Untitled.txt',
@@ -820,7 +820,7 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
     if (!files?.length) return
     const dir = dest ?? (section === 'temp' ? tempDir(folderPath) : folderPath)
     const batch = Array.from(files)
-    const operation = beginOperation('Upload queue', `${batch.length} file${batch.length === 1 ? '' : 's'} queued`)
+    const operation = beginOperation('Upload Queue', `${batch.length} file${batch.length === 1 ? '' : 's'} queued`)
     operation.progress(`${batch.length} file${batch.length === 1 ? '' : 's'} queued`, 0)
     uploadQueue.current.push({ files: batch, dir, operation })
     void drainUploads()
@@ -903,7 +903,7 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
     if (!batch.length) return
     try {
       await runBatch(batch, item => keepFromTemp(item.id))
-      notify(batch.length === 1 ? `Kept ${batch[0].name} in My files` : `Kept ${batch.length} items in My files`)
+      notify(batch.length === 1 ? `Kept ${batch[0].name} in My Files` : `Kept ${batch.length} items in My Files`)
       setSelectedIds([])
       await refreshCurrent.current({ silent: true })
     } catch (err) {
@@ -1163,7 +1163,7 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
                     }
                     {...(canMove ? dropDest(section === 'temp' ? '.temp' : '') : {})}
                   >
-                    {section === 'shared' ? 'Shared with me' : section === 'temp' ? 'Temp' : 'My files'}
+                    {section === 'shared' ? 'Shared With Me' : section === 'temp' ? 'Temp' : 'My Files'}
                   </button>
                   {crumbs.map((crumb, i) => (
                     <span key={crumb.id} className="flex items-center gap-2">
@@ -1207,7 +1207,7 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
                       className="h-9 rounded-full text-[#f28b82] hover:bg-white/5 hover:text-[#f28b82]"
                       onClick={() => setConfirm({ mode: 'empty-trash' })}
                     >
-                      Empty trash
+                      Empty Trash
                     </Button>
                   ) : null}
                 </div>
@@ -1314,7 +1314,7 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
         <DialogContent showCloseButton={false}>
           <DialogHeader>
             <DialogTitle>
-              {lockDialog?.mode === 'set' ? 'Password lock' : lockDialog?.mode === 'clear' ? 'Remove password' : 'Password required'}
+              {lockDialog?.mode === 'set' ? 'Password Lock' : lockDialog?.mode === 'clear' ? 'Remove Password' : 'Password Required'}
             </DialogTitle>
             <DialogDescription className="text-[#8d8d8d]">
               {lockDialog?.mode === 'set'
@@ -1365,13 +1365,13 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
         <DialogContent showCloseButton={false}>
           <DialogHeader>
             <DialogTitle>
-              {dialog?.mode === 'rename' ? 'Rename' : dialog?.mode === 'create-file' ? 'New file' : 'New folder'}
+              {dialog?.mode === 'rename' ? 'Rename' : dialog?.mode === 'create-file' ? 'New File' : 'New Folder'}
             </DialogTitle>
           </DialogHeader>
           <Input
             autoFocus
             value={nameDraft}
-            placeholder={dialog?.mode === 'create-file' ? 'notes.txt' : 'Untitled folder'}
+            placeholder={dialog?.mode === 'create-file' ? 'notes.txt' : 'Untitled Folder'}
             onChange={(e) => setNameDraft(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === 'Enter') void submitDialog()
@@ -1439,10 +1439,10 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
           <DialogHeader>
             <DialogTitle>
               {confirm?.mode === 'empty-trash'
-                ? 'Empty trash?'
+                ? 'Empty Trash?'
                 : confirm?.mode === 'delete-forever'
-                  ? 'Delete forever?'
-                  : 'No trash for this file'}
+                  ? 'Delete Forever?'
+                  : 'No Trash For This File'}
             </DialogTitle>
             <DialogDescription className="text-[#8d8d8d]">
               {confirm?.mode === 'empty-trash'
@@ -1478,7 +1478,7 @@ export default function App({ account, onSignedOut }: { account: Account; onSign
       <Dialog open={downloadWarning !== null} onOpenChange={(open) => !open && setDownloadWarning(null)}>
         <DialogContent showCloseButton={false}>
           <DialogHeader>
-            <DialogTitle>Potentially unsafe file</DialogTitle>
+            <DialogTitle>Potentially Unsafe File</DialogTitle>
             <DialogDescription className="text-[#8d8d8d]">
               This file is potentially a virus. Download it only if you trust where it came from.
             </DialogDescription>

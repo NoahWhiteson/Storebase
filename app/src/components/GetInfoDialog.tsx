@@ -13,7 +13,7 @@ import { useEffect, useState } from 'react'
 
 function whereLabel(item: DriveItem, info: FileInfo): string {
   if (item.id.startsWith('share:')) {
-    return item.shareName ? `Shared · ${item.shareName}` : 'Shared with me'
+    return item.shareName ? `Shared · ${item.shareName}` : 'Shared With Me'
   }
   if (isTempId(item.id)) {
     const rest = item.id === '.temp' ? '' : item.id.slice('.temp/'.length)
@@ -24,7 +24,7 @@ function whereLabel(item: DriveItem, info: FileInfo): string {
   if (item.trashed || info.path.startsWith('.trash/')) return 'Trash'
   const slash = info.path.lastIndexOf('/')
   const parent = slash === -1 ? '' : info.path.slice(0, slash)
-  return parent || 'My files'
+  return parent || 'My Files'
 }
 
 function Row({ label, value, detail }: { label: string; value: string; detail?: string }) {

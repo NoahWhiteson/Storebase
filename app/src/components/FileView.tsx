@@ -219,11 +219,11 @@ export function FileView(props: FileViewProps) {
         <>
           <ContextMenuItem onSelect={props.onNewFolder}>
             <FolderPlus />
-            New folder
+            New Folder
           </ContextMenuItem>
           <ContextMenuItem onSelect={props.onNewFile}>
             <FilePlus />
-            New file
+            New File
           </ContextMenuItem>
           <ContextMenuItem onSelect={props.onUpload}>
             <Upload />
@@ -235,15 +235,15 @@ export function FileView(props: FileViewProps) {
       <ContextMenuRadioGroup value={props.sort} onValueChange={(value) => props.onSort(value as SortKey)}>
         <ContextMenuRadioItem value="name">
           <ArrowDownAz />
-          Sort by name
+          Sort By Name
         </ContextMenuRadioItem>
         <ContextMenuRadioItem value="modified">
           <Calendar />
-          Sort by date
+          Sort By Date
         </ContextMenuRadioItem>
         <ContextMenuRadioItem value="size">
           <HardDrive />
-          Sort by size
+          Sort By Size
         </ContextMenuRadioItem>
       </ContextMenuRadioGroup>
       <ContextMenuSeparator />
@@ -330,9 +330,9 @@ function ListView(props: FileViewProps & { items: DriveItem[]; drag: DragApi; on
         <span>Name</span>
         <span>Owner</span>
         <span>
-          {props.section === 'trash' || props.section === 'temp' ? 'Retention' : 'Date modified'}
+          {props.section === 'trash' || props.section === 'temp' ? 'Retention' : 'Date Modified'}
         </span>
-        <span className="text-right">File size</span>
+        <span className="text-right">File Size</span>
       </div>
       {props.items.map((item) => (
         <ItemMenu key={item.id} item={item} items={props.items} selectedIds={props.selectedIds} {...handlers(props)}>
@@ -728,7 +728,7 @@ function ItemMenu({
         {anyInbound || anyTrashed ? null : (
           <ContextMenuItem onSelect={() => onStar(ids)}>
             <Star />
-            {allStarred ? (n > 1 ? `Remove star from ${n} items` : 'Remove star') : n > 1 ? `Star ${n} items` : 'Add to starred'}
+            {allStarred ? (n > 1 ? `Remove Star From ${n} Items` : 'Remove Star') : n > 1 ? `Star ${n} Items` : 'Add To Starred'}
           </ContextMenuItem>
         )}
         {n === 1 && !inbound && !item.trashed ? (
@@ -741,19 +741,19 @@ function ItemMenu({
           item.locked ? (
             <ContextMenuItem onSelect={() => onClearLock(item)}>
               <Lock />
-              Remove password
+              Remove Password
             </ContextMenuItem>
           ) : (
             <ContextMenuItem onSelect={() => onLock(item)}>
               <Lock />
-              Password lock
+              Password Lock
             </ContextMenuItem>
           )
         ) : null}
         {canCopy ? (
           <ContextMenuItem onSelect={() => onCopy(ids)}>
             <Copy />
-            {n > 1 ? `Make ${n} copies` : 'Make a copy'}
+            {n > 1 ? `Make ${n} Copies` : 'Make A Copy'}
           </ContextMenuItem>
         ) : null}
         {zips.length ? (
@@ -769,18 +769,18 @@ function ItemMenu({
         {canVirusScan ? (
           <ContextMenuItem onSelect={() => onVirusScan(ids)}>
             <ShieldCheck />
-            {n > 1 ? `Check ${n} files for viruses` : 'Check for viruses'}
+            {n > 1 ? `Check ${n} Files For Viruses` : 'Check For Viruses'}
           </ContextMenuItem>
         ) : null}
         {anyInbound || anyTrashed || batch.some((entry) => entry.computer) ? null : inTemp ? (
           <ContextMenuItem onSelect={() => onKeep(ids)}>
             <HardDrive />
-            {n > 1 ? `Keep ${n} in My files` : 'Keep in My files'}
+            {n > 1 ? `Keep ${n} In My Files` : 'Keep In My Files'}
           </ContextMenuItem>
         ) : canTemp ? (
           <ContextMenuItem onSelect={() => onMoveToTemp(ids)}>
             <Timer />
-            {n > 1 ? `Move ${n} to Temp` : 'Move to Temp'}
+            {n > 1 ? `Move ${n} To Temp` : 'Move To Temp'}
           </ContextMenuItem>
         ) : null}
         {allTrashed || shareRoot || (!anyInbound && !anyTrashed) ? <ContextMenuSeparator /> : null}
@@ -792,7 +792,7 @@ function ItemMenu({
             </ContextMenuItem>
             <ContextMenuItem variant="destructive" onSelect={() => onDeleteForever(ids)}>
               <Trash2 />
-              {n > 1 ? `Delete ${n} forever` : 'Delete forever'}
+              {n > 1 ? `Delete ${n} Forever` : 'Delete Forever'}
             </ContextMenuItem>
           </>
         ) : inbound ? (
@@ -807,11 +807,11 @@ function ItemMenu({
             <Trash2 />
             {n > 1
               ? huge
-                ? `Delete ${n} items`
-                : `Move ${n} to trash`
+                ? `Delete ${n} Items`
+                : `Move ${n} To Trash`
               : huge
-                ? 'Delete permanently'
-                : 'Move to trash'}
+                ? 'Delete Permanently'
+                : 'Move To Trash'}
           </ContextMenuItem>
         )}
           </>
@@ -822,30 +822,30 @@ function ItemMenu({
 }
 
 function EmptyState({ section, search }: { section: SectionId; search: string }) {
-  let title = 'This folder is empty'
+  let title = 'This Folder Is Empty'
   let body = 'Right-click for new file, folder, or upload. Drag items into folders to organize.'
 
   if (search.trim()) {
     title = `No results for "${search.trim()}"`
     body = 'Try a different name, or check another location.'
   } else if (section === 'starred') {
-    title = 'No starred files'
+    title = 'No Starred Files'
     body = 'Star items you want to find fast. They show up here.'
   } else if (section === 'trash') {
-    title = 'Trash is empty'
+    title = 'Trash Is Empty'
     body = 'Files stay 30 days, then they’re gone. Empty trash to wipe now. Anything over 20 GB skips trash.'
   } else if (section === 'shared') {
-    title = 'Nothing shared with you'
+    title = 'Nothing Shared With You'
     body = 'When someone on this node shares a file, it lands here.'
   } else if (section === 'spam') {
-    title = 'Spam is empty'
-    body = 'First-time shares from people you have not accepted yet land here. Accept to move them into Shared with me, or remove them.'
+    title = 'Spam Is Empty'
+    body = 'First-time shares from people you have not accepted yet land here. Accept to move them into Shared With Me, or remove them.'
   } else if (section === 'recent') {
-    title = 'No recent files'
+    title = 'No Recent Files'
     body = 'Open something and it will show up in this list.'
   } else if (section === 'temp') {
-    title = 'Temp is empty'
-    body = 'Files here delete on the timer you set. Upload, or move something from My files.'
+    title = 'Temp Is Empty'
+    body = 'Files here delete on the timer you set. Upload, or move something from My Files.'
   }
 
   return (

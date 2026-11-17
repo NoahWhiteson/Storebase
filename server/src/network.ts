@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path'
 import { Readable } from 'node:stream'
 import type { ServerConfig } from './config.ts'
 import { encodePointer, readPointerAt, type FilePointer } from './pointer.ts'
-import { s3Delete, s3Get, s3Probe, s3Put, type S3Target, type PutBody } from './s3.ts'
+import { s3AbortMultipart, s3CompleteMultipart, s3CreateMultipart, s3Delete, s3Get, s3Probe, s3Put, s3UploadPart, type S3Target, type PutBody } from './s3.ts'
 import { adjustCachedComputation, cachedComputation } from './quota.ts'
 import { mapConcurrent } from './concurrency.ts'
 
@@ -287,6 +287,26 @@ export async function putBlob(backend: StorageBackend, key: string, body: PutBod
     })
     if (!res.ok) throw new NetworkError(await readErr(res, 'Remote node would not store that file'), 400)
   } finally { source?.destroy() }
+}
+
+export async function startMultipart(backend: StorageBackend, key: string): Promise<string> {
+  if (backend.type !== 's3') throw new NetworkError('Multipart is only for S3 stores', 400)
+  return s3CreateMultipart(s3Of(backend), key)
+}
+
+export async function uploadMultipartPart(backend: StorageBackend, key: string, uploadId: string, partNumber: number, body: Buffer): Promise<string> {
+  if (backend.type !== 's3') throw new NetworkError('Multipart is only for S3 stores', 400)
+  return s3UploadPart(s3Of(backend), key, uploadId, partNumber, body)
+}
+
+export async function finishMultipart(backend: StorageBackend, key: string, uploadId: string, parts: { partNumber: number; etag: string }[]): Promise<void> {
+  if (backend.type !== 's3') throw new NetworkError('Multipart is only for S3 stores', 400)
+  await s3CompleteMultipart(s3Of(backend), key, uploadId, parts)
+}
+
+export async function abortMultipart(backend: StorageBackend, key: string, uploadId: string): Promise<void> {
+  if (backend.type !== 's3') throw new NetworkError('Multipart is only for S3 stores', 400)
+  await s3AbortMultipart(s3Of(backend), key, uploadId)
 }
 
 export async function getBlob(

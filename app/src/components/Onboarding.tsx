@@ -524,7 +524,7 @@ function StoragePicker({
     { label: '25%', gb: clamp(Math.round(maxGb * 0.25 * 10) / 10, 0.1, maxGb) },
     { label: '50%', gb: clamp(Math.round(maxGb * 0.5 * 10) / 10, 0.1, maxGb) },
     { label: '75%', gb: clamp(Math.round(maxGb * 0.75 * 10) / 10, 0.1, maxGb) },
-    { label: 'All free', gb: maxGb },
+    { label: 'All Free', gb: maxGb },
   ].filter((preset, index, list) => list.findIndex((item) => Math.abs(item.gb - preset.gb) < 0.05) === index)
 
   function commitText(raw: string) {

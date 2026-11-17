@@ -49,7 +49,7 @@ export function Login({
         <span className="text-[20px] font-medium tracking-tight">Storebase</span>
       </header>
       <main className="mx-auto flex w-full max-w-lg flex-1 flex-col justify-center px-5 pb-16">
-        <h1 className="text-3xl font-medium tracking-tight">Sign in</h1>
+        <h1 className="text-3xl font-medium tracking-tight">Sign In</h1>
         <p className="mt-2 text-sm text-[#8d8d8d]">
           {signInMessage?.trim() ||
             (nodeName ? `Sign in to ${nodeName}.` : 'Use the account from this node’s onboarding.')}
